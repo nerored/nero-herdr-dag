@@ -356,7 +356,7 @@ function progressBarRow(rows, labelPattern) {
   assert.ok(barRow >= 0, 'indeterminate bar row exists');
   const interior = rows[barRow].slice(0, -2);
   assert.match(interior, /█/, 'bar has a lit segment');
-  assert.match(interior, /░/, 'bar keeps an empty track');
+  assert.match(interior, /─/, 'bar keeps an empty track');
   return barRow;
 }
 
@@ -407,7 +407,7 @@ test('the task list row shows the indeterminate sweep without a numeric percent'
     const first = renderUnknown('running', { motion }, { width: 120, height: 40, time: 0 });
     const firstBar = taskBarCells(first);
     assert.match(firstBar, /█/);
-    assert.match(firstBar, /░/);
+    assert.match(firstBar, /─/);
     assert.doesNotMatch(first.text, /\b0%|\b100%/);
     const laterBar = taskBarCells(renderUnknown('running', { motion }, {
       width: 120, height: 40, time: 1000,
@@ -646,15 +646,15 @@ test('duty scroll intents move the painted body and lists', () => {
 
 test('Help scroll keys move ui.helpScroll and clamp to the visible list', () => {
   assert.equal(helpViewportRows(20), 13);
-  assert.deepEqual(helpScrollMetrics(20), { rows: 22, viewport: 13, maxScroll: 9 });
-  assert.deepEqual(helpScrollMetrics(24), { rows: 22, viewport: 17, maxScroll: 5 });
-  assert.deepEqual(helpScrollMetrics(42), { rows: 22, viewport: 22, maxScroll: 0 });
+  assert.deepEqual(helpScrollMetrics(20), { rows: 32, viewport: 13, maxScroll: 19 });
+  assert.deepEqual(helpScrollMetrics(24), { rows: 32, viewport: 17, maxScroll: 15 });
+  assert.deepEqual(helpScrollMetrics(42), { rows: 32, viewport: 32, maxScroll: 0 });
   assert.equal(helpScrollForKey('j'), 1);
   assert.equal(helpScrollForKey('k'), -1);
   assert.equal(helpScrollForKey('PageDown', undefined, { viewport: 13 }), 12);
   assert.equal(helpScrollForKey('PageUp', undefined, { viewport: 13 }), -12);
-  assert.equal(helpScrollForKey('g', undefined, { viewport: 13 }), -9);
-  assert.equal(helpScrollForKey('G', undefined, { viewport: 13 }), 9);
+  assert.equal(helpScrollForKey('g', undefined, { viewport: 13 }), -19);
+  assert.equal(helpScrollForKey('G', undefined, { viewport: 13 }), 19);
   assert.equal(helpScrollForKey('nope', undefined, { viewport: 13 }), undefined);
 
   const ui = { helpScroll: 0 };
@@ -662,9 +662,9 @@ test('Help scroll keys move ui.helpScroll and clamp to the visible list', () => 
   assert.equal(applyHelpScroll(ui, 'j', undefined, metrics), true);
   assert.equal(ui.helpScroll, 1);
   assert.equal(applyHelpScroll(ui, 'End', undefined, metrics), true);
-  assert.equal(ui.helpScroll, 9);
+  assert.equal(ui.helpScroll, 19);
   assert.equal(applyHelpScroll(ui, 'j', undefined, metrics), true);
-  assert.equal(ui.helpScroll, 9, 'stays clamped at the last row');
+  assert.equal(ui.helpScroll, 19, 'stays clamped at the last row');
   assert.equal(applyHelpScroll(ui, 'g', undefined, metrics), true);
   assert.equal(ui.helpScroll, 0);
   assert.equal(applyHelpScroll(ui, 'nope', undefined, metrics), false);
@@ -689,7 +689,7 @@ test('Help scroll updates the painted rows at 54x20', () => {
   const snapshot = oneNode('running', 42);
   const options = { width: 54, height: 20, time: 0, now, palette, theme };
   const top = renderApp(snapshot, { ...baseUi, help: true, helpScroll: 0 }, options);
-  assert.equal(top.help.maxScroll, 9);
+  assert.equal(top.help.maxScroll, 19);
 
   const ui = { helpScroll: 0 };
   assert.equal(applyHelpScroll(ui, 'j', undefined, helpScrollMetrics(20)), true);
@@ -699,9 +699,9 @@ test('Help scroll updates the painted rows at 54x20', () => {
   assert.notEqual(scrolled.text, top.text, 'a Help scroll repaints the list');
 
   assert.equal(applyHelpScroll(ui, 'G', undefined, helpScrollMetrics(20)), true);
-  assert.equal(ui.helpScroll, 9);
+  assert.equal(ui.helpScroll, 19);
   const bottom = renderApp(snapshot, { ...baseUi, help: true, helpScroll: ui.helpScroll }, options);
-  assert.equal(bottom.help.scroll, 9);
+  assert.equal(bottom.help.scroll, 19);
   assert.match(bottom.text, /quit/);
 });
 

@@ -244,6 +244,22 @@ export function switcherItems(snapshot, frozenKeys, { preferRunId, tasks } = {})
       ].filter(Boolean).join(' '),
     });
   }
+  for (const run of runs) {
+    for (const node of run.nodes ?? []) {
+      fresh.push({
+        key: `node:${run.id}:${node.id}`,
+        kind: 'node',
+        id: node.id,
+        runId: run.id,
+        label: node.label,
+        status: node.state,
+        detail: [node.id, node.agent, node.model, node.taskId].filter(Boolean).join(' · '),
+        search: ['node', node.id, node.label, node.state, node.taskId, node.agent, node.model,
+          run.id, run.name, run.todoTitle,
+        ].filter(Boolean).join(' '),
+      });
+    }
+  }
   for (const task of taskList) {
     const linked = nodeForTask(snapshot, task.id, { preferRunId });
     fresh.push({
@@ -280,9 +296,13 @@ export function switcherItems(snapshot, frozenKeys, { preferRunId, tasks } = {})
 // Lowercased AND tokens over the item's search text. CJK has no whitespace
 // tokenisation, so a multi-character query is also a straight substring test.
 export function filterSwitcher(items, query) {
-  const tokens = String(query ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
-  if (!tokens.length) return items;
+  const raw = String(query ?? '').trim().toLowerCase();
+  const prefix = /^([rnt]):\s*(.*)$/.exec(raw);
+  const kind = prefix ? ({ r: 'run', n: 'node', t: 'task' })[prefix[1]] : undefined;
+  const tokens = (prefix ? prefix[2] : raw).split(/\s+/).filter(Boolean);
+  if (!kind && !tokens.length) return items;
   return items.filter(item => {
+    if (kind && item.kind !== kind) return false;
     const haystack = String(item.search ?? `${item.id} ${item.label ?? ''}`).toLowerCase();
     return tokens.every(token => haystack.includes(token));
   });

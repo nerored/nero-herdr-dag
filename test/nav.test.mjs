@@ -38,6 +38,81 @@ const allLinked = () => normalizeSnapshot({
   ],
 });
 
+test('the cockpit keys drive filters, focus, scope, and the palette', async () => {
+  const viewer = await makeViewer();
+  viewer.acceptSnapshot(allLinked(), { silent: true });
+  viewer.draw();
+
+  viewer.ui.runOverview = true;
+  viewer.ui.focus = 'details';
+  viewer.handleKey('2', { sequence: '2', name: '2' });
+  assert.equal(viewer.ui.graphFilter, 'failed');
+  viewer.handleKey('\x1b', { name: 'escape' });
+  assert.equal(viewer.ui.graphFilter, 'all');
+
+  viewer.ui.runOverview = false;
+  viewer.ui.focus = 'graph';
+  viewer.ui.selectedNodeId = 'n';
+  viewer.handleKey('z', { sequence: 'z', name: 'z' });
+  assert.equal(viewer.ui.graphFocus, 'n');
+  viewer.handleKey('n', { sequence: 'n', name: 'n' });
+  assert.equal(viewer.ui.selectedNodeId, 'n');
+  viewer.handleKey('\x1b', { name: 'escape' });
+  assert.equal(viewer.ui.graphFocus, undefined);
+
+  viewer.ui.taskScope = 'run';
+  viewer.handleKey('t', { sequence: 't', name: 't' });
+  assert.equal(viewer.ui.taskScope, 'all');
+  viewer.ui.completedCollapsed = true;
+  viewer.handleKey('T', { sequence: 'T', name: 'T' });
+  assert.equal(viewer.ui.completedCollapsed, false);
+
+  viewer.ui.runOverview = false;
+  viewer.ui.selectedNodeId = 'n';
+  viewer.handleKey('\x7f', { name: 'backspace' });
+  assert.equal(viewer.ui.runOverview, true);
+
+  viewer.handleKey(':', { sequence: ':', name: ':' });
+  assert.equal(viewer.ui.palette, true);
+  viewer.handleKey('\r', { name: 'return' });
+  assert.equal(viewer.ui.palette, false);
+  assert.equal(viewer.ui.runOverview, true);
+  viewer.handleKey(':', { sequence: ':', name: ':' });
+  viewer.handleKey('\x1b', { name: 'escape' });
+  assert.equal(viewer.ui.palette, false);
+
+  viewer.ui.runOverview = false;
+  viewer.ui.focus = 'details';
+  viewer.ui.selectedNodeId = 'n';
+  viewer.ui.selectedTaskId = 'st_linked';
+  viewer.ui.selectedTaskUnlinked = false;
+  viewer.draw();
+  viewer.draw();
+  assert.equal(viewer.ui.focus, 'details');
+  assert.ok(viewer.lastRender.scroll.details.headings.length > 0, 'details headings are measured');
+  viewer.handleKey('\r', { name: 'return' });
+  assert.equal(viewer.ui.collapsedSections.size, 1, 'Enter collapses the current details section');
+});
+
+test('x clears completed subjects and u restores the same batch', async () => {
+  const viewer = await makeViewer();
+  const finished = normalizeSnapshot({
+    version: 3, mode: 'live', connected: true, sessionId: 'clear-test',
+    runs: [{
+      id: 'run_done', name: 'Done run', status: 'completed',
+      updatedAt: new Date().toISOString(), nodes: [],
+    }],
+    tasks: [{ id: 'st_done', description: 'Done task', status: 'completed' }],
+  });
+  viewer.acceptSnapshot(finished, { silent: true });
+  viewer.draw();
+  viewer.handleKey('x', { sequence: 'x', name: 'x' });
+  assert.ok(viewer.ui.hiddenRunIds.has('run_done') || viewer.ui.hiddenTaskIds.has('st_done'));
+  viewer.handleKey('u', { sequence: 'u', name: 'u' });
+  assert.equal(viewer.ui.hiddenRunIds.size, 0);
+  assert.equal(viewer.ui.hiddenTaskIds.size, 0);
+});
+
 test('navigation tasks include root tasks linked to a DAG node', () => {
   const snapshot = allLinked();
   assert.deepEqual(standaloneTasks(snapshot), []);
@@ -363,7 +438,8 @@ test('F-73 a stale switcher key does not select the active row', async () => {
   viewer.confirmSwitcher(undefined);
   assert.equal(viewer.ui.switcher, null);
   if (active.startsWith('run:')) assert.equal(viewer.ui.selectedRunId, active.slice(4));
-  else assert.equal(viewer.ui.selectedTaskId, active.slice(5));
+  else if (active.startsWith('task:')) assert.equal(viewer.ui.selectedTaskId, active.slice(5));
+  else assert.equal(viewer.ui.selectedNodeId, active.split(':').at(-1));
 });
 
 test('F-74 a settings overlay click never falls through to the breadcrumb', async () => {

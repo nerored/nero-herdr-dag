@@ -119,7 +119,7 @@ test('unknown percent never renders as zero and the graph keeps an empty track',
     const result = render(snapshot, {}, { width: 120, height: 40 });
     assert.doesNotMatch(result.text, /(?:^|[^0-9])0%/);
     assert.match(result.text, /—/);
-    assert.match(result.text, /░/);
+    assert.match(result.text, /─/);
   }
 });
 

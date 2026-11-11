@@ -629,13 +629,13 @@ function drawProgress(canvas, box, node, { time, motion, palette, connected, sel
   const bg = selected ? palette.selection : palette.panel;
   if (!Number.isFinite(node.percent)) {
     // No recorded percent: show an empty track, never a fabricated 0% fill.
-    canvas.put(box.x + 2, box.y + 2, '░'.repeat(inner), {
+    canvas.put(box.x + 2, box.y + 2, '─'.repeat(inner), {
       fg: palette.border, dim: true, bg,
     });
     return;
   }
   const percent = Math.round(Math.max(0, Math.min(100, node.percent)));
-  const bar = percentBar(percent, inner);
+  const bar = percentBar(percent, inner, { empty: '─' });
   canvas.put(box.x + 2, box.y + 2, bar, {
     fg: node.state === 'pending' ? palette.pending : node.state === 'blocked' ? palette.faint : color,
     dim: node.state === 'blocked',
@@ -658,7 +658,9 @@ function drawProgress(canvas, box, node, { time, motion, palette, connected, sel
 function drawTitle(canvas, box, node, { time, motion, palette, selected, folded }) {
   const inner = box.w - 2;
   const icon = nodeIcon(node, time, motion);
-  const color = selected ? (motion ? pulse(palette.accent, time / 700, 0.35) : palette.accent) : statusColor(palette, node.state);
+  const color = selected
+    ? (motion && node.state === 'running' ? pulse(palette.accent, time / 700, 0.35) : palette.accent)
+    : statusColor(palette, node.state);
   const percent = Number.isFinite(node.percent) ? `${Math.round(node.percent)}%` : '—';
   const right = `${folded ? '▸' : '▾'} ${percent}`;
   const marker = selected ? '▶' : ' ';
@@ -685,7 +687,7 @@ function drawActivity(canvas, box, node, { time, motion, palette, now, connected
     line = `${activity.mark} ${activity.label}${activity.text ? ` · ${activity.text}` : ''}`;
     color = activity.stalled ? palette.warn : statusColor(palette, node.state);
   } else if (node.state === 'completed') {
-    line = t(language, 'evidenceCaptured');
+    line = `✓ ${node.agent ?? node.taskId ?? t(language, 'evidenceCaptured')}`;
     color = palette.completed;
   } else if (node.state === 'failed') {
     line = `× ${node.error ?? t(language, 'failed')}`;
@@ -727,7 +729,9 @@ export function drawGraph(canvas, layout, options) {
   for (const box of layout.boxes.values()) {
     const { node } = box;
     const selected = node.id === selectedId;
-    const border = selected ? (motion ? pulse(palette.accent, time / 700, 0.35) : palette.accent) : statusColor(palette, node.state);
+    const border = selected
+      ? (motion && node.state === 'running' ? pulse(palette.accent, time / 700, 0.35) : palette.accent)
+      : statusColor(palette, node.state);
     canvas.box(box.x, box.y, box.w, box.h, {
       border,
       bg: selected ? palette.selection : palette.panel,

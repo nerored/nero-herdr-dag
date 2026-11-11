@@ -1,5 +1,7 @@
 import { Canvas } from './canvas.mjs';
 import { runSummary } from './run-summary.mjs';
+import { criticalNodeIds, filterCounts, focusSubgraph, nodeMatchesFilter } from './cockpit.mjs';
+import { commandItems, filterCommands } from './commands.mjs';
 import { diagnosisFor, diagnosisPathsText } from './diagnosis.mjs';
 import { computeLayout, drawGraph, nodeScrollTarget, spinnerFrame } from './graph.mjs';
 import { languageLabel, statusLabel, t } from './i18n.mjs';
@@ -89,7 +91,18 @@ export function taskListLayout(rect, snapshot, ui) {
   const tasksY = runGeometry.tasksY;
   const available = bottom - tasksY;
   const taskRows = Math.max(0, Math.floor(available / 2));
-  const tasks = navTasks(snapshot);
+  const allTasks = navTasks(snapshot);
+  const run = snapshot?.runs?.[ui?.runIndex];
+  const linked = run
+    ? allTasks.filter(task => run.nodes.some(node => node.taskId === task.id))
+    : [];
+  const scoped = ui?.taskScope === 'all' || !run || !linked.length ? allTasks : linked;
+  const scope = !run || !linked.length ? 'all' : ui.taskScope;
+  const completed = scoped.filter(task => task.status === 'completed');
+  const completedCollapsed = ui?.completedCollapsed !== false;
+  const tasks = completedCollapsed
+    ? scoped.filter(task => task.status !== 'completed' || task.id === ui?.selectedTaskId)
+    : scoped;
   const contentH = tasks.length;
   const maxScroll = Math.max(0, contentH - taskRows);
   const offset = scrollOffset(ui?.tasksScroll, maxScroll);
@@ -110,6 +123,11 @@ export function taskListLayout(rect, snapshot, ui) {
     tasksY,
     taskRows,
     tasks,
+    allTasks,
+    scopeCount: scoped.length,
+    scope,
+    completedCount: completed.length,
+    completedCollapsed,
     contentH,
     maxScroll,
     offset,
@@ -628,7 +646,7 @@ function drawIndeterminateBar(canvas, x, y, width, {
   const position = motion
     ? Math.round((Math.sin(time / 650) * 0.5 + 0.5) * travel)
     : Math.floor(travel / 2);
-  canvas.put(x, y, '░'.repeat(columns), { fg: palette.border, bg, dim: true });
+  canvas.put(x, y, '─'.repeat(columns), { fg: palette.border, bg, dim: true });
   canvas.put(x + position, y, '█'.repeat(segment), {
     fg: color ?? palette.accent, bg, bold: !dim, dim,
   });
@@ -646,7 +664,7 @@ function progressBlock(canvas, x, y, w, progress, {
     // the bar on its own row instead of truncating the truth away.
     if (labelW + 8 > w) {
       rich(canvas, x, y, w, [
-        [percentBar(progress.value, Math.max(6, w)), { fg: color, bold }],
+        [percentBar(progress.value, Math.max(6, w), { empty: '─' }), { fg: color, bold }],
       ], palette, bg);
       rich(canvas, x, y + 1, w, [
         [progress.label, { fg: palette.text, bold: true }],
@@ -655,7 +673,7 @@ function progressBlock(canvas, x, y, w, progress, {
     }
     const barW = Math.max(6, w - labelW - 2);
     rich(canvas, x, y, w, [
-      [percentBar(progress.value, barW), { fg: color, bold }],
+      [percentBar(progress.value, barW, { empty: '─' }), { fg: color, bold }],
       [` ${progress.label}`, { fg: palette.text, bold: true }],
     ], palette, bg);
     return y + 1;
@@ -915,11 +933,15 @@ function renderSidebar(canvas, rect, snapshot, ui, { time, now, palette, motion,
       [displayRunName(run), { fg: selected ? palette.white : palette.text, bold: selected }],
     ], palette, bg);
     const barWidth = Math.max(4, w - 16);
-    const bar = stats.percentKnown ? percentBar(stats.percent, barWidth) : '░'.repeat(barWidth);
+    const bar = stats.percentKnown ? percentBar(stats.percent, barWidth, { empty: '─' }) : '─'.repeat(barWidth);
+    const attention = [];
+    if (stats.counts.failed) attention.push([` ×${stats.counts.failed}`, { fg: palette.failed, bold: true }]);
+    if (stats.counts.blocked) attention.push([` ◌${stats.counts.blocked}`, { fg: palette.blocked, bold: true }]);
+    if (!attention.length) attention.push([` · ${stats.done}/${stats.total}`, { fg: palette.dim }]);
     rich(canvas, x + 2, y + 1, w - 2, [
       [bar, { fg: runColor(run, palette), dim: !selected }],
       [stats.percentKnown ? ` ${stats.percent}%` : ' —', { fg: selected ? palette.accent : palette.faint }],
-      [` · ${stats.done}/${stats.total}`, { fg: palette.dim }],
+      ...attention,
     ], palette, bg);
     hitboxes.runs.set(run.id, { x, y, w, h: 2 });
     y += 2;
@@ -934,8 +956,13 @@ function renderSidebar(canvas, rect, snapshot, ui, { time, now, palette, motion,
   const { tasks, tasksY, taskRows, contentH, maxScroll, offset, visible, bar, contentW } = taskGeometry;
   rich(canvas, taskGeometry.x, tasksY - 1, taskGeometry.w, [
     [t(language, 'tasks'), { fg: palette.accent2, bold: true }],
-    [`  ${tasks.length}`, { fg: palette.faint }],
+    [`  ${taskGeometry.scopeCount}`, { fg: palette.faint }],
+    [` · ${taskGeometry.scope === 'all' ? t(language, 'taskScopeAll') : t(language, 'taskScopeRun')}`, { fg: palette.faint }],
+    ...(taskGeometry.completedCollapsed && taskGeometry.completedCount
+      ? [[` · ✓${taskGeometry.completedCount}`, { fg: palette.completed }]]
+      : []),
   ], palette, palette.panel);
+  hitboxes.tasksToggle = { x: taskGeometry.x, y: tasksY - 1, w: taskGeometry.w, h: 1 };
   y = tasksY;
   for (const task of visible) {
     const selected = ui.focus === 'tasks' && task.id === ui.selectedTaskId;
@@ -954,7 +981,7 @@ function renderSidebar(canvas, rect, snapshot, ui, { time, now, palette, motion,
       const percentLabel = progressInfo.compact ?? `${progressInfo.value}%`;
       const progressWidth = Math.max(4, contentW - 2 - textWidth(percentLabel) - 1);
       rich(canvas, barX, y + 1, contentW - 2, [
-        [percentBar(progressInfo.value, progressWidth), {
+        [percentBar(progressInfo.value, progressWidth, { empty: '─' }), {
           fg: statusColor(palette, task.status), dim: !selected,
         }],
         [` ${percentLabel}`, { fg: palette.faint }],
@@ -973,7 +1000,7 @@ function renderSidebar(canvas, rect, snapshot, ui, { time, now, palette, motion,
     } else {
       const progressWidth = Math.max(4, contentW - 14);
       rich(canvas, barX, y + 1, contentW - 2, [
-        ['░'.repeat(progressWidth), { fg: statusColor(palette, task.status), dim: !selected }],
+        ['─'.repeat(progressWidth), { fg: statusColor(palette, task.status), dim: !selected }],
         [' —', { fg: palette.faint }],
         ...(task.agent && w >= 34 ? [[` · ${task.agent}`, { fg: palette.dim }]] : []),
       ], palette, bg);
@@ -1000,6 +1027,10 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
   time, now, viewNow = now, palette, motion, language, graphLayout, freshness,
 }) {
   const stats = run ? runStats(run) : null;
+  const graphSummary = run ? runSummary(run, { now: viewNow }) : undefined;
+  const criticalIds = criticalNodeIds(graphSummary);
+  const graphRun = focusSubgraph(run, ui.graphFocus);
+  const filter = ui.graphFilter ?? 'all';
   const selectedTask = navTasks(snapshot).find(candidate => candidate.id === ui.selectedTaskId);
   const unlinked = Boolean(ui.selectedTaskUnlinked && selectedTask);
   panel(canvas, rect, t(language, unlinked ? 'taskOverview' : 'graph'), {
@@ -1050,9 +1081,9 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
   const viewportH = Math.max(3, innerH - depsH);
   let layout;
   try {
-    layout = graphLayout && graphLayoutMatches(graphLayout, run)
+    layout = !ui.graphFocus && graphLayout && graphLayoutMatches(graphLayout, run)
       ? bindGraphLayout(graphLayout, run)
-      : computeLayout(run, contentW, { folded: ui.folded });
+      : computeLayout(graphRun, contentW, { folded: ui.folded });
   } catch (error) {
     rich(canvas, innerX + 1, innerY + 1, innerW - 2, [
       [t(language, 'graphError', { error: error.message }), { fg: palette.failed, bold: true }],
@@ -1067,6 +1098,12 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
     time, motion, palette, selectedId: ui.selectedNodeId, folded: ui.folded,
     now: viewNow, connected: isActiveSnapshot(snapshot), language,
   });
+  if (filter !== 'all') {
+    for (const box of layout.boxes.values()) {
+      if (nodeMatchesFilter(box.node, filter, criticalIds)) continue;
+      graphCanvas.fadeRect(box.x, box.y, box.w, box.h, 0.64, palette.bg);
+    }
+  }
   canvas.blit(graphCanvas, contentX, innerY + offset, {
     x: contentX, y: innerY, w: contentW, h: viewportH,
   });
@@ -1089,7 +1126,18 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
   const selected = run.nodes.find(node => node.id === ui.selectedNodeId);
   const names = id => nodeMap(run).get(id)?.label ?? id;
   let dependencyLine = t(language, 'edgesNodes', { edges: run.edges.length, nodes: stats.total });
-  if (selected) {
+  if (ui.graphFocus && ui.selectedNodeId) {
+    const focusNode = run.nodes.find(node => node.id === ui.graphFocus);
+    dependencyLine = t(language, 'graphFocusHint', { name: focusNode?.label ?? ui.graphFocus });
+  } else if (filter === 'critical' && graphSummary?.critical?.labels?.length) {
+    dependencyLine = `${t(language, 'pathShort')}: ${graphSummary.critical.labels.join(' → ')}`;
+  } else if (filter !== 'all') {
+    const count = filterCounts(run.nodes, graphSummary)[filter] ?? 0;
+    const label = filter === 'failed' ? statusLabel(language, 'failed')
+      : filter === 'blocked' ? statusLabel(language, 'blocked')
+        : statusLabel(language, 'running');
+    dependencyLine = `${t(language, 'switcherFilter')}: ${label} ${count}`;
+  } else if (selected) {
     const from = incoming(run, selected.id).map(names);
     const to = outgoing(run, selected.id).map(names);
     dependencyLine = t(language, 'depsLine', {
@@ -2001,7 +2049,7 @@ function nodeDetails(canvas, rect, run, node, snapshot, ui, {
     [`${agent}`, { fg: node.agent ? palette.accent : palette.faint, bold: Boolean(node.agent) }],
     [' · ', { fg: palette.faint }],
     [model, { fg: node.model ? palette.dim : palette.faint, dim: !node.model }],
-    [`  ${node.taskId ?? ''}`, { fg: palette.faint }],
+    [`  ${truncateMiddle(node.taskId ?? '', 28)}`, { fg: palette.faint }],
   ], palette);
   y++;
   const compact = w < 60 || (Number.isFinite(viewportH) && viewportH < 26);
@@ -2020,6 +2068,16 @@ function nodeDetails(canvas, rect, run, node, snapshot, ui, {
       time, motion, palette, color, bg: palette.panel, bold: node.state === 'running',
     });
     y += 1;
+  }
+  if (!diagnosis && (!Number.isFinite(viewportH) || viewportH >= 34)) {
+    const whyText = node.error ?? node.logs?.at(-1)
+      ?? (node.state === 'running' ? t(language, 'waitingFirst') : t(language, 'errorNoneRecorded'));
+    for (const line of wrap(`${t(language, 'detailsWhy')} ${whyText}`, w)) {
+      if (y >= bottom) break;
+      y = detailLine(canvas, x, y, w, [[line, {
+        fg: node.state === 'failed' ? palette.failed : node.state === 'running' ? palette.warn : palette.dim,
+      }]], palette);
+    }
   }
   y = metricsSection(canvas, x, y, w, node, palette, language);
   if (snapshot?.sources?.length) {
@@ -2141,7 +2199,7 @@ function taskDetails(canvas, rect, task, snapshot, ui, {
     [agentLabel(task, language), { fg: task.agent ? palette.accent : palette.faint, bold: Boolean(task.agent) }],
     [' · ', { fg: palette.faint }],
     [modelLabel(task, language), { fg: task.model ? palette.dim : palette.faint, dim: !task.model }],
-    [`  ${task.id}`, { fg: palette.faint }],
+    [`  ${truncateMiddle(task.id, 28)}`, { fg: palette.faint }],
   ], palette);
   y++;
   const linked = linkedNodeForTask(snapshot, task.id);
@@ -2253,7 +2311,7 @@ function wrapSummaryPath(labels, suffix, width) {
 }
 
 function runSummarySection(canvas, x, y, w, run, snapshot, stats, {
-  now, viewNow, palette, language, freshness,
+  now, viewNow, palette, language, freshness, filter = 'all',
 }) {
   // Live runs follow the wall clock; saved and stale captures freeze at the
   // instant the snapshot was taken so a cached duration never keeps growing.
@@ -2271,23 +2329,55 @@ function runSummarySection(canvas, x, y, w, run, snapshot, stats, {
   const row = (label, parts) => {
     y = metricRow(canvas, x, y, w, label, parts, palette, labelWidth);
   };
-  const withGaps = parts => parts.flatMap((part, index) => (index ? [[' ', faint], part] : [part]));
 
   y = detailSection(canvas, x, y, w, t(language, 'runSummary'), palette);
 
-  const statusParts = [
-    [t(language, 'runningCount', { count: stats.counts.running ?? 0 }), { fg: palette.running }],
-    [t(language, 'completedCount', { count: stats.counts.completed ?? 0 }), { fg: palette.completed }],
-    [t(language, 'failedCount', { count: stats.counts.failed ?? 0 }), { fg: palette.failed }],
-    [t(language, 'blockedCount', { count: stats.counts.blocked ?? 0 }), { fg: palette.blocked }],
+  const counts = filterCounts(run.nodes, summary);
+  const attentionRows = [
+    [
+      [`${statusIcon('failed')} ${t(language, 'failedCount', { count: counts.failed })}`, { fg: palette.failed, bold: counts.failed > 0 }],
+      [' · ', faint],
+      [`${statusIcon('blocked')} ${t(language, 'blockedCount', { count: counts.blocked })}`, { fg: palette.blocked, bold: counts.blocked > 0 }],
+    ],
+    [
+      [`${statusIcon('running')} ${t(language, 'runningCount', { count: counts.running })}`, { fg: palette.running, bold: counts.running > 0 }],
+      [' · ', faint],
+      [`${statusIcon('completed')} ${t(language, 'completedCount', { count: stats.counts.completed ?? 0 })}`, { fg: palette.completed }],
+    ],
   ];
-  const statusText = statusParts.map(([text]) => text).join(' ');
-  if (textWidth(statusText) <= valueW) {
-    row(t(language, 'status'), withGaps(statusParts));
-  } else {
-    row(t(language, 'status'), withGaps(statusParts.slice(0, 2)));
-    row('', withGaps(statusParts.slice(2)));
+  for (const parts of attentionRows) {
+    rich(canvas, x, y, w, parts, palette, palette.panel);
+    y++;
   }
+
+  const chip = (key, label) => {
+    const active = filter === key;
+    return [`${active ? '▸ ' : ''}${label}`, {
+      fg: active ? palette.accent : palette.faint,
+      bold: active,
+    }];
+  };
+  rich(canvas, x, y, w, [
+    chip('all', `1 ${t(language, 'filterAll')}`),
+    [' · ', faint],
+    chip('failed', `2 ${statusIcon('failed')}${counts.failed}`),
+    [' · ', faint],
+    chip('blocked', `3 ${statusIcon('blocked')}${counts.blocked}`),
+    [' · ', faint],
+    chip('running', `4 ${statusIcon('running')}${counts.running}`),
+    [' · ', faint],
+    chip('critical', `5 ${t(language, 'pathShort')}`),
+  ], palette, palette.panel);
+  y++;
+
+  let grouped = false;
+  const group = label => {
+    if (grouped) y++;
+    grouped = true;
+    canvas.put(x, y, label.toUpperCase(), { fg: palette.accent2, bold: true, dim: true });
+    y++;
+  };
+  group(t(language, 'runSummaryEfficiency'));
 
   if (summary.tokens) {
     const tokenStyle = { fg: palette.accent2, bold: true };
@@ -2366,6 +2456,7 @@ function runSummarySection(canvas, x, y, w, run, snapshot, stats, {
     }
   }
 
+  group(t(language, 'runSummaryTime'));
   if (summary.wallMs !== undefined) {
     const wall = compactDuration(summary.wallMs, language);
     const busy = summary.busyMs !== undefined
@@ -2399,6 +2490,7 @@ function runSummarySection(canvas, x, y, w, run, snapshot, stats, {
     row(t(language, 'parallelism'), append(parts, cov));
   }
 
+  group(t(language, 'runSummaryScope'));
   row(t(language, 'nodesShort'), [
     [t(language, 'nodesEdges', { nodes: run.nodes.length, edges: run.edges.length }), faint],
   ]);
@@ -2410,7 +2502,7 @@ function runSummarySection(canvas, x, y, w, run, snapshot, stats, {
   return y;
 }
 
-function runOverview(canvas, rect, run, snapshot, { now, palette, language, verbose = false, freshness }) {
+function runOverview(canvas, rect, run, snapshot, { now, palette, language, verbose = false, freshness, filter = 'all' }) {
   const x = rect.x + 2;
   const w = rect.w - 4;
   const bottom = rect.y + rect.h - 1;
@@ -2437,7 +2529,7 @@ function runOverview(canvas, rect, run, snapshot, { now, palette, language, verb
   y++;
   if (stats.percentKnown) {
     rich(canvas, x, y, w, [
-      [percentBar(stats.percent, Math.max(6, w - 8)), { fg: color }],
+      [percentBar(stats.percent, Math.max(6, w - 8), { empty: '─' }), { fg: color }],
       [` ${stats.percent}%`, { fg: palette.text, bold: true }],
     ], palette, palette.panel);
   } else {
@@ -2445,7 +2537,7 @@ function runOverview(canvas, rect, run, snapshot, { now, palette, language, verb
   }
   y += 2;
   y = runSummarySection(canvas, x, y, w, run, snapshot, stats, {
-    now, viewNow, palette, language, freshness,
+    now, viewNow, palette, language, freshness, filter,
   });
   if (snapshot?.sources?.length) {
     y = sourceHealthSection(canvas, x, y, w, snapshot, { palette, language, now, bottom });
@@ -2500,8 +2592,34 @@ function renderDetails(canvas, rect, snapshot, ui, {
     now, time, motion, palette, language, viewportH: detailsViewportH, freshness,
   });
   else runOverview(body, full, run, snapshot, {
-    now, palette, language, verbose: ui.verbose, freshness,
+    now, palette, language, verbose: ui.verbose, freshness, filter: ui.graphFilter,
   });
+  const headings = [];
+  for (let row = 2; row < measureH; row++) {
+    const cells = body.cells[row];
+    const label = [];
+    let rule = false;
+    for (let col = 1; col < rect.w - 1; col++) {
+      const cell = cells[col];
+      if (cell.cont) continue;
+      if (cell.ch === '─' && cell.fg === palette.border) { rule = true; break; }
+      if (cell.ch !== ' ') label.push(cell.ch);
+    }
+    if (!rule) continue;
+    const heading = cells.some(cell => !cell.cont && cell.ch !== ' ' &&
+      cell.fg === palette.accent2 && (cell.flags & 1));
+    if (!heading) continue;
+    headings.push({ row, label: label.join('').trim() });
+  }
+  for (let index = 0; index < headings.length; index++) {
+    const heading = headings[index];
+    if (!ui.collapsedSections?.has(heading.label)) continue;
+    const end = headings[index + 1]?.row ?? measureH;
+    body.fill(1, heading.row + 1, rect.w - 2, Math.max(0, end - heading.row - 1), {
+      fg: palette.text, bg: palette.panel,
+    });
+    body.put(rect.w - 3, heading.row, '▸', { fg: palette.accent2, bg: palette.panel, bold: true });
+  }
   let lastUsed = -1;
   for (let row = measureH - 1; row >= 2; row--) {
     if (body.cells[row].some(cell => !cell.cont && cell.ch !== ' ')) {
@@ -2556,7 +2674,7 @@ function renderDetails(canvas, rect, snapshot, ui, {
       thumbTop: rect.y + localBar.thumbTop,
     }
     : null;
-  return { viewportH: detailsViewportH, contentH, offset, maxScroll, bar };
+  return { viewportH: detailsViewportH, contentH, offset, maxScroll, bar, headings: headings.map(item => ({ row: item.row - 2, label: item.label })) };
 }
 
 function dutySelectionResolution(snapshot, selection) {
@@ -2697,7 +2815,7 @@ function dutyBody(canvas, full, snapshot, ui, {
   // run summary the wide details pane uses instead of empty per-subject metrics.
   if (!showTask && !node && run) {
     y = runSummarySection(canvas, x, y, w, run, snapshot, stats, {
-      now, viewNow, palette, language, freshness,
+      now, viewNow, palette, language, freshness, filter: ui.graphFilter,
     });
   } else {
     // Retry is rendered inside METRICS immediately before turns/tools.
@@ -3154,6 +3272,15 @@ function renderFooter(canvas, width, height, snapshot, ui, {
   const named = width >= 54;
   drawAction('m', named ? selectLabel : '', 'selectHint');
   drawAction('x', named ? clearLabel : '', 'clearHint');
+  const hint = ui.runOverview
+    ? `${t(language, 'filterHint')} · ${t(language, 'footerOverviewHint')}`
+    : ui.focus === 'details'
+      ? t(language, 'footerDetailsHint')
+      : ui.focus === 'tasks'
+        ? t(language, 'footerTasksHint')
+        : t(language, 'footerGraphHint');
+  draw('  ', { fg: palette.faint });
+  draw(hint, { fg: palette.faint, dim: true });
   const rightX = Math.max(1, settingsX - textWidth(right) - 2);
   canvas.put(rightX, height - 1, right, {
     fg: rightColor,
@@ -3172,9 +3299,9 @@ function renderHelp(canvas, width, height, {
 }, hitboxes) {
   canvas.fadeRect(0, 0, width, height, 0.58, palette.bg);
   const w = Math.min(68, width - 4);
-  // 22 documented rows plus the pinned data line. A 26-row box still leaves
-  // three rows of terminal margin, and keeps the whole list visible at 54x42.
-  const h = Math.min(26, height - 3);
+  // 32 documented rows plus the pinned data line. A 36-row box keeps the full
+  // grouped list visible on a 42-row terminal and scrolls on shorter ones.
+  const h = Math.min(36, height - 3);
   const x = Math.floor((width - w) / 2);
   const y = Math.floor((height - h) / 2);
   canvas.fill(x, y, w, h, { bg: palette.panelAlt, fg: palette.text });
@@ -3187,26 +3314,36 @@ function renderHelp(canvas, width, height, {
   });
   hitboxes.helpPanel = { x, y, w, h };
   const lines = [
+    [t(language, 'helpGroupMove'), ''],
     ['↑/↓  j/k', t(language, 'helpScroll')],
     ['PgUp / PgDn', t(language, 'helpPage')],
     ['g / G  Home/End', t(language, 'helpJump')],
     ['Tab / Shift-Tab', t(language, 'helpSelect')],
-    ['t', t(language, 'helpTaskFocus')],
-    ['1 / 2 / 3', t(language, 'helpDutyFocus')],
+    [t(language, 'helpGroupView'), ''],
     ['Click', t(language, 'helpClick')],
     ['m', t(language, 'helpMouseSelection')],
-    ['x / X', t(language, 'helpClearCompleted')],
     ['Mouse wheel', t(language, 'helpWheel')],
     ['← / →', t(language, 'helpRun')],
     ['Space / Enter', t(language, 'helpFold')],
     ['d', t(language, 'helpVerbose')],
-    ['c / p / o', t(language, 'helpDiagnosis')],
     ['e / Esc', t(language, 'helpDetails')],
     ['v / /', t(language, 'helpSwitcher')],
     ['f', t(language, 'helpFollow')],
-    ['s', t(language, 'helpSettings')],
     ['S', t(language, 'helpSidebar')],
+    [t(language, 'helpGroupActions'), ''],
+    ['t', t(language, 'helpTaskFocus')],
+    ['T', t(language, 'helpCompleted')],
+    ['1–5', t(language, 'helpFilters')],
+    ['1 / 2 / 3', t(language, 'helpDutyFocus')],
+    ['z', t(language, 'helpFocusNode')],
+    ['n / N', t(language, 'helpNodes')],
+    ['[ / ]', t(language, 'helpSections')],
+    ['c / p / o', t(language, 'helpDiagnosis')],
+    ['x / X / u', t(language, 'helpClearCompleted')],
+    ['s', t(language, 'helpSettings')],
     ['r', t(language, 'helpDemo')],
+    [t(language, 'helpGroupSystem'), ''],
+    [':', t(language, 'helpPalette')],
     ['? / Esc', t(language, 'helpClose')],
     ['q', t(language, 'helpQuit')],
   ];
@@ -3226,6 +3363,11 @@ function renderHelp(canvas, width, height, {
   }
   let row = y + 2;
   for (const [key, description] of lines.slice(scroll, scroll + visibleRows)) {
+    if (!description) {
+      canvas.put(x + 3, row, key, { fg: palette.accent2, bg: palette.panelAlt, bold: true });
+      row++;
+      continue;
+    }
     // Keep the demo-data footer row intact on short terminals.
     if (row >= y + h - 2) break;
     canvas.put(x + 3, row, fit(key, 18), { fg: palette.accent, bg: palette.panelAlt, bold: true });
@@ -3311,7 +3453,7 @@ function renderSwitcher(canvas, width, height, snapshot, ui, { palette, time, mo
   canvas.box(x, y, w, h, {
     border: motion ? pulse(palette.accent, time / 700, 0.3) : palette.accent,
     bg: palette.panelAlt,
-    title: t(language, 'switcherTitle'),
+    title: t(language, 'finderTitle'),
     titleColor: palette.accent,
     double: true,
   });
@@ -3339,7 +3481,9 @@ function renderSwitcher(canvas, width, height, snapshot, ui, { palette, time, mo
   for (const item of items) {
     if (item.kind !== lastKind) {
       rows.push({
-        header: item.kind === 'run' ? t(language, 'switcherRuns') : t(language, 'switcherTasks'),
+        header: item.kind === 'run' ? t(language, 'switcherRuns')
+          : item.kind === 'node' ? t(language, 'switcherNodes')
+            : t(language, 'switcherTasks'),
       });
       lastKind = item.kind;
     }
@@ -3382,9 +3526,96 @@ function renderSwitcher(canvas, width, height, snapshot, ui, { palette, time, mo
     row++;
   }
   rich(canvas, x + 3, y + h - 2, w - 6, [
-    [t(language, 'switcherHint'), { fg: palette.faint, dim: true }],
+    [t(language, 'finderHint'), { fg: palette.faint, dim: true }],
   ], palette, palette.panelAlt);
   return { items, activeKey };
+}
+
+export function renderPalette(canvas, width, height, ui, { palette, time, motion, language }, hitboxes) {
+  const items = filterCommands(commandItems(language), ui.paletteFilter);
+  const activeIndex = items.length ? clamp(ui.paletteIndex ?? 0, 0, items.length - 1) : 0;
+  canvas.fadeRect(0, 0, width, height, 0.58, palette.bg);
+  const w = Math.min(64, width - 4);
+  const h = Math.min(22, Math.max(10, height - 4));
+  const x = Math.floor((width - w) / 2);
+  const y = Math.floor((height - h) / 2);
+  canvas.fill(x, y, w, h, { bg: palette.panelAlt, fg: palette.text });
+  canvas.box(x, y, w, h, {
+    border: motion ? pulse(palette.accent, time / 700, 0.3) : palette.accent,
+    bg: palette.panelAlt,
+    title: t(language, 'paletteTitle'),
+    titleColor: palette.accent,
+    double: true,
+  });
+  const countText = ` ${items.length} `;
+  canvas.put(x + w - 1 - textWidth(countText), y, countText, { fg: palette.faint, bg: palette.panelAlt });
+  const filterRow = y + 1;
+  canvas.fill(x + 1, filterRow, w - 2, 1, { bg: palette.selection, fg: palette.text });
+  rich(canvas, x + 2, filterRow, w - 4, [
+    [': ', { fg: palette.accent }],
+    [ui.paletteFilter || t(language, 'paletteFilter'), {
+      fg: ui.paletteFilter ? palette.white : palette.faint,
+      bold: Boolean(ui.paletteFilter),
+    }],
+  ], palette, palette.selection);
+  hitboxes.palettePanel = { x, y, w, h };
+  hitboxes.paletteFilter = { x: x + 1, y: filterRow, w: w - 2, h: 1 };
+  hitboxes.palette = new Map();
+  const listTop = y + 2;
+  const listBottom = y + h - 2;
+  const viewport = Math.max(1, listBottom - listTop);
+  if (!items.length) {
+    rich(canvas, x + 3, listTop, w - 6, [[t(language, 'paletteEmpty'), { fg: palette.faint, dim: true }]], palette, palette.panelAlt);
+  }
+  const offset = clamp(activeIndex - Math.floor(viewport / 2), 0, Math.max(0, items.length - viewport));
+  let row = listTop;
+  for (const item of items.slice(offset, offset + viewport)) {
+    if (row >= listBottom) break;
+    const selected = item.id === items[activeIndex]?.id;
+    if (selected) canvas.fill(x + 1, row, w - 2, 1, { bg: palette.selection, fg: palette.text });
+    const bg = selected ? palette.selection : palette.panelAlt;
+    rich(canvas, x + 2, row, w - 4, [
+      [`${selected ? '▸' : ' '} `, { fg: selected ? palette.accent : palette.faint, bold: selected }],
+      [fit(item.label, w - 8), { fg: selected ? palette.white : palette.text, bold: selected }],
+    ], palette, bg);
+    hitboxes.palette.set(item.id, { x: x + 1, y: row, w: w - 2, h: 1 });
+    row++;
+  }
+  rich(canvas, x + 3, y + h - 2, w - 6, [[t(language, 'paletteHint'), { fg: palette.faint, dim: true }]], palette, palette.panelAlt);
+  return { items, activeIndex };
+}
+
+function renderTour(canvas, width, height, ui, { palette, language }, hitboxes) {
+  const step = clamp(ui.tour ?? 1, 1, 5);
+  const steps = [
+    t(language, 'tourStep1'),
+    t(language, 'tourStep2'),
+    t(language, 'tourStep3'),
+    t(language, 'tourStep4'),
+    t(language, 'tourStep5'),
+  ];
+  canvas.fadeRect(0, 0, width, height, 0.45, palette.bg);
+  const w = Math.min(58, width - 4);
+  const h = 8;
+  const x = Math.floor((width - w) / 2);
+  const y = Math.max(2, height - h - 3);
+  canvas.fill(x, y, w, h, { bg: palette.panelAlt, fg: palette.text });
+  canvas.box(x, y, w, h, {
+    border: palette.accent,
+    bg: palette.panelAlt,
+    title: t(language, 'tourTitle'),
+    titleColor: palette.accent,
+    double: true,
+  });
+  const count = ` ${step}/5 `;
+  canvas.put(x + w - 1 - textWidth(count), y, count, { fg: palette.faint, bg: palette.panelAlt });
+  let row = y + 2;
+  for (const line of wrap(steps[step - 1], w - 6).slice(0, 3)) {
+    rich(canvas, x + 3, row, w - 6, [[line, { fg: palette.text }]], palette, palette.panelAlt);
+    row++;
+  }
+  rich(canvas, x + 3, y + h - 2, w - 6, [[t(language, 'tourNext'), { fg: palette.faint, dim: true }]], palette, palette.panelAlt);
+  hitboxes.tourPanel = { x, y, w, h };
 }
 
 export function renderApp(snapshot, ui, {
@@ -3404,6 +3635,7 @@ export function renderApp(snapshot, ui, {
     context: {},
     regions: new Map(), scrollbars: new Map(),
     switcher: null, switcherPanel: null, switcherFilter: null,
+    palette: null, palettePanel: null, paletteFilter: null,
   };
   const freshness = snapshotFreshness(snapshot, { now, staleAfterMs: ui.staleAfterMs });
   // A stale capture is no longer evidence of live work. The graph and the
@@ -3452,6 +3684,24 @@ export function renderApp(snapshot, ui, {
       index: ui.settingsIndex ?? 0, animation: ui.motion !== false,
       themeName: ui.themeName,
     }, hitboxes);
+  } else if (ui.palette) {
+    renderPalette(canvas, width, height, ui, {
+      palette, time, motion: ui.motion !== false, language,
+    }, hitboxes);
+    hitboxes.nodes.clear();
+    hitboxes.tasks.clear();
+    hitboxes.runs.clear();
+    hitboxes.regions.clear();
+    hitboxes.scrollbars.clear();
+    hitboxes.context = {};
+  } else if (ui.tour) {
+    renderTour(canvas, width, height, ui, { palette, language }, hitboxes);
+    hitboxes.nodes.clear();
+    hitboxes.tasks.clear();
+    hitboxes.runs.clear();
+    hitboxes.regions.clear();
+    hitboxes.scrollbars.clear();
+    hitboxes.context = {};
   } else if (ui.help) {
     helpInfo = renderHelp(canvas, width, height, {
       palette, time, motion: ui.motion !== false, language, snapshot,

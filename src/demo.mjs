@@ -603,6 +603,23 @@ function standaloneTasks(now, phase) {
   ];
 }
 
+function withEconomics(task) {
+  if (!Number.isFinite(task?.tokensIn)) return task;
+  if (task.costUsd !== undefined) return task;
+  const input = task.tokensIn;
+  const output = Number.isFinite(task.tokensOut) ? task.tokensOut : 0;
+  const cacheRead = Math.max(0, Math.round(input * 0.92));
+  const totalTokens = Math.max(input + output, cacheRead);
+  return {
+    ...task,
+    costUsd: Number((((input * 2) + (output * 10)) / 1_000_000).toFixed(6)),
+    costStatus: 'reported',
+    cacheReadTokens: cacheRead,
+    cacheWriteTokens: Math.max(0, Math.round(input * 0.02)),
+    totalTokens,
+  };
+}
+
 function withModelNarrative(task) {
   if (task.thinking || task.reply) return task;
   const first = task.logs?.[0] ?? task.progress ?? task.description;
@@ -657,9 +674,11 @@ export class DemoEngine {
         demo: { cycle, phase, cycleMs: this.cycleMs },
       },
       demo: { cycle, phase, cycleMs: this.cycleMs },
-      runs: [active.run, ...staticRuns.map(item => item.run)],
+      runs: [active.run, ...staticRuns.map(item => item.run)]
+        .map(run => ({ ...run, nodes: run.nodes.map(withEconomics) })),
       tasks: [...active.tasks, ...staticRuns.flatMap(item => item.tasks), ...standaloneTasks(now, phase)]
-        .map(withModelNarrative),
+        .map(withModelNarrative)
+        .map(withEconomics),
     };
   }
 }

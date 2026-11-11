@@ -111,7 +111,7 @@ export const palettes = {
     failed: '#c8253d',
     blocked: '#8f6802',
     pending: '#8f6802',
-    paused: '#b5a5e8',
+    paused: '#6f5aa8',
     skipped: '#60676a',
     selection: '#dfe7ec',
     white: '#3b3f41',

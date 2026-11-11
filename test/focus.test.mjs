@@ -243,7 +243,7 @@ test('F-161 the wheel scrolls Help while the overlay is open', async () => {
   viewer.onMouseEvent({ button: 65, x: 5, y: 5, release: false });
 
   assert.equal(viewer.ui.help, true, 'wheel never closes Help');
-  assert.equal(viewer.ui.helpScroll, 9);
+  assert.equal(viewer.ui.helpScroll, 12);
   assert.equal(Object.hasOwn(viewer.ui, 'helpScrollTarget'), false);
 
   viewer.onMouseEvent({ button: 64, x: 5, y: 5, release: false });

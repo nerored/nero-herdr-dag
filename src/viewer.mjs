@@ -13,6 +13,8 @@ import {
 } from './config.mjs';
 import { DemoEngine } from './demo.mjs';
 import { computeLayout, nodeScrollTarget } from './graph.mjs';
+import { nextNodeId } from './cockpit.mjs';
+import { commandItems, filterCommands } from './commands.mjs';
 import { languageLabel, normalizeLanguage, t } from './i18n.mjs';
 import { findRunningTarget, isActiveRun, nodeForTask, normalizeSnapshot, TERMINAL } from './model.mjs';
 import {
@@ -394,6 +396,18 @@ export function createViewerState({
     runPinned: false,
     // The run itself is the details subject (RUN SUMMARY) instead of a node.
     runOverview: false,
+    // Triage state: graph filter/focus, task scope, and collapsed sections.
+    graphFilter: 'all',
+    graphFocus: undefined,
+    taskScope: 'run',
+    completedCollapsed: true,
+    detailsSection: 0,
+    collapsedSections: new Set(),
+    palette: false,
+    paletteFilter: '',
+    paletteIndex: 0,
+    tour: 0,
+    undoClear: null,
     focus: 'graph',
     lastFocus: 'graph',
     mouseCapture: true,
@@ -649,9 +663,9 @@ export function detailsVerboseAvailable(structural) {
 // the last documented row (q) is reachable and never publishes a scroll offset
 // the frame cannot show.
 
-export const HELP_ROWS = 22;
+export const HELP_ROWS = 32;
 
-export const HELP_MAX_ROWS = 26;
+export const HELP_MAX_ROWS = 36;
 
 export function helpViewportRows(height) {
   const h = Math.min(HELP_MAX_ROWS, Math.max(1, Math.floor(Number(height) || 0) - 3));
@@ -811,6 +825,8 @@ export function selectRunById(ui, state, runId, scrollInfo = {}) {
   if (index < 0) return false;
   const run = state.runs[index];
   ui.runOverview = false;
+  ui.graphFilter = 'all';
+  ui.graphFocus = undefined;
   ui.runIndex = index;
   ui.selectedRunId = run.id;
   ui.runPinned = true;
@@ -846,6 +862,8 @@ export function selectRunOverview(ui, state, runId, scrollInfo = {}) {
   ui.selectedRunId = run.id;
   ui.runPinned = true;
   ui.runOverview = true;
+  ui.graphFilter = 'all';
+  ui.graphFocus = undefined;
   ui.selectedNodeId = undefined;
   ui.selectedTaskId = undefined;
   ui.selectedTaskUnlinked = false;
@@ -868,6 +886,31 @@ export function applySwitcherSelection(ui, state, item, scrollInfo = {}) {
   if (item.kind === 'run') {
     const handled = selectRunOverview(ui, state, item.id, scrollInfo);
     return { handled, stale: !handled, linked: undefined };
+  }
+  if (item.kind === 'node') {
+    const run = state.runs.find(candidate => candidate.id === item.runId);
+    const node = run?.nodes?.find(candidate => candidate.id === item.id);
+    if (!run || !node) return { handled: false, stale: true, linked: undefined };
+    const index = state.runs.indexOf(run);
+    ui.runIndex = index;
+    ui.selectedRunId = run.id;
+    ui.runPinned = true;
+    ui.runOverview = false;
+    ui.graphFilter = 'all';
+    ui.graphFocus = undefined;
+    ui.selectedNodeId = node.id;
+    ui.selectedTaskId = node.taskId;
+    ui.selectedTaskUnlinked = false;
+    ui.graphScroll = 0;
+    ui.graphScrollTarget = 0;
+    ui.cellsScroll = 0;
+    ui.cellsScrollTarget = 0;
+    ui.follow = false;
+    ui.followTarget = undefined;
+    ui.manualScroll = false;
+    ui.focus = ui.expanded ? 'details' : 'graph';
+    if (ui.expanded) ui.lastFocus = 'graph';
+    return { handled: true, stale: false, linked: true };
   }
   if (item.kind !== 'task') return { handled: false, stale: true, linked: undefined };
   if (!navTasks(state).some(task => task.id === item.id)) {
@@ -1273,8 +1316,55 @@ export async function createViewer(options = {}, deps = {}) {
     selectTaskById(tasks[index].id);
   }
 
-  function switchRun(direction) {
-    if (!snapshot?.runs.length) return;
+  function stepGraphNode(direction) {
+    const run = snapshot?.runs[ui.runIndex];
+    if (!run?.nodes?.length) return;
+    const layout = lastRender?.graph?.layout;
+    const next = layout ? nextNodeId(layout, ui.selectedNodeId, direction) : undefined;
+    const fallback = run.nodes[
+      (Math.max(0, run.nodes.findIndex(node => node.id === ui.selectedNodeId)) + direction + run.nodes.length)
+        % run.nodes.length
+    ].id;
+    const nodeId = next ?? fallback;
+    ui.selectedNodeId = nodeId;
+    ui.selectedRunId = run.id;
+    ui.runPinned = true;
+    ui.runOverview = false;
+    ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
+    ui.selectedTaskUnlinked = false;
+    ui.focus = lastRender?.layout?.layout === 'duty' ? 'cells' : 'graph';
+    if (ui.graphFocus) ui.graphFocus = nodeId;
+    ui.follow = false;
+    ui.followTarget = undefined;
+    ui.manualScroll = false;
+    scrollSelectedIntoView();
+  }
+
+  function jumpDetailsSection(direction) {
+    const info = lastRender?.scroll?.details;
+    const headings = info?.headings ?? [];
+    if (!headings.length) return;
+    const offset = info.offset ?? 0;
+    const target = direction > 0
+      ? headings.find(item => item.row > offset + 1)
+      : [...headings].reverse().find(item => item.row < offset - 1);
+    if (!target) return;
+    ui.detailsScroll = target.row;
+    ui.detailsScrollTarget = target.row;
+  }
+
+  function toggleDetailsSection() {
+    const info = lastRender?.scroll?.details;
+    const headings = info?.headings ?? [];
+    if (!headings.length) return;
+    const offset = info.offset ?? 0;
+    const heading = [...headings].reverse().find(item => item.row <= offset + 2) ?? headings[0];
+    if (!heading) return;
+    if (ui.collapsedSections.has(heading.label)) ui.collapsedSections.delete(heading.label);
+    else ui.collapsedSections.add(heading.label);
+  }
+
+  function switchRun(direction) {    if (!snapshot?.runs.length) return;
     const index = (ui.runIndex + direction + snapshot.runs.length) % snapshot.runs.length;
     if (ui.runOverview) {
       selectRunOverview(ui, snapshot, snapshot.runs[index].id, lastRender?.scroll);
@@ -1289,11 +1379,15 @@ export async function createViewer(options = {}, deps = {}) {
     const node = run?.nodes?.find(candidate => candidate.id === ui.selectedNodeId);
     const taskOwner = ui.focus === 'tasks' || (ui.focus === 'details' && ui.lastFocus === 'tasks');
     const preferredTaskId = taskOwner ? ui.selectedTaskId : node?.taskId;
+    const preferredNodeKey = run?.id && ui.selectedNodeId ? `node:${run.id}:${ui.selectedNodeId}` : undefined;
     const items = switcherItems(snapshot, null, {
       preferRunId: run?.id,
       tasks: navTasks(snapshot),
     });
-    const active = items.find(item => item.kind === 'task' && item.id === preferredTaskId)
+    const active = (preferredNodeKey
+      ? items.find(item => item.key === preferredNodeKey)
+      : undefined)
+      ?? items.find(item => item.kind === 'task' && item.id === preferredTaskId)
       ?? items.find(item => item.kind === 'run' && item.id === run?.id)
       ?? items[0];
     ui.switcher = { query: '', frozenKeys: items.map(item => item.key), activeKey: active?.key };
@@ -1342,8 +1436,122 @@ export async function createViewer(options = {}, deps = {}) {
     ui.switcher = null;
   }
 
-  function toggleFold() {
-    const run = snapshot?.runs[ui.runIndex];
+  function paletteView() {
+    const items = filterCommands(commandItems(ui.language), ui.paletteFilter);
+    const index = items.length ? clamp(ui.paletteIndex ?? 0, 0, items.length - 1) : 0;
+    return { items, index, active: items[index] };
+  }
+
+  function openPalette() {
+    ui.palette = true;
+    ui.paletteFilter = '';
+    ui.paletteIndex = 0;
+  }
+
+  function closePalette() {
+    ui.palette = false;
+    ui.paletteFilter = '';
+    ui.paletteIndex = 0;
+  }
+
+  function movePalette(delta) {
+    const { items, index } = paletteView();
+    if (!items.length) return;
+    ui.paletteIndex = (index + delta + items.length) % items.length;
+  }
+
+  function applyPaletteCommand(id) {
+    const run = snapshot?.runs?.[ui.runIndex];
+    switch (id) {
+      case 'overview':
+        if (run) selectRunOverview(ui, snapshot, run.id, lastRender?.scroll);
+        break;
+      case 'find':
+        closePalette();
+        openSwitcher();
+        return;
+      case 'filter-failed':
+      case 'filter-blocked':
+      case 'filter-running':
+      case 'filter-critical':
+        ui.graphFilter = id.slice('filter-'.length);
+        ui.graphFocus = undefined;
+        break;
+      case 'filter-clear':
+        ui.graphFilter = 'all';
+        ui.graphFocus = undefined;
+        break;
+      case 'focus': {
+        if (!run?.nodes?.length) break;
+        const nodeId = ui.selectedNodeId ?? run.nodes[0].id;
+        ui.selectedNodeId = nodeId;
+        ui.runOverview = false;
+        ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
+        ui.selectedTaskUnlinked = false;
+        ui.focus = lastRender?.layout?.layout === 'duty' ? 'cells' : 'graph';
+        ui.graphFocus = nodeId;
+        ui.follow = false;
+        break;
+      }
+      case 'scope':
+        ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
+        ui.tasksScroll = 0;
+        ui.tasksScrollTarget = 0;
+        break;
+      case 'completed':
+        ui.completedCollapsed = !ui.completedCollapsed;
+        ui.tasksScroll = 0;
+        ui.tasksScrollTarget = 0;
+        break;
+      case 'verbose':
+        ui.verbose = !ui.verbose;
+        break;
+      case 'tour':
+        ui.tour = 1;
+        break;
+      case 'undo':
+        undoCleared();
+        break;
+      case 'help':
+        ui.help = true;
+        ui.helpScroll = 0;
+        helpFrameDrawn = false;
+        break;
+      case 'settings':
+        openSettingsMenu();
+        break;
+      case 'quit':
+        void close({ closePane: true });
+        return;
+      default:
+        break;
+    }
+    closePalette();
+  }
+
+  function handlePaletteKey(key, pressed) {
+    if (isEscapeKey(key, pressed) || key === ':') { closePalette(); return; }
+    const up = key === '\x1b[A' || key === 'k' || pressed?.name === 'up';
+    const down = key === '\x1b[B' || key === 'j' || pressed?.name === 'down';
+    if (up) { movePalette(-1); return; }
+    if (down) { movePalette(1); return; }
+    if (key === '\r' || key === '\n' || pressed?.name === 'return' || pressed?.name === 'enter') {
+      const { active } = paletteView();
+      if (active) applyPaletteCommand(active.id);
+      return;
+    }
+    if (key === '\x7f' || key === '\b' || pressed?.name === 'backspace') {
+      ui.paletteFilter = ui.paletteFilter.slice(0, -1);
+      ui.paletteIndex = 0;
+      return;
+    }
+    if (typeof key === 'string' && key.length === 1 && key.charCodeAt(0) >= 32 && key !== '\x7f') {
+      ui.paletteFilter += key;
+      ui.paletteIndex = 0;
+    }
+  }
+
+  function toggleFold() {    const run = snapshot?.runs[ui.runIndex];
     if (!run || ui.focus !== 'graph') return;
     const nodeId = ui.selectedNodeId;
     if (!nodeId) return;
@@ -1610,6 +1818,21 @@ export async function createViewer(options = {}, deps = {}) {
   function selectAt(x, y) {
     if (!lastRender || !snapshot) return;
     const inside = rect => x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h;
+    if (ui.palette) {
+      for (const [id, rect] of lastRender.hitboxes.palette ?? []) {
+        if (!inside(rect)) continue;
+        const items = filterCommands(commandItems(ui.language), ui.paletteFilter);
+        const index = items.findIndex(item => item.id === id);
+        if (index >= 0) {
+          ui.paletteIndex = index;
+          applyPaletteCommand(id);
+        }
+        return;
+      }
+      if (lastRender.hitboxes.palettePanel && inside(lastRender.hitboxes.palettePanel)) return;
+      closePalette();
+      return;
+    }
     if (ui.switcher) {
       for (const [key, rect] of lastRender.hitboxes.switcher ?? []) {
         if (!inside(rect)) continue;
@@ -1632,6 +1855,12 @@ export async function createViewer(options = {}, deps = {}) {
         return;
       }
       ui.settingsMenu = false;
+      return;
+    }
+    if (lastRender.hitboxes.tasksToggle && inside(lastRender.hitboxes.tasksToggle)) {
+      ui.completedCollapsed = !ui.completedCollapsed;
+      ui.tasksScroll = 0;
+      ui.tasksScrollTarget = 0;
       return;
     }
     if (lastRender.hitboxes.context) {
@@ -1790,6 +2019,7 @@ export async function createViewer(options = {}, deps = {}) {
         ui.detailsKey = nextDetailsKey;
         ui.detailsScroll = 0;
         ui.detailsScrollTarget = 0;
+        ui.collapsedSections.clear();
       }
       const nextTaskRevealKey = `${ui.selectedTaskId ?? ''}|${ui.focus}`;
       if (ui.taskRevealKey !== nextTaskRevealKey) {
@@ -1993,9 +2223,26 @@ export async function createViewer(options = {}, deps = {}) {
       addToast(t(ui.language, 'toastNoCompleted'), 'info');
       return;
     }
+    ui.undoClear = {
+      runs: runs.map(run => run.id),
+      tasks: tasks.map(task => task.id),
+    };
     for (const run of runs) ui.hiddenRunIds.add(run.id);
     for (const task of tasks) ui.hiddenTaskIds.add(task.id);
-    addToast(t(ui.language, 'toastClearedCompleted', { runs: runs.length, tasks: tasks.length }), 'info');
+    addToast(`${t(ui.language, 'toastClearedCompleted', { runs: runs.length, tasks: tasks.length })} · ${t(ui.language, 'undoClear')}`, 'info');
+    refreshHiddenSnapshot();
+  }
+
+  function undoCleared() {
+    const last = ui.undoClear;
+    if (!last) {
+      addToast(t(ui.language, 'toastNoHidden'), 'info');
+      return;
+    }
+    for (const id of last.runs) ui.hiddenRunIds.delete(id);
+    for (const id of last.tasks) ui.hiddenTaskIds.delete(id);
+    ui.undoClear = null;
+    addToast(t(ui.language, 'undoRestored'), 'info');
     refreshHiddenSnapshot();
   }
 
@@ -2200,7 +2447,24 @@ export async function createViewer(options = {}, deps = {}) {
       }
       return;
     }
+    if (ui.palette) {
+      handlePaletteKey(key, pressed);
+      return;
+    }
+    if (ui.tour) {
+      if (isEscapeKey(key, pressed)) { ui.tour = 0; return; }
+      if (key === '\r' || key === '\n' || key === ' ' || pressed?.name === 'return' || pressed?.name === 'enter') {
+        ui.tour = ui.tour >= 5 ? 0 : ui.tour + 1;
+        return;
+      }
+      return;
+    }
     if (isEscapeKey(key, pressed)) {
+      if (ui.graphFilter !== 'all' || ui.graphFocus) {
+        ui.graphFilter = 'all';
+        ui.graphFocus = undefined;
+        return;
+      }
       const collapsed = collapseTransition(ui);
       if (collapsed) Object.assign(ui, collapsed);
       return;
@@ -2264,6 +2528,48 @@ export async function createViewer(options = {}, deps = {}) {
         applySetting(ui.settingsIndex);
         return;
       }
+      return;
+    }
+    if ((key === '\x7f' || key === '\b' || pressed?.name === 'backspace') && !ui.runOverview) {
+      const run = snapshot?.runs?.[ui.runIndex];
+      if (run) {
+        selectRunOverview(ui, snapshot, run.id, lastRender?.scroll);
+        return;
+      }
+    }
+    if (/^[1-5]$/.test(key) && ui.runOverview) {
+      ui.graphFilter = ['all', 'failed', 'blocked', 'running', 'critical'][Number(key) - 1];
+      ui.graphFocus = undefined;
+      return;
+    }
+    if (key === 'z') {
+      const run = snapshot?.runs[ui.runIndex];
+      if (!run?.nodes?.length) return;
+      if (ui.graphFocus) {
+        ui.graphFocus = undefined;
+        return;
+      }
+      const nodeId = ui.selectedNodeId ?? run.nodes[0].id;
+      ui.selectedNodeId = nodeId;
+      ui.runOverview = false;
+      ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
+      ui.selectedTaskUnlinked = false;
+      ui.focus = lastRender?.layout?.layout === 'duty' ? 'cells' : 'graph';
+      ui.graphFocus = nodeId;
+      ui.follow = false;
+      ui.followTarget = undefined;
+      return;
+    }
+    if ((key === 'n' || key === 'N') && (ui.focus === 'graph' || ui.focus === 'cells')) {
+      stepGraphNode(key === 'N' ? -1 : 1);
+      return;
+    }
+    if (key === 'u') {
+      undoCleared();
+      return;
+    }
+    if (key === ':') {
+      openPalette();
       return;
     }
     if (key === '?') {
@@ -2331,6 +2637,12 @@ export async function createViewer(options = {}, deps = {}) {
       openSwitcher();
       return;
     }
+    if (key === 'T') {
+      ui.completedCollapsed = !ui.completedCollapsed;
+      ui.tasksScroll = 0;
+      ui.tasksScrollTarget = 0;
+      return;
+    }
     if (key === 't') {
       const structural = structuralFor(terminalWidth(), {
         expanded: ui.expanded, sidebar: sidebarEnabled(),
@@ -2339,10 +2651,9 @@ export async function createViewer(options = {}, deps = {}) {
         openSwitcher();
         return;
       }
-      const tasks = navTasks(snapshot ?? { runs: [], tasks: [] });
-      if (!tasks.length) { addToast(t(ui.language, 'toastNoTasks'), 'warning'); return; }
-      ui.focus = ui.focus === 'tasks' ? 'graph' : 'tasks';
-      ui.follow = false;
+      ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
+      ui.tasksScroll = 0;
+      ui.tasksScrollTarget = 0;
       return;
     }
     if (key === 'Tab' || pressed?.name === 'tab') { cycle(pressed?.shift ? -1 : 1); return; }
@@ -2350,6 +2661,15 @@ export async function createViewer(options = {}, deps = {}) {
     if (key === '\x1b[C') { switchRun(1); return; }
     if (key === '\x1b[D') { switchRun(-1); return; }
     if (dispatchKeyboardScroll(key, pressed)) return;
+    if ((key === ']' || key === '[') && ui.focus === 'details') {
+      jumpDetailsSection(key === ']' ? 1 : -1);
+      return;
+    }
+    if ((key === '\r' || key === '\n' || pressed?.name === 'return' || pressed?.name === 'enter')
+        && ui.focus === 'details') {
+      toggleDetailsSection();
+      return;
+    }
     if (key === ' ' || key === '\r' || key === '\n') { toggleFold(); return; }
   }
 

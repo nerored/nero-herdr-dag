@@ -269,9 +269,12 @@ test('the switcher freezes runs-then-tasks order by id and refreshes values', ()
   assert.ok(items.length >= snapshot.runs.length + tasks.length);
   assert.equal(items[0].kind, 'run');
   assert.equal(items[0].id, 'run_integration');
+  const firstNode = items.findIndex(item => item.kind === 'node');
   const firstTask = items.findIndex(item => item.kind === 'task');
-  assert.ok(firstTask > 0);
-  assert.ok(items.slice(0, firstTask).every(item => item.kind === 'run'));
+  assert.ok(firstNode > 0, 'nodes follow runs');
+  assert.ok(firstTask > firstNode, 'tasks follow nodes');
+  assert.ok(items.slice(0, firstNode).every(item => item.kind === 'run'));
+  assert.ok(items.slice(firstNode, firstTask).every(item => item.kind === 'node'));
 
   const keys = items.map(item => item.key);
   const reversed = [...keys].reverse();
@@ -287,6 +290,15 @@ test('the switcher freezes runs-then-tasks order by id and refreshes values', ()
   const filtered = filterSwitcher(items, 'build-api');
   assert.ok(filtered.length > 0);
   assert.ok(filtered.every(item => /build-api/i.test(item.search)));
+  const nodeOnly = filterSwitcher(items, 'n:build-api');
+  assert.ok(nodeOnly.length > 0);
+  assert.ok(nodeOnly.every(item => item.kind === 'node'));
+  const runOnly = filterSwitcher(items, 'r:gold');
+  assert.ok(runOnly.length > 0);
+  assert.ok(runOnly.every(item => item.kind === 'run'));
+  const taskOnly = filterSwitcher(items, 't:build');
+  assert.ok(taskOnly.length > 0);
+  assert.ok(taskOnly.every(item => item.kind === 'task'));
   assert.ok(filterSwitcher(items, 'build-api running').every(item =>
     /build-api/i.test(item.search) && /running/i.test(item.search)));
   assert.equal(reconcileSwitcher(filtered, 'task:missing'), filtered[0].key);
@@ -305,7 +317,7 @@ test('the switcher overlay blocks every underlying hitbox', () => {
   const result = render({
     switcher: { query: 'build', frozenKeys: items.map(item => item.key), activeKey: active.key },
   });
-  assert.match(result.text, /SWITCH · RUNS & TASKS/);
+  assert.match(result.text, /FIND · RUNS, NODES & TASKS/);
   assert.match(result.text, /filter/);
   assert.equal(result.hitboxes.regions.size, 0);
   assert.equal(result.hitboxes.nodes.size, 0);

@@ -224,7 +224,7 @@ test('a stale task hitbox is ignored instead of selecting the old subject', () =
       { id: 'st_gamma', description: 'Gamma', status: 'completed' },
     ],
   });
-  const ui = baseUi({ selectedTaskId: 'st_beta', selectedNodeId: 'a0' });
+  const ui = baseUi({ selectedTaskId: 'st_beta', selectedNodeId: 'a0', completedCollapsed: false, taskScope: 'all' });
 
   const painted = renderApp(withAlpha, ui, renderOptions);
   const staleRect = painted.hitboxes.tasks.get('st_alpha');
@@ -323,7 +323,7 @@ test('a reordered row resolves the task under the pointer from the current snaps
   assert.deepEqual(navTasks(before).map(task => task.id), ['st_alpha', 'st_beta']);
   assert.deepEqual(navTasks(afterSwap).map(task => task.id), ['st_beta', 'st_alpha']);
 
-  const ui = baseUi({ selectedTaskId: 'st_alpha', selectedNodeId: 'a0' });
+  const ui = baseUi({ selectedTaskId: 'st_alpha', selectedNodeId: 'a0', completedCollapsed: false, taskScope: 'all' });
   const painted = renderApp(before, ui, renderOptions);
   const oldAlphaRect = painted.hitboxes.tasks.get('st_alpha');
   assert.ok(oldAlphaRect, 'the first frame paints Alpha at the row about to move');
@@ -370,7 +370,7 @@ test('a reordered row resolves the task under the pointer from the current snaps
   // The same resolution rejects a row that no longer exists at all.
   const reduced = { ...afterSwap, tasks: afterSwap.tasks.filter(task => task.id !== 'st_beta') };
   assert.equal(taskAtPoint(painted.layout.sidebar, reduced, ui, oldAlphaRect.x, oldAlphaRect.y)?.id, 'st_alpha');
-  const staleUi = baseUi();
+  const staleUi = baseUi({ completedCollapsed: false, taskScope: 'all' });
   const staleClick = selectTaskAtPoint(staleUi, reduced, painted.layout.sidebar, oldAlphaRect.x, oldAlphaRect.y);
   assert.equal(staleClick.handled, true);
   assert.equal(staleUi.selectedTaskId, 'st_alpha');
@@ -417,6 +417,8 @@ test('F-30 raw stdin chunks keep X10 bytes above 0x7f intact', async () => {
 test('F-31 a split mouse report does not dispatch its digits as keys', async () => {
   const viewer = await makeInputViewer();
   viewer.acceptSnapshot(fixture(), { silent: true });
+  viewer.ui.completedCollapsed = false;
+  viewer.ui.taskScope = 'all';
   viewer.draw();
   // Control: the digits really are duty focus hotkeys in this layout.
   viewer.handleKey('1', { sequence: '1', name: '1' });

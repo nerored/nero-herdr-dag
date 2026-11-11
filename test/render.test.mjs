@@ -57,7 +57,9 @@ test('a run todo title is the primary displayed run title', () => {
 });
 
 test('the three-pane layout exposes navigation, graph, and node details', () => {
-  const result = renderApp(snapshot, ui, { width: 140, height: 42, time: 1000, now, palette, theme });
+  const result = renderApp(snapshot, { ...ui, taskScope: 'all', completedCollapsed: false }, {
+    width: 140, height: 42, time: 1000, now, palette, theme,
+  });
   assert.match(result.text, /NAVIGATION/);
   assert.match(result.text, /NODE · build-api/);
   assert.match(result.text, /METRICS/);
@@ -350,8 +352,9 @@ test('graph scrollbar uses the last interior column and tracks the offset', () =
 test('navigation tasks scroll by items with a reserved bar column', () => {
   const tasks = navTasks(snapshot);
   assert.equal(tasks.length, 43);
+  const fullList = { ...ui, taskScope: 'all', completedCollapsed: false };
 
-  const top = renderApp(snapshot, ui, { width: 120, height: 40, time: 0, now, palette, theme });
+  const top = renderApp(snapshot, fullList, { width: 120, height: 40, time: 0, now, palette, theme });
   assert.equal(top.scroll.tasks.contentH, 43);
   assert.equal(top.scroll.tasks.viewportH, 11);
   assert.equal(top.scroll.tasks.maxScroll, 32);
@@ -371,7 +374,7 @@ test('navigation tasks scroll by items with a reserved bar column', () => {
   assert.equal(top.canvas.cells[top.scroll.tasks.bar.y][24].ch, '█');
   assert.equal(top.canvas.cells[top.scroll.tasks.bar.y][25].ch, '│');
 
-  const bottom = renderApp(snapshot, { ...ui, tasksScroll: 33 }, {
+  const bottom = renderApp(snapshot, { ...fullList, tasksScroll: 33 }, {
     width: 120, height: 40, time: 0, now, palette, theme,
   });
   assert.equal(bottom.scroll.tasks.offset, 32);
@@ -380,7 +383,7 @@ test('navigation tasks scroll by items with a reserved bar column', () => {
   const bottomBar = bottom.scroll.tasks.bar;
   assert.equal(bottomBar.thumbTop + bottomBar.thumbH, bottomBar.y + bottomBar.h);
 
-  const small = renderApp(snapshot, { ...ui, tasksScroll: 35 }, {
+  const small = renderApp(snapshot, { ...fullList, tasksScroll: 35 }, {
     width: 112, height: 36, time: 0, now, palette, theme,
   });
   assert.equal(small.scroll.tasks.viewportH, 9);
@@ -390,7 +393,7 @@ test('navigation tasks scroll by items with a reserved bar column', () => {
   assert.equal(small.scroll.tasks.bar.thumbTop, 31);
   assert.equal(small.scroll.tasks.bar.thumbH, 2);
 
-  const short = renderApp(snapshot, ui, { width: 140, height: 24, time: 0, now, palette, theme });
+  const short = renderApp(snapshot, fullList, { width: 140, height: 24, time: 0, now, palette, theme });
   assert.equal(short.scroll.tasks.viewportH, 4);
   assert.equal(short.scroll.tasks.maxScroll, 39);
   assert.equal(short.hitboxes.regions.get('tasks').h, 8);
@@ -398,7 +401,7 @@ test('navigation tasks scroll by items with a reserved bar column', () => {
 
   const roots = snapshot.tasks.filter(task => !task.parentTaskId).slice(0, 3);
   const few = { ...snapshot, runs: [], tasks: roots };
-  const fit = renderApp(few, { ...ui, selectedTaskId: roots[0].id }, {
+  const fit = renderApp(few, { ...ui, completedCollapsed: false, selectedTaskId: roots[0].id }, {
     width: 120, height: 40, time: 0, now, palette, theme,
   });
   assert.equal(fit.scroll.tasks.contentH, 3);
@@ -410,9 +413,9 @@ test('navigation tasks scroll by items with a reserved bar column', () => {
 test('details measure scrollable content and clip above the viewport', () => {
   const verbose = { ...ui, verbose: true, selectedNodeId: 'api' };
   const top = renderApp(snapshot, verbose, { width: 120, height: 40, time: 0, now, palette, theme });
-  assert.equal(top.scroll.details.contentH, 51);
+  assert.equal(top.scroll.details.contentH, 52);
   assert.equal(top.scroll.details.viewportH, 32);
-  assert.equal(top.scroll.details.maxScroll, 19);
+  assert.equal(top.scroll.details.maxScroll, 20);
   const bar = top.scroll.details.bar;
   assert.deepEqual([bar.x, bar.y, bar.h, bar.w], [118, 5, 32, 1]);
   assert.deepEqual(top.hitboxes.scrollbars.get('details'), bar);
@@ -450,15 +453,15 @@ test('details measure scrollable content and clip above the viewport', () => {
   }
 
   const compact = renderApp(snapshot, ui, { width: 120, height: 40, time: 0, now, palette, theme });
-  assert.equal(compact.scroll.details.contentH, 32);
+  assert.equal(compact.scroll.details.contentH, 33);
   assert.equal(compact.scroll.details.viewportH, 32);
-  assert.equal(compact.scroll.details.maxScroll, 0);
-  assert.equal(compact.scroll.details.bar, null);
+  assert.equal(compact.scroll.details.maxScroll, 1);
+  assert.ok(compact.scroll.details.bar);
 
   const mid = renderApp(snapshot, ui, { width: 112, height: 36, time: 0, now, palette, theme });
-  assert.equal(mid.scroll.details.contentH, 32);
+  assert.equal(mid.scroll.details.contentH, 33);
   assert.equal(mid.scroll.details.viewportH, 28);
-  assert.equal(mid.scroll.details.maxScroll, 4);
+  assert.equal(mid.scroll.details.maxScroll, 5);
   assert.deepEqual([mid.scroll.details.bar.x, mid.scroll.details.bar.y, mid.scroll.details.bar.h], [110, 5, 28]);
   assert.equal(mid.scroll.details.offset, 0);
 });
@@ -549,32 +552,32 @@ test('help scrolls to every documented key at 54x20 with the data line pinned', 
   }, { width, height, time: 0, now, palette, theme });
   const top = help(0);
   const end = help(999);
-  assert.equal(top.help.total, 22);
+  assert.equal(top.help.total, 32);
   assert.equal(top.help.scroll, 0);
   assert.ok(top.help.maxScroll > 0);
   assert.equal(end.help.scroll, end.help.maxScroll);
-  assert.match(top.text, /1 \/ 2 \/ 3/);
+  assert.match(top.text, /Click/);
   assert.match(top.text, /PgUp \/ PgDn/);
   assert.match(top.text, /g \/ G  Home\/End/);
   assert.match(end.text, /q\s+quit \(close Help first\)/, 'Help says it must close before quitting');
   assert.match(end.text, /\? \/ Esc/);
   assert.match(end.text, /\bs\s+open settings/);
-  assert.match(end.text, /\bS\s+toggle sidebar/);
+  assert.match(end.text, /\bx \/ X \/ u\s+x clears/);
   assert.match(end.text, /\br\s+restart demo cycle/);
   const all = top.text + end.text;
-  for (const key of ['t', 's', 'S', 'r', '? / Esc', 'q', 'g / G', 'Home/End', '1 / 2 / 3']) {
+  for (const key of ['s', 'r', '? / Esc', 'q', 'g / G', 'Home/End']) {
     assert.ok(all.includes(key), `help key missing ${key}`);
   }
   const topData = frameLines(top).find(line => line.includes('Demo data:'));
   const endData = frameLines(end).find(line => line.includes('Demo data:'));
   assert.ok(topData);
   assert.equal(endData, topData);
-  assert.match(top.text, /\d+-\d+\/22/);
-  assert.match(end.text, /10-22\/22/);
+  assert.match(top.text, /\d+-\d+\/32/);
+  assert.match(end.text, /20-32\/32/);
 
   const roomy = help(0, 54, 42);
   assert.equal(roomy.help.maxScroll, 0);
-  assert.equal(roomy.help.visibleRows, 22);
+  assert.equal(roomy.help.visibleRows, 32);
   assert.doesNotMatch(roomy.text, /\d+-\d+\/22/);
   const wide = help(0, 120, 40);
   assert.equal(wide.help.maxScroll, 0);
@@ -770,7 +773,7 @@ test('a completed node linked to a running task shows completion, not live activ
 
   const done = frame('done');
   const doneGraph = regionText(done, done.hitboxes.nodes.get('done'));
-  assert.match(doneGraph, /evidence captured/, 'the completed node keeps completion evidence');
+  assert.match(doneGraph, /✓ st_live/, 'the completed node keeps completion evidence');
   assert.doesNotMatch(doneGraph, /bash running/, 'the completed node inherits no live activity');
   assert.doesNotMatch(regionText(done, done.layout.details), /bash running/,
     'the completed node details pane shows no live activity');
@@ -971,7 +974,8 @@ test('the run block has one geometry source for painting and task rows', () => {
 // F-135: non-finite scroll offsets fall back to the top instead of NaN slicing.
 test('NaN and string scroll offsets fall back to a finite top-of-list frame', () => {
   const result = renderApp(snapshot, {
-    ...ui, graphScroll: NaN, tasksScroll: 'x', detailsScroll: NaN,
+    ...ui, taskScope: 'all', completedCollapsed: false,
+    graphScroll: NaN, tasksScroll: 'x', detailsScroll: NaN,
     runsScroll: NaN, cellsScroll: -4,
   }, { width: 120, height: 40, time: 0, now, palette, theme });
   assert.equal(result.scroll.graph.offset, 0);
@@ -1076,7 +1080,7 @@ test('the run overview summarizes a run with one aligned value column', () => {
   });
   assert.match(result.text, /RUN SUMMARY/);
   const lines = detailLines(result);
-  const labels = ['status', 'tokens', 'retries', 'wall', 'critical', 'parallel', 'nodes'];
+  const labels = ['tokens', 'retries', 'wall', 'critical', 'parallel', 'nodes'];
   const columns = [];
   for (const label of labels) {
     const line = lines.find(candidate => candidate.includes(label));
@@ -1158,7 +1162,6 @@ test('a run with only queued nodes invents no metric rows', () => {
   });
   const details = detailLines(result).join('\n');
   assert.match(details, /RUN SUMMARY/);
-  assert.match(details, /\bstatus\b/);
   assert.match(details, /\bnodes\b/);
   assert.doesNotMatch(details, /\btokens\b/);
   assert.doesNotMatch(details, /\bcost\b/);
