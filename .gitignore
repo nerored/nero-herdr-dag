@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.artifacts/
+.dist-stage-*/
+*.tmp
+.omo

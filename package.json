@@ -1,0 +1,49 @@
+{
+  "name": "herdr-dag-studio",
+  "version": "0.1.0",
+  "description": "Animated three-pane OmO workflow DAG studio for Herdr",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "bun@1.4.3",
+  "bin": {
+    "dag-studio": "bin/dag-studio.mjs"
+  },
+  "exports": {
+    ".": "./dist/extension.mjs"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "docs/",
+    "demo/",
+    "scripts/",
+    "src/",
+    "extension.mjs",
+    "Makefile",
+    "README.md",
+    "README_ZH.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "demo": "bun src/viewer.mjs --demo",
+    "demo:once": "bun src/viewer.mjs --demo --once --no-color --width 120 --height 40",
+    "make-demo": "bun scripts/make-demo.mjs",
+    "test": "bun test",
+    "build": "bun scripts/build.mjs",
+    "prepare": "bun run build",
+    "check": "bun run test && bun run build",
+    "install:extension": "bun scripts/install.mjs",
+    "uninstall:extension": "bun scripts/uninstall.mjs"
+  },
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "keywords": [
+    "omo",
+    "herdr",
+    "dag",
+    "tui",
+    "workflow",
+    "dashboard"
+  ]
+}
