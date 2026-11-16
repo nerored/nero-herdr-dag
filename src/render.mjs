@@ -1,17 +1,18 @@
 import { Canvas } from './canvas.mjs';
 import {
   createFrameBuffers, detailLine, detailSection, drawScrollbar, fixedBodyLines, graphCanvasFor,
-  labelWidthFor, metricRow, metricValue, panel, pill, rich, scratchCanvas,
+  metricValue, panel, pill, rich, scratchCanvas,
 } from './frame-primitives.mjs';
-import {
-  diagnosisCompactSection, diagnosisErrorSection, diagnosisSection, fullReasonSection,
-} from './render-diagnosis.mjs';
+import { diagnosisCompactSection } from './render-diagnosis.mjs';
 import {
   invalidateOverlayHitboxes, renderHelp, renderPalette, renderSettingsMenu, renderSwitcher, renderTour,
 } from './render-overlays.mjs';
 import {
   metricsSection, retryInfo, runSummarySection, runWarningCount, warningsSection,
 } from './render-summary.mjs';
+import {
+  agentLabel, isFailureState, modelLabel, nodeSubject, renderSubjectBody, shortPath, taskSubject,
+} from './render-subject.mjs';
 import { runSummary } from './run-summary.mjs';
 import { criticalNodeIds, filterCounts, focusSubgraph, nodeMatchesFilter } from './cockpit.mjs';
 import { diagnosisFor } from './diagnosis.mjs';
@@ -38,11 +39,9 @@ const FOOTER_H = 2;
 // A connected capture older than this is no longer evidence of live work. The
 // threshold is shared with the viewer so direct render calls and `--help`
 // cannot disagree; callers may override it per frame through `ui.staleAfterMs`.
-export { DEFAULT_STALE_AFTER_MS };
+export { DEFAULT_STALE_AFTER_MS, isFailureState };
 const displayRunName = run => run?.todoTitle || run?.name || '';
 const THINKING_BODY_LINES = 5;
-const ACTIVITY_DETAIL_LINES = 4;
-const ACTIVITY_BODY_LINES = ACTIVITY_DETAIL_LINES + 1;
 // The persisted reply is already bounded (1200 characters). This is only a
 // defensive display bound so a pathological context cannot paint forever.
 const REPLY_MAX_LINES = 256;
@@ -400,20 +399,8 @@ export function capturedDisplay(value) {
   return `${new Date(at).toISOString().slice(0, 19)}Z`;
 }
 
-function shortPath(value) {
-  if (typeof value !== 'string' || !value) return undefined;
-  const home = process.env.HOME;
-  if (home && value === home) return '~';
-  if (home && value.startsWith(`${home}/`)) return `~/${value.slice(home.length + 1)}`;
-  return value;
-}
-
 export function entityState(entity) {
   return entity?.state ?? entity?.status;
-}
-
-export function isFailureState(state) {
-  return ['failed', 'error', 'cancelled', 'lost', 'interrupted', 'blocked'].includes(state);
 }
 
 function provenanceValue(entry, language) {
@@ -429,27 +416,6 @@ function provenanceValue(entry, language) {
   if (entry.kind === 'simulated') return t(language, 'provenanceSimulated');
   if (entry.kind === 'unknown') return t(language, 'provenanceUnknown');
   return t(language, 'provenanceUnavailable');
-}
-
-function agentLabel(entity, language) {
-  const entry = entity?.provenance?.agent;
-  if (!entity?.agent) {
-    if (entity?.category && entry?.kind === 'derived') {
-      return t(language, 'agentCategory', { value: entity.category });
-    }
-    return t(language, 'agentNotRecorded');
-  }
-  if (entry?.kind === 'derived' && entry.from === 'category') {
-    return t(language, 'agentCategory', { value: entity.agent });
-  }
-  if (entry?.kind === 'derived' && entry.from === 'agent_type') {
-    return t(language, 'agentType', { value: entity.agent });
-  }
-  return entity.agent;
-}
-
-function modelLabel(entity, language) {
-  return entity?.model ?? t(language, 'modelNotRecorded');
 }
 
 function percentInfo(entity, language, counts) {
@@ -1277,304 +1243,58 @@ function resolveSelection(snapshot, ui, { allowRunFallback = false } = {}) {
   return { runs, tasks, run, task, node, showTask, kind, subject };
 }
 
+// Shared painters stay in this module; the subject body owns the one section
+// order. The wrappers below only adapt the selected node or task and its clock.
+const SUBJECT_SECTIONS = {
+  progressBlock, sourceHealthSection, sourceSection, replyOutput, thinkingOutput,
+};
+
 function nodeDetails(canvas, rect, run, node, snapshot, ui, {
   now, time, motion = true, palette, language, viewportH, freshness,
 }) {
-  const x = rect.x + 2;
-  const w = rect.w - 4;
-  const bottom = rect.y + rect.h - 1;
   const viewNow = freshness?.stale ? freshness.frozenNow : now;
-  let y = rect.y + 2;
-  const color = statusColor(palette, node.state);
-  const end = pill(canvas, x, y, statusLabel(language, node.state).toUpperCase(), color, statusIcon(node.state));
-  const elapsed = elapsedLabel(node, { now: viewNow, connected: isActiveSnapshot(snapshot), updatedAt: run.updatedAt });
-  rich(canvas, end + 2, y, Math.max(0, rect.x + rect.w - 2 - end - 2), [
-    [`${elapsed}`, { fg: palette.text, bold: true }],
-    [`  ${t(language, 'attempt', { count: node.attempt ?? 1 })}`, { fg: palette.faint }],
-  ], palette, palette.panel);
-  y++;
-  const description = node.task?.description ?? node.label;
-  for (const line of wrap(description, w)) {
-    y = detailLine(canvas, x, y, w, [[line, { fg: palette.text, bold: true }]], palette);
-    if (y >= bottom) return;
-  }
-  const agent = agentLabel(node, language);
-  const model = modelLabel(node, language);
-  y = detailLine(canvas, x, y, w, [
-    [`${agent}`, { fg: node.agent ? palette.accent : palette.faint, bold: Boolean(node.agent) }],
-    [' · ', { fg: palette.faint }],
-    [model, { fg: node.model ? palette.dim : palette.faint, dim: !node.model }],
-    [`  ${truncateMiddle(node.taskId ?? '', 28)}`, { fg: palette.faint }],
-  ], palette);
-  y++;
-  const compact = w < 60 || (Number.isFinite(viewportH) && viewportH < 26);
   const { diagnosis, record } = selectionResolution(
     snapshot,
     { snapshot, run, node, task: node.task, subject: 'node' },
     `node:${run?.id ?? ''}:${node.id}`,
   );
-  if (diagnosis) {
-    y = diagnosisSection(canvas, x, y, w, diagnosis, { palette, language, compact, record });
-    if (!compact) y++;
-  } else {
-    const stats = runStats(run);
-    const progress = percentInfo(node, language, { done: stats.done, total: stats.total });
-    y = progressBlock(canvas, x, y, w, progress, {
-      time, motion, palette, color, bg: palette.panel, bold: node.state === 'running',
-    });
-    y += 1;
-  }
-  if (runWarningCount(run)) {
-    y = warningsSection(canvas, x, y, w, run, palette, language, bottom);
-    y++;
-  }
-  if (!diagnosis && (!Number.isFinite(viewportH) || viewportH >= 34)) {
-    const whyText = node.error ?? node.logs?.at(-1)
-      ?? (node.state === 'running' ? t(language, 'waitingFirst') : t(language, 'errorNoneRecorded'));
-    for (const line of wrap(`${t(language, 'detailsWhy')} ${whyText}`, w)) {
-      if (y >= bottom) break;
-      y = detailLine(canvas, x, y, w, [[line, {
-        fg: node.state === 'failed' ? palette.failed : node.state === 'running' ? palette.warn : palette.dim,
-      }]], palette);
-    }
-  }
-  y = metricsSection(canvas, x, y, w, node, palette, language);
-  if (snapshot?.sources?.length) {
-    y = sourceHealthSection(canvas, x, y, w, snapshot, { palette, language, now, bottom });
-  }
-  if (y < bottom - 2) {
-    y = detailSection(canvas, x, y, w, t(language, 'graphLinks'), palette);
-    const names = id => nodeMap(run).get(id)?.label ?? id;
-    const from = incoming(run, node.id).map(names);
-    const to = outgoing(run, node.id).map(names);
-    y = detailLine(canvas, x, y, w, [
-      [t(language, 'inLabel'), { fg: palette.faint }],
-      [from.length ? from.join(' · ') : t(language, 'start'), { fg: from.length ? palette.dim : palette.faint, dim: !from.length }],
-    ], palette);
-    y = detailLine(canvas, x, y, w, [
-      [t(language, 'outLabel'), { fg: palette.faint }],
-      [to.length ? to.join(' · ') : t(language, 'end'), { fg: to.length ? palette.dim : palette.faint, dim: !to.length }],
-    ], palette);
-  }
-  if (ui.verbose) {
-    if (y < bottom - 1) {
-      y = replyOutput(canvas, x, y, w, bottom, node, palette, language, { record, verbose: true });
-    }
-    if (node.provenance) {
-      y = sourceSection(canvas, x, y, w, node, snapshot, { palette, language, verbose: true, now, freshness });
-    }
-  }
-  y = thinkingOutput(canvas, x, y, w, bottom, node, palette, language);
-  const activity = isActiveSnapshot(snapshot) ? activitySummary(nodeActivity(node), { now: viewNow, language }) : null;
-  if (y + 1 + ACTIVITY_BODY_LINES <= bottom) {
-    y = detailSection(canvas, x, y, w, t(language, 'activity'), palette);
-    y = detailLine(canvas, x, y, w, activity ? [
-      [`${activity.mark} `, { fg: activity.stalled ? palette.warn : color, bold: true }],
-      [activity.label, { fg: activity.stalled ? palette.warn : palette.text }],
-    ] : [[node.state === 'running' ? t(language, 'waitingFirst') : t(language, 'noLiveActivity'), { fg: palette.faint, dim: true }]], palette);
-    y = fixedBodyLines(canvas, x + 2, y, w - 2, ACTIVITY_DETAIL_LINES,
-      activity?.text ? wrap(activity.text, w - 2) : [], palette, { fg: palette.dim });
-  }
-  const children = node.children ?? node.task?.children ?? [];
-  if (children.length && y < bottom - 2) {
-    y = detailSection(canvas, x, y, w, t(language, 'subtasks', { count: children.length }), palette);
-    for (const child of children.slice(0, Math.max(0, bottom - y))) {
-      const childColor = statusColor(palette, child.status);
-      y = detailLine(canvas, x, y, w, [
-        [`${statusIcon(child.status)} `, { fg: childColor, bold: true }],
-        [child.description, { fg: palette.text }],
-        [`  ${statusLabel(language, child.status)}`, { fg: childColor, dim: true }],
-      ], palette);
-      if (y >= bottom) return;
-    }
-  }
-  if (y < bottom - 1 && (node.error || isFailureState(node.state) || diagnosis)) {
-    y = diagnosisErrorSection(canvas, x, y, w, node, diagnosis, palette, language);
-  }
-  if (ui.verbose && diagnosis) y = fullReasonSection(canvas, x, y, w, diagnosis, palette, language);
-  const recentEvents = (node.recentEvents ?? []).slice(-(ui.verbose ? 8 : 3));
-  const artifact = node.artifact;
-  if ((recentEvents.length || (ui.verbose && artifact)) && y < bottom - 1) {
-    y = detailSection(canvas, x, y, w, t(language, 'recentEvents'), palette);
-    for (const line of recentEvents) {
-      y = detailLine(canvas, x, y, w, [[line, { fg: palette.dim }]], palette);
-      if (y >= bottom) return;
-    }
-    if (node.outputTruncated && node.outputBytes !== undefined) {
-      y = detailLine(canvas, x, y, w, [[t(language, 'outputTruncated', { bytes: node.outputBytes }), {
-        fg: palette.faint, dim: true, italic: true,
-      }]], palette);
-      if (y >= bottom) return;
-    }
-    if (ui.verbose && artifact) {
-      const sha = artifact.sha256 ? artifact.sha256.slice(0, 8) : undefined;
-      const meta = sha
-        ? t(language, 'artifact', { bytes: artifact.bytes ?? '—', sha })
-        : t(language, 'artifactBytes', { bytes: artifact.bytes ?? '—' });
-      y = detailLine(canvas, x, y, w, [[meta, { fg: palette.accent2 }]], palette);
-      if (y >= bottom) return;
-      if (artifact.statsBytes !== undefined) {
-        y = detailLine(canvas, x, y, w, [[t(language, 'artifactStats', { bytes: artifact.statsBytes }), {
-          fg: palette.faint,
-        }]], palette);
-        if (y >= bottom) return;
-      }
-      if (artifact.relativePath) {
-        y = detailLine(canvas, x, y, w, [[t(language, 'artifactPath', { path: artifact.relativePath }), {
-          fg: palette.faint, dim: true,
-        }]], palette);
-      }
-      if (y >= bottom) return;
-    }
-  }
-  const logs = (node.logs ?? node.task?.logs ?? []).slice(-(ui.verbose ? 8 : 3));
-  if (ui.verbose && logs.length && y < bottom - 1) {
-    y = detailSection(canvas, x, y, w, t(language, 'recentLog'), palette);
-    for (const line of logs) {
-      y = detailLine(canvas, x, y, w, [[line, { fg: palette.faint, dim: true }]], palette);
-      if (y >= bottom) return;
-    }
-  }
-}
-
-// A spawned task record carries host summary and spawn metadata that the
-// generic status/metrics block does not show. Plan artifacts are referenced by
-// path inside the prompt; show the extracted path and role, never the prompt.
-function taskContractRows(task, language, compact) {
-  const rows = [];
-  if (task.summary && task.summary !== task.description) {
-    rows.push({ key: 'summary', label: t(language, 'taskSummary'), value: task.summary });
-  }
-  const owner = task.ownerKind === 'dag'
-    ? [t(language, 'ownerDag'), task.ownerRunId, task.ownerNodeId].filter(Boolean).join(' · ')
-    : task.ownerKind === 'task'
-      ? [t(language, 'ownerTask'), task.ownerTaskId].filter(Boolean).join(' · ')
-      : task.ownerKind;
-  if (owner) rows.push({ key: 'owner', label: t(language, 'taskOwner'), value: owner });
-  const execution = [
-    task.executionMode,
-    task.backgroundMode,
-    Number.isFinite(task.depth) ? `${t(language, 'depth')} ${task.depth}` : undefined,
-  ].filter(Boolean).join(' · ');
-  if (execution) rows.push({ key: 'execution', label: t(language, 'taskExecution'), value: execution });
-  if (task.planRole) rows.push({ key: 'planRole', label: t(language, 'taskPlan'), value: task.planRole });
-  if (task.planPath) rows.push({ key: 'planPath', label: t(language, 'taskPath'), value: task.planPath });
-  if (task.workdir) rows.push({ key: 'workdir', label: t(language, 'taskWorkdir'), value: shortPath(task.workdir) });
-  if (task.modelRequested && task.modelResolved && task.modelRequested !== task.modelResolved) {
-    rows.push({ key: 'models', label: t(language, 'taskModels'), value: `${task.modelRequested} → ${task.modelResolved}` });
-  }
-  const stats = [
-    Number.isFinite(task.runtimeMs) ? `${t(language, 'taskRuntime')} ${compactDuration(task.runtimeMs, language)}` : undefined,
-    Number.isFinite(task.tokensPerSecond) ? `${Math.round(task.tokensPerSecond)} tok/s` : undefined,
-    Number.isFinite(task.costUsd) ? `$${task.costUsd.toFixed(4)}` : undefined,
-    Number.isFinite(task.cacheHitRate) ? `${(task.cacheHitRate * 100).toFixed(1)}% ${t(language, 'taskCacheHit')}` : undefined,
-  ].filter(Boolean);
-  if (stats.length) rows.push({ key: 'stats', label: t(language, 'taskStats'), value: stats.join(' · ') });
-  return compact ? rows.filter(row => ['summary', 'planPath', 'owner'].includes(row.key)).slice(0, 3) : rows;
+  const stats = runStats(run);
+  const names = id => nodeMap(run).get(id)?.label ?? id;
+  renderSubjectBody(canvas, rect, nodeSubject(node, run, {
+    language,
+    elapsed: elapsedLabel(node, { now: viewNow, connected: isActiveSnapshot(snapshot), updatedAt: run.updatedAt }),
+    progress: percentInfo(node, language, { done: stats.done, total: stats.total }),
+    diagnosis,
+    record,
+    activity: isActiveSnapshot(snapshot) ? activitySummary(nodeActivity(node), { now: viewNow, language }) : null,
+    links: { from: incoming(run, node.id).map(names), to: outgoing(run, node.id).map(names) },
+  }), {
+    now, time, motion, palette, language, viewportH, freshness, snapshot, verbose: ui.verbose,
+    sections: SUBJECT_SECTIONS,
+  });
 }
 
 function taskDetails(canvas, rect, task, snapshot, ui, {
   now, time, motion = true, palette, language, viewportH, freshness,
 }) {
-  const x = rect.x + 2;
-  const w = rect.w - 4;
-  const bottom = rect.y + rect.h - 1;
   const viewNow = freshness?.stale ? freshness.frozenNow : now;
-  let y = rect.y + 2;
-  const color = statusColor(palette, task.status);
-  const end = pill(canvas, x, y, statusLabel(language, task.status).toUpperCase(), color, statusIcon(task.status));
-  const elapsed = elapsedLabel(task, { now: viewNow, connected: isActiveSnapshot(snapshot), updatedAt: snapshot.generatedAt });
-  rich(canvas, end + 2, y, Math.max(0, rect.x + rect.w - 2 - end - 2), [[elapsed, { fg: palette.text, bold: true }]], palette, palette.panel);
-  y++;
-  for (const line of wrap(task.description, w)) {
-    y = detailLine(canvas, x, y, w, [[line, { fg: palette.text, bold: true }]], palette);
-    if (y >= bottom) return;
-  }
-  y = detailLine(canvas, x, y, w, [
-    [agentLabel(task, language), { fg: task.agent ? palette.accent : palette.faint, bold: Boolean(task.agent) }],
-    [' · ', { fg: palette.faint }],
-    [modelLabel(task, language), { fg: task.model ? palette.dim : palette.faint, dim: !task.model }],
-    [`  ${truncateMiddle(task.id, 28)}`, { fg: palette.faint }],
-  ], palette);
-  y++;
   const linked = linkedNodeForTask(snapshot, task.id);
-  const compact = w < 60 || (Number.isFinite(viewportH) && viewportH < 26);
-  const contractRows = taskContractRows(task, language, compact);
-  if (contractRows.length && y < bottom - 2) {
-    y = detailSection(canvas, x, y, w, t(language, 'taskContract'), palette);
-    const contractWidth = labelWidthFor(contractRows.map(row => row.label));
-    for (const row of contractRows) {
-      y = metricRow(canvas, x, y, w, row.label, [[row.value, { fg: palette.text }]], palette, contractWidth);
-      if (y >= bottom) return;
-    }
-    y++;
-  }
   const { diagnosis, record } = selectionResolution(
     snapshot,
     { snapshot, run: linked?.run, node: linked?.node, task, subject: 'task' },
     `task:${task.id}`,
   );
-  if (diagnosis) {
-    y = diagnosisSection(canvas, x, y, w, diagnosis, { palette, language, compact, record });
-    if (!compact) y++;
-  } else {
-    const progress = percentInfo(task, language, progressCounts(snapshot, task, linked?.run));
-    y = progressBlock(canvas, x, y, w, progress, {
-      time, motion, palette, color, bg: palette.panel, bold: task.status === 'running',
-    });
-    y += 1;
-  }
-  if (linked?.run && runWarningCount(linked.run)) {
-    y = warningsSection(canvas, x, y, w, linked.run, palette, language, bottom);
-    y++;
-  }
-  y = metricsSection(canvas, x, y, w, task, palette, language);
-  if (snapshot?.sources?.length) {
-    y = sourceHealthSection(canvas, x, y, w, snapshot, { palette, language, now, bottom });
-  }
-  if (ui.verbose) {
-    if (y < bottom - 1) {
-      y = replyOutput(canvas, x, y, w, bottom, task, palette, language, { record, verbose: true });
-    }
-    if (task.provenance) {
-      y = sourceSection(canvas, x, y, w, task, snapshot, { palette, language, verbose: true, now, freshness });
-    }
-  }
-  y = thinkingOutput(canvas, x, y, w, bottom, task, palette, language);
-  const activity = isActiveSnapshot(snapshot) ? activitySummary(task.activity, { now: viewNow, language }) : null;
-  if (y + 1 + ACTIVITY_BODY_LINES <= bottom) {
-    y = detailSection(canvas, x, y, w, t(language, 'activity'), palette);
-    y = detailLine(canvas, x, y, w, activity ? [
-      [`${activity.mark} `, { fg: activity.stalled ? palette.warn : color, bold: true }],
-      [activity.label, { fg: activity.stalled ? palette.warn : palette.text }],
-    ] : [[task.status === 'running' ? t(language, 'waitingFirst') : t(language, 'noLiveActivity'), { fg: palette.faint, dim: true }]], palette);
-    y = fixedBodyLines(canvas, x + 2, y, w - 2, ACTIVITY_DETAIL_LINES,
-      activity?.text ? wrap(activity.text, w - 2) : [], palette, { fg: palette.dim });
-  }
-  if (y < bottom - 1 && (task.error || isFailureState(task.status) || diagnosis)) {
-    y = diagnosisErrorSection(canvas, x, y, w, task, diagnosis, palette, language);
-  }
-  if (task.children?.length && y < bottom - 2) {
-    y = detailSection(canvas, x, y, w, t(language, 'subtasks', { count: task.children.length }), palette);
-    for (const child of task.children.slice(0, Math.max(0, bottom - y))) {
-      const childColor = statusColor(palette, child.status);
-      y = detailLine(canvas, x, y, w, [
-        [`${statusIcon(child.status)} `, { fg: childColor, bold: true }],
-        [child.description, { fg: palette.text }],
-        [`  ${statusLabel(language, child.status)}`, { fg: childColor, dim: true }],
-      ], palette);
-      if (y >= bottom) return;
-    }
-  }
-  if (ui.verbose && diagnosis) y = fullReasonSection(canvas, x, y, w, diagnosis, palette, language);
-  const logs = (task.logs ?? []).slice(-(ui.verbose ? 8 : 3));
-  if (ui.verbose && logs.length && y < bottom - 1) {
-    y = detailSection(canvas, x, y, w, t(language, 'recentLog'), palette);
-    for (const line of logs) {
-      y = detailLine(canvas, x, y, w, [[line, { fg: palette.faint, dim: true }]], palette);
-      if (y >= bottom) return;
-    }
-  }
+  renderSubjectBody(canvas, rect, taskSubject(task, {
+    elapsed: elapsedLabel(task, { now: viewNow, connected: isActiveSnapshot(snapshot), updatedAt: snapshot.generatedAt }),
+    progress: percentInfo(task, language, progressCounts(snapshot, task, linked?.run)),
+    diagnosis,
+    record,
+    activity: isActiveSnapshot(snapshot) ? activitySummary(task.activity, { now: viewNow, language }) : null,
+    warningRun: linked?.run,
+  }), {
+    now, time, motion, palette, language, viewportH, freshness, snapshot, verbose: ui.verbose,
+    sections: SUBJECT_SECTIONS,
+  });
 }
 
 function runOverview(canvas, rect, run, snapshot, { now, palette, language, verbose = false, freshness, filter = 'all' }) {
