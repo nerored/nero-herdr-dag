@@ -1032,6 +1032,28 @@ test('a stale empty capture renders STALE, not CONNECTED', () => {
   assert.doesNotMatch(freshFrame.text, /STALE · No workflow yet\./);
 });
 
+// GAP-11: the header and the details empty state must read the same capture
+// age, so crossing a unit threshold changes both labels together.
+test('header and details capture age agree across thresholds', () => {
+  const cases = [
+    [0, 'captured now'],
+    [1499, 'captured now'],
+    [1500, 'captured 1s ago'],
+    [59_000, 'captured 59s ago'],
+    [60_000, 'captured 1m ago'],
+    [3_599_000, 'captured 59m ago'],
+    [3_600_000, 'captured 1h ago'],
+  ];
+  for (const [ageMs, expected] of cases) {
+    const snap = emptySourceSnapshot({ capturedAt: now - ageMs, sources: [auditSource('ok')] });
+    const result = renderApp(snap, ui, { width: 120, height: 40, time: 0, now, palette, theme });
+    const header = result.text.split('\n')[0];
+    const details = regionText(result, result.layout.graph);
+    assert.ok(header.includes(expected), `header at ${ageMs}ms shows ${expected}: ${header}`);
+    assert.ok(details.includes(expected), `details at ${ageMs}ms show ${expected}: ${details}`);
+  }
+});
+
 // F-39: source health is bounded by the empty-state bottom, never the border.
 test('source health cannot paint over the graph box at minimum heights', () => {
   const snap = emptySourceSnapshot({ capturedAt: now - 3000, sources: [auditSource()] });

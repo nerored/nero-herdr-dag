@@ -328,14 +328,21 @@ export function modeColor(snapshot, palette, time, motion, freshness = snapshotF
   return motion ? pulse(palette.good, time / 700, 0.4) : palette.good;
 }
 
+// The header and every details empty state use this one formatter over the
+// freshness result, so the threshold that picks "now" and the unit that picks
+// s/m/h cannot drift between surfaces.
+export function captureAgeLabel(freshness, language, { compact = false } = {}) {
+  const age = freshness?.ageMs;
+  if (age === undefined) return undefined;
+  if (age < 1500) return compact ? t(language, 'now') : t(language, 'capturedAt', { time: t(language, 'now') });
+  const time = compactAge(age, language);
+  return compact ? time : t(language, 'capturedAgo', { time });
+}
+
+// Compatibility export: callers that still pass (snapshot, now) share the one
+// parse in snapshotFreshness instead of parsing capturedAt again.
 export function capturedAgoLabel(snapshot, now, language) {
-  const captured = snapshot?.provenance?.capturedAt;
-  const at = captured ? Date.parse(captured) : NaN;
-  if (!Number.isFinite(at)) return undefined;
-  const age = Math.max(0, now - at);
-  return age < 1500
-    ? t(language, 'capturedAt', { time: t(language, 'now') })
-    : t(language, 'capturedAgo', { time: compactAge(age, language) });
+  return captureAgeLabel(snapshotFreshness(snapshot, { now }), language);
 }
 
 // The run summary follows the wall clock only for a live, fresh capture; saved

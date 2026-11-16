@@ -263,10 +263,11 @@ function formatRow(row) {
 }
 
 // The frame-path memory probe. It renders the committed demo fixture with a
-// fresh snapshot identity every eighth frame (a 10Hz accepted read), forcing
-// the snapshot-keyed caches to churn while the shared text/theme/wire/rate
-// caches stay capped. Heap is sampled after a forced collection every 1,000
-// frames, so retained growth is distinguishable from short-lived garbage.
+// fresh snapshot identity for every frame, forcing the snapshot-keyed caches
+// to churn while the shared text/theme/wire/rate caches stay capped. The
+// returned snapshotRotations counter is the machine witness for that rotation;
+// heap is sampled after a forced collection every 1,000 frames, so retained
+// growth is distinguishable from short-lived garbage.
 function memoryProbe({ snapshot }) {
   const run = snapshot.runs[0];
   const now = Date.parse(snapshot.provenance?.capturedAt ?? snapshot.generatedAt) || FIXED_NOW;
@@ -301,11 +302,13 @@ function memoryProbe({ snapshot }) {
   collectGarbage();
   const before = process.memoryUsage().heapUsed;
   const samplesMb = [];
+  let snapshotRotations = 0;
   for (let index = 0; index < MEMORY_FRAMES; index++) {
     // A fresh identity every frame: a 10kHz accepted-read stream is harsher
     // than the product's 10Hz, and it makes any strong snapshot-keyed cache
     // grow instead of hoping the collector catches the sparse case.
     const view = { ...snapshot };
+    snapshotRotations += 1;
     renderApp(view, ui, options);
     if ((index + 1) % MEMORY_GC_INTERVAL === 0) {
       collectGarbage();
@@ -330,7 +333,7 @@ function memoryProbe({ snapshot }) {
   const heapOk = growthMb <= MEMORY_GROWTH_LIMIT_MB;
   return {
     frames: MEMORY_FRAMES,
-    snapshotRotations: MEMORY_FRAMES,
+    snapshotRotations,
     heapBeforeMb: round(before / (1024 * 1024)),
     heapAfterMb: round(after / (1024 * 1024)),
     growthMb,

@@ -77,18 +77,6 @@ export class BoundedCache {
     return this.store.keys();
   }
 
-  values() {
-    return this.store.values();
-  }
-
-  entries() {
-    return this.store.entries();
-  }
-
-  [Symbol.iterator]() {
-    return this.store[Symbol.iterator]();
-  }
-
   stats() {
     return {
       name: this.name,
@@ -140,10 +128,6 @@ export class BoundedKeySet {
   }
 
   keys() {
-    return this.items.keys();
-  }
-
-  [Symbol.iterator]() {
     return this.items.keys();
   }
 

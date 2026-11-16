@@ -7,7 +7,7 @@ import { rich } from './frame-primitives.mjs';
 import { statusLabel, t } from './i18n.mjs';
 import { modeFor, runStats } from './model.mjs';
 import {
-  capturedAgoLabel, compactAge, displayRunName, entityState, HEADER_H, isActiveSnapshot,
+  captureAgeLabel, displayRunName, entityState, HEADER_H, isActiveSnapshot,
   modeColor, resolveSelection, snapshotFreshness,
 } from './render-view.mjs';
 import { gradientCells, mix, statusColor } from './theme.mjs';
@@ -148,12 +148,9 @@ export function renderHeader(canvas, width, snapshot, ui, {
   const available = Math.max(0, width - rightStart - 2);
   // Below 48 columns the full "captured 8h ago" phrase is clipped before its
   // value. Keep the freshness evidence as the compact unit ("8h") there so the
-  // age survives at every width the header itself can fit.
-  const ageText = freshness.ageMs === undefined
-    ? undefined
-    : width < 48
-      ? (freshness.ageMs < 1500 ? t(language, 'now') : compactAge(freshness.ageMs, language))
-      : capturedAgoLabel(snapshot, now, language);
+  // age survives at every width the header itself can fit; the shared formatter
+  // owns the threshold and the compact unit for both cases.
+  const ageText = captureAgeLabel(freshness, language, { compact: width < 48 });
   let showClock = width >= 80;
   const showAge = Boolean(ageText);
   const reserved = () => (showAge ? textWidth(ageText) + 3 : 0) + (showClock ? textWidth(clockText) + 3 : 0);

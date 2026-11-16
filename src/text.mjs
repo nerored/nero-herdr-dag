@@ -15,7 +15,7 @@ const segmentCache = new Map();
 const charWidthCache = new Map();
 const widthCache = new Map();
 
-export const TEXT_CACHE_LIMITS = Object.freeze({
+const TEXT_CACHE_LIMITS = Object.freeze({
   clean: CACHE_LIMIT,
   segments: CACHE_LIMIT,
   charWidth: CHAR_WIDTH_LIMIT,

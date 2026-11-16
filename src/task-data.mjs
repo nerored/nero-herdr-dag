@@ -731,18 +731,20 @@ export class TaskData {
       }
       this.cache.clear();
     } else {
-      combined = new Map(this.cache);
+      combined = new Map([...this.cache.keys()].map(id => [id, this.cache.peek(id)]));
     }
     // A terminal live overlay is only useful while it covers producer lag. Once
     // a readable store proves the task is gone (cleanup or retention removed
     // it), drop the overlay instead of resurrecting it. An unreadable store is
     // no proof, so keep the overlay then, same as the cache policy.
     if (readable) {
-      for (const [id, entry] of this.live) {
+      for (const id of this.live.keys()) {
+        const entry = this.live.peek(id);
         if (!scanned.has(id) && TERMINAL.has(entry.task?.status)) this.live.delete(id);
       }
     }
-    for (const entry of this.live.values()) {
+    for (const id of this.live.keys()) {
+      const entry = this.live.peek(id);
       const raw = entry.raw ?? {};
       this.mergeEntry(combined, raw, entry.task, entry.source ?? 'live', entry.parentSessionId ?? this.sessionId);
     }

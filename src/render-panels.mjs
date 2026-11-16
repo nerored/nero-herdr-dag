@@ -7,7 +7,7 @@ import { t } from './i18n.mjs';
 import { PROVENANCE_FIELDS } from './model.mjs';
 import { shortPath } from './render-subject.mjs';
 import {
-  capturedAgoLabel, capturedDisplay, modeColor, modeName, provenanceValue,
+  captureAgeLabel, capturedDisplay, modeColor, modeName, provenanceValue,
   snapshotFreshness, snapshotMode,
 } from './render-view.mjs';
 import { compactDuration, percentBar, width as textWidth } from './text.mjs';
@@ -105,7 +105,7 @@ export function renderEmptyState(canvas, x, y, w, h, snapshot, {
 }) {
   const mode = snapshotMode(snapshot);
   const path = shortPath(snapshot?.provenance?.statePath) ?? t(language, 'provenanceUnavailable');
-  const age = capturedAgoLabel(snapshot, now, language) ?? t(language, 'provenanceUnavailable');
+  const age = captureAgeLabel(freshness, language) ?? t(language, 'provenanceUnavailable');
   const headline = emptyStateLabel(snapshot, language, freshness);
   let lines;
   if (mode === 'saved') {

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 // import this module, so the pointer path cannot drift apart again. It lives
 // under src/ because scripts/ is not copied into an installed generation while
 // src/ is.
-export const pointerFile = 'current.json';
+const pointerFile = 'current.json';
 
 export function studioDirectory(agentDir) {
   return join(agentDir, 'herdr-dag-studio');
