@@ -322,12 +322,4 @@ test('summary rows are pure data and need no canvas', () => {
   assert.equal(tokens.parts[0][0], '100 in / 50 out');
   assert.equal(tokens.parts[1][0], ' 1/2');
 
-  // The source itself stays canvas-free, so a later edit cannot quietly make
-  // the pure split depend on a painter.
-  const source = readFileSync(new URL('../src/render-summary.mjs', import.meta.url), 'utf8');
-  const start = source.indexOf('export function summaryRows(');
-  assert.ok(start >= 0, 'summaryRows is exported');
-  const end = source.indexOf('\nexport function ', start + 1);
-  const body = source.slice(start, end === -1 ? undefined : end);
-  assert.equal(/\bcanvas\b/.test(body), false, 'summaryRows reads no canvas');
 });

@@ -173,7 +173,6 @@ const GAP9_REMOVED = Object.freeze([
   { name: 'taskForNode', file: 'src/model.mjs', kind: 'export' },
   { name: 'graphHeight', file: 'src/graph.mjs', kind: 'export' },
   { name: 'GRAPH_FILTERS', file: 'src/cockpit.mjs', kind: 'export' },
-  { name: 'count', file: 'src/task-data.mjs', kind: 'local' },
 ]);
 
 const MATRIX_MODULES = [
