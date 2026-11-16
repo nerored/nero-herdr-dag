@@ -1,5 +1,5 @@
 import { createFrameBuffers } from '../src/frame-primitives.mjs';
-import { computeLayout, wireRasterStats } from '../src/graph.mjs';
+import { computeLayout, graphLayoutMatches, wireRasterStats } from '../src/graph.mjs';
 import { dashboardLayout, renderApp, subjectResolutionStats } from '../src/render.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -155,12 +155,12 @@ function runFixture({ name, snapshot }) {
     nodes: run.nodes.length,
     edges: run.edges.length,
     layout: { medianMs: layoutMs, samplesMs: layoutSamples },
-    // A capped layout cannot be reused, so renderApp recomputes it inside the
-    // frame. Record that honestly instead of calling a 600ms frame "warm".
+    // Reuse is decided by the same geometry key the renderer uses, so a
+    // capped layout is reusable and the warm median is its true frame cost.
     warm: {
       medianMs: warmMs,
       samplesMs: warmSamples,
-      layoutReusable: layout.boxes.size === run.nodes.length,
+      layoutReusable: graphLayoutMatches(layout, run, CONTENT_WIDTH, ui.folded),
     },
     memory: memorySnapshot(),
     finite,

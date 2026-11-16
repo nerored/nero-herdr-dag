@@ -19,7 +19,7 @@ import { runSummary } from './run-summary.mjs';
 import { memoNavTasks, memoProgressCounts } from './derived-cache.mjs';
 import { criticalNodeIds, filterCounts, focusSubgraph, nodeMatchesFilter } from './cockpit.mjs';
 import { diagnosisFor } from './diagnosis.mjs';
-import { computeLayout, drawGraph, nodeScrollTarget, spinnerFrame } from './graph.mjs';
+import { computeLayout, drawGraph, graphLayoutMatches, nodeScrollTarget, spinnerFrame } from './graph.mjs';
 import { statusLabel, t } from './i18n.mjs';
 import {
   activitySummary, compareNavigationTasks, elapsedLabel, incoming, isActiveRun, linkedTaskIds,
@@ -252,15 +252,6 @@ export function dashboardLayout(width, height, { sidebar = true, expanded = fals
     mode: 'single',
     layout: structural,
   };
-}
-
-// A cached layout is reusable only while it describes exactly the current
-// run's node set. A changed or emptied run is recomputed instead of keeping
-// ghost boxes and clickable hitboxes for nodes that no longer exist.
-function graphLayoutMatches(layout, run) {
-  const nodes = run?.nodes ?? [];
-  if (!layout?.boxes || layout.boxes.size !== nodes.length) return false;
-  return nodes.every(node => layout.boxes.has(node.id));
 }
 
 // A cached layout keeps its geometry between snapshots, but every box must
@@ -953,7 +944,7 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
     }));
   let layout;
   try {
-    layout = !ui.graphFocus && graphLayout && graphLayoutMatches(graphLayout, run)
+    layout = !ui.graphFocus && graphLayout && graphLayoutMatches(graphLayout, run, contentW, ui.folded)
       ? bindGraphLayout(graphLayout, run)
       : computeLayout(graphRun, contentW, { folded: ui.folded });
   } catch (error) {

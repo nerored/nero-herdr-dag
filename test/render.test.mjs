@@ -221,6 +221,36 @@ test('a precomputed graph layout is painted instead of recomputed', () => {
   assert.notEqual(reused.text, first.text, 'the cached geometry is what gets painted');
 });
 
+test('rebinding a supplied layout leaves the cached geometry and boxes untouched', () => {
+  const edges = [{ from: 'a', to: 'b' }];
+  const before = ghostSnapshot([
+    { id: 'a', label: 'a', state: 'running', percent: 30 },
+    { id: 'b', label: 'b', state: 'pending', percent: 0 },
+  ], edges);
+  const cached = computeLayout(before.runs[0], 52);
+  assert.equal('rows' in cached, false, 'the layout publishes no secondary row map');
+  const originalBoxes = new Map(cached.boxes);
+  const originalNodes = new Map([...cached.boxes].map(([id, box]) => [id, box.node]));
+
+  const after = ghostSnapshot([
+    { id: 'a', label: 'a', state: 'completed', percent: 100 },
+    { id: 'b', label: 'b', state: 'pending', percent: 0 },
+  ], edges);
+  const result = renderApp(after, ui, {
+    width: 120, height: 40, time: 0, now, palette, theme, graphLayout: cached,
+  });
+
+  assert.notEqual(result.graph.layout, cached, 'a node rebind returns a derived layout');
+  assert.equal('rows' in result.graph.layout, false);
+  assert.equal(result.graph.layout.key, cached.key, 'rebinding does not change geometry identity');
+  assert.equal(cached.boxes.size, originalBoxes.size);
+  for (const [id, box] of cached.boxes) {
+    assert.equal(box, originalBoxes.get(id), `${id}: the supplied box object is untouched`);
+    assert.equal(box.node, originalNodes.get(id), `${id}: the supplied node binding is untouched`);
+  }
+  assert.equal(result.graph.layout.boxes.get('a').node.state, 'completed', 'the frame uses the current node');
+});
+
 test('the cached wire raster paints the identical full frame as a cold build', () => {
   for (const [label, options] of [
     ['120x40 en animated', { width: 120, height: 40, language: 'en', motion: true, time: 750 }],

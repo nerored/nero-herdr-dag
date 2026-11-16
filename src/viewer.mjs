@@ -13,7 +13,7 @@ import {
   DEFAULT_STALE_AFTER_MS, STALE_AFTER_ENV, loadConfig, saveConfig, staleAfterMs,
 } from './config.mjs';
 import { DemoEngine } from './demo.mjs';
-import { computeLayout } from './graph.mjs';
+import { computeLayout, graphLayoutKey } from './graph.mjs';
 import { createFrameBuffers } from './frame-primitives.mjs';
 import { nextNodeId } from './cockpit.mjs';
 import { commandItems, filterCommands } from './commands.mjs';
@@ -976,10 +976,7 @@ export async function createViewer(options = {}, deps = {}) {
     syncFoldedRun(ui, run.id);
     const metrics = graphMetrics();
     if (!metrics) return null;
-    const foldedKey = [...ui.folded].sort().join(',');
-    const structure = run.nodes.map(node => node.id).join(',') + '|' +
-      run.edges.map(edge => `${edge.from}>${edge.to}`).join(',');
-    const key = `${run.id}|${metrics.width}|${foldedKey}|${structure}`;
+    const key = graphLayoutKey(run, metrics.width, { folded: ui.folded });
     const layout = graphLayoutCache.get(key, () => {
       try {
         return computeLayout(run, metrics.width, { folded: ui.folded });

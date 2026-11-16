@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DemoEngine } from '../src/demo.mjs';
-import { computeLayout } from '../src/graph.mjs';
+import { computeLayout, graphLayoutKey } from '../src/graph.mjs';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { renderApp, taskListLayout } from '../src/render.mjs';
 import { keyboardScrollTarget } from '../src/scroll.mjs';
@@ -103,6 +103,7 @@ test('a cached layout binds current nodes without mutating its boxes', () => {
   // The caller's cache keeps the geometry it was built from.
   assert.equal(cachedLayout.boxes.get('api').node.state, 'running');
   assert.equal(cachedLayout.boxes.get('api').node.percent, 4);
+  assert.equal('rows' in cachedLayout, false, 'no secondary row map can go stale after a rebind');
 });
 
 test('a 54-column header keeps the brand and truncates a UUID session id', () => {
@@ -306,13 +307,15 @@ test('footer fps reflects the effective loop rate, including no-motion 1fps', ()
   assert.doesNotMatch(moving.text.split('\n').at(-1), /\btick\b/i);
 });
 
-test('a layout computed for another width is still a valid render input', () => {
+test('a layout computed for another width is rebuilt at the render content width', () => {
   const snapshot = oneNode('completed', 100);
   const layout = computeLayout(snapshot.runs[0], 40);
   const result = renderApp(snapshot, baseUi, {
     width: 120, height: 40, time: 0, now, palette, theme, graphLayout: layout,
   });
-  assert.equal(result.graph.layout.width, 40);
+  assert.equal(result.graph.layout.width, 52, '120 columns with the sidebar leaves 52 content cells');
+  assert.equal(result.graph.layout.key, graphLayoutKey(snapshot.runs[0], 52));
+  assert.notEqual(result.graph.layout, layout, 'the stale-width layout is not painted');
   assert.equal(result.graph.layout.boxes.get('api').node.percent, 100);
 });
 

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { Canvas, BOLD, DIM } from '../src/canvas.mjs';
 import { DemoEngine } from '../src/demo.mjs';
 import {
-  assignSlots, computeLayout, drawGraph, MAX_LAYOUT_ROWS, resetWireRaster, wirePoints,
-  wireRasterStats, wireShimmerIntensity, pathHitsBox, WIRE_GLYPHS,
+  assignSlots, computeLayout, drawGraph, graphLayoutKey, graphLayoutMatches, MAX_LAYOUT_ROWS,
+  resetWireRaster, wirePoints, wireRasterStats, wireShimmerIntensity, pathHitsBox, WIRE_GLYPHS,
 } from '../src/graph.mjs';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { paletteAt } from '../src/theme.mjs';
@@ -473,6 +473,77 @@ test('a very long workflow is capped at MAX_LAYOUT_ROWS', () => {
   }).runs[0], 120);
   assert.equal(short.capped, false);
   assert.equal(short.hiddenNodes, 0);
+});
+
+test('the layout key covers run, width, fold, node order, and edge order', () => {
+  const run = {
+    id: 'key-run',
+    nodes: ['a', 'b', 'c'].map(id => ({ id, label: id, state: 'pending' })),
+    edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }],
+  };
+  const base = graphLayoutKey(run, 40);
+  assert.equal(base, graphLayoutKey(run, 40), 'the key is stable for the same geometry');
+  assert.notEqual(base, graphLayoutKey({ ...run, id: 'other-run' }, 40), 'run identity is keyed');
+  assert.notEqual(base, graphLayoutKey(run, 41), 'width is keyed');
+  assert.notEqual(base, graphLayoutKey(run, 40, { folded: new Set(['b']) }), 'fold is keyed');
+  assert.equal(
+    graphLayoutKey(run, 40, { folded: new Set(['c', 'a']) }),
+    graphLayoutKey(run, 40, { folded: new Set(['a', 'c']) }),
+    'fold order is not geometry',
+  );
+  const reversedNodes = [...run.nodes].reverse();
+  assert.notEqual(base, graphLayoutKey({ ...run, nodes: reversedNodes }, 40), 'node order is keyed even for the same set');
+  const reversedEdges = [...run.edges].reverse();
+  assert.notEqual(base, graphLayoutKey({ ...run, edges: reversedEdges }, 40), 'edge order is keyed even for the same set');
+});
+
+test('computeLayout publishes the key it was built from and no stale row map', () => {
+  const run = tightRun();
+  const layout = computeLayout(run, 35);
+  assert.equal(layout.key, graphLayoutKey(run, 35));
+  assert.equal('rows' in layout, false, 'rows would alias boxes after a rebind; omit it');
+});
+
+test('a supplied layout matches only the exact width and geometry key', () => {
+  const run = tightRun();
+  const layout = computeLayout(run, 35);
+  assert.equal(graphLayoutMatches(layout, run, 35, new Set()), true);
+  assert.equal(graphLayoutMatches(layout, run, 36, new Set()), false, 'a wider pane rejects the layout');
+  // The key is computed for the call width, so only the explicit width guard
+  // rejects this layout. Removing that guard makes this assertion fail.
+  assert.equal(
+    graphLayoutMatches({ ...layout, width: 36 }, run, 35, new Set()),
+    false,
+    'the layout width itself must equal the content width',
+  );
+  assert.equal(
+    graphLayoutMatches({ ...layout, key: 'stale' }, run, 35, new Set()),
+    false,
+    'the key must match, not just the node count',
+  );
+  assert.equal(graphLayoutMatches(layout, run, 35, new Set(['a'])), false, 'a fold change rejects the layout');
+});
+
+test('a capped layout is reusable only when its hidden count completes the node list', () => {
+  const nodes = Array.from({ length: 500 }, (_, index) => ({ id: `cap-${index}`, label: `cap-${index}`, state: 'pending' }));
+  const edges = nodes.slice(1).map((node, index) => ({ from: nodes[index].id, to: node.id }));
+  const run = { id: 'capped', nodes, edges };
+  const layout = computeLayout(run, 52);
+  assert.equal(layout.capped, true);
+  assert.equal(layout.boxes.size, 373);
+  assert.equal(layout.hiddenNodes, 127);
+  assert.equal(graphLayoutMatches(layout, run, 52, new Set()), true, 'the full key makes a capped layout reusable');
+  assert.equal(
+    graphLayoutMatches({ ...layout, hiddenNodes: layout.hiddenNodes - 1 }, run, 52, new Set()),
+    false,
+    'boxes plus hidden must account for every node',
+  );
+  const short = new Map([...layout.boxes].slice(1));
+  assert.equal(
+    graphLayoutMatches({ ...layout, boxes: short }, run, 52, new Set()),
+    false,
+    'a missing box cannot be hidden silently',
+  );
 });
 
 // F-113: two independent edges crossing are not painted as a dependency

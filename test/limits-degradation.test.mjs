@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MAX_LAYOUT_ROWS } from '../src/graph.mjs';
+import { graphLayoutKey, MAX_LAYOUT_ROWS } from '../src/graph.mjs';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { renderApp } from '../src/render.mjs';
 import {
@@ -168,8 +168,8 @@ function longChainSnapshot(count) {
   });
 }
 
-const frameAt120 = snapshot => renderApp(snapshot, baseUi({ motion: false }), {
-  width: 120, height: 40, time: 0, now, palette, theme,
+const frameAt120 = (snapshot, extra = {}) => renderApp(snapshot, baseUi({ motion: false }), {
+  width: 120, height: 40, time: 0, now, palette, theme, ...extra,
 });
 
 test('a capped graph names the hidden node count at 120 columns', () => {
@@ -186,6 +186,65 @@ test('a capped graph names the hidden node count at 120 columns', () => {
   const graph = regionText(result, result.layout.graph);
   assert.match(graph, new RegExp(`⚠ capped · ${layout.hiddenNodes} hidden`));
   assert.doesNotMatch(graph, /cap-499/, 'a node past the cap is never painted');
+});
+
+test('a capped 500-node layout is reused at 373 boxes and 127 hidden', () => {
+  const snapshot = longChainSnapshot(500);
+  const run = snapshot.runs[0];
+  const cold = frameAt120(snapshot);
+  const layout = cold.graph.layout;
+  assert.equal(layout.width, 52);
+  assert.equal(layout.boxes.size, 373);
+  assert.equal(layout.hiddenNodes, 127);
+  assert.equal(layout.key, graphLayoutKey(run, 52));
+
+  // Shift one visible box without touching the key. A renderer that recomputes
+  // would restore the computed x and drop the supplied object identity.
+  const boxes = new Map([...layout.boxes].map(([id, box]) => [
+    id, id === 'cap-0' ? { ...box, x: box.x + 4 } : box,
+  ]));
+  const cached = { ...layout, boxes };
+  const beforeBox = cold.hitboxes.nodes.get('cap-0');
+  const warm = frameAt120(snapshot, { graphLayout: cached });
+  assert.equal(warm.graph.layout, cached, 'the capped layout is reused instead of recomputed');
+  assert.equal(warm.graph.layout.boxes.size, 373);
+  assert.equal(warm.graph.layout.hiddenNodes, 127);
+  assert.equal(warm.hitboxes.nodes.get('cap-0').x, beforeBox.x + 4, 'the supplied geometry is painted');
+  assert.equal(warm.hitboxes.nodes.has('cap-499'), false, 'hidden nodes have no hitbox');
+  assert.doesNotMatch(warm.text, /cap-499/);
+});
+
+test('fold, edge-order, and node-order changes recompute a capped layout', () => {
+  const snapshot = longChainSnapshot(500);
+  const run = snapshot.runs[0];
+  const cached = frameAt120(snapshot).graph.layout;
+
+  const folded = renderApp(snapshot, baseUi({ motion: false, folded: new Set(['cap-0']) }), {
+    width: 120, height: 40, time: 0, now, palette, theme, graphLayout: cached,
+  });
+  assert.notEqual(folded.graph.layout, cached);
+  assert.equal(folded.graph.layout.key, graphLayoutKey(run, 52, { folded: new Set(['cap-0']) }));
+  assert.equal(folded.graph.layout.boxes.get('cap-0').h, 3, 'the folded box is recomputed');
+  assert.equal(folded.hitboxes.nodes.has('cap-499'), false);
+
+  const reorderedEdges = { ...snapshot, runs: [{ ...run, edges: [...run.edges].reverse() }] };
+  const edgeFrame = frameAt120(reorderedEdges, { graphLayout: cached });
+  assert.notEqual(edgeFrame.graph.layout, cached);
+  assert.equal(edgeFrame.graph.layout.key, graphLayoutKey(reorderedEdges.runs[0], 52));
+  const visibleReversed = [...run.edges].reverse()
+    .filter(edge => cached.boxes.has(edge.from) && cached.boxes.has(edge.to))
+    .map(edge => `${edge.from}>${edge.to}`);
+  assert.deepEqual(
+    edgeFrame.graph.layout.edges.map(edge => `${edge.from}>${edge.to}`),
+    visibleReversed,
+    'the reordered edges are routed, not the cached order',
+  );
+
+  const reorderedNodes = { ...snapshot, runs: [{ ...run, nodes: [...run.nodes].reverse() }] };
+  const nodeFrame = frameAt120(reorderedNodes, { graphLayout: cached });
+  assert.notEqual(nodeFrame.graph.layout, cached);
+  assert.equal(nodeFrame.graph.layout.key, graphLayoutKey(reorderedNodes.runs[0], 52));
+  assert.equal(nodeFrame.hitboxes.nodes.has('cap-499'), false);
 });
 
 test('a graph below the row cap carries no capped badge', () => {

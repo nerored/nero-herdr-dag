@@ -551,6 +551,25 @@ export function assignSlots(count, desired, columns) {
   return slots;
 }
 
+// A layout is valid only for the exact geometry inputs: the run identity, the
+// content width, the folded ids, and the ordered node/edge lists. The key is a
+// stable string so the viewer cache, the renderer's reuse check, and the
+// benchmark all share one definition; JSON keeps ids that contain separators
+// unambiguous.
+//
+// Fold order is not geometry, so the folded ids are sorted. Node and edge
+// order are geometry: a reordered layer or a reordered wire changes slots and
+// routing even when the set is unchanged.
+export function graphLayoutKey(run, width, { folded = new Set() } = {}) {
+  return JSON.stringify([
+    run?.id ?? '',
+    width,
+    [...folded].sort(),
+    (run?.nodes ?? []).map(node => node.id),
+    (run?.edges ?? []).map(edge => [edge.from, edge.to]),
+  ]);
+}
+
 export function computeLayout(run, width, { folded = new Set() } = {}) {
   const logicalRows = layers(run);
   const gap = width < 60 ? 2 : 4;
@@ -571,7 +590,6 @@ export function computeLayout(run, width, { folded = new Set() } = {}) {
   }
   const positions = new Map();
   const boxes = new Map();
-  const rowInfo = [];
   let y = 2;
   let unlaid = 0;
 
@@ -623,14 +641,10 @@ export function computeLayout(run, width, { folded = new Set() } = {}) {
           placement.push({ node, x, centerX });
         });
       }
-      const info = [];
       for (const { node, x, centerX } of placement) {
         const height = folded.has(node.id) ? 3 : 6;
-        const box = { node, x, y, w: boxWidth, h: height, centerX };
-        boxes.set(node.id, box);
-        info.push(box);
+        boxes.set(node.id, { node, x, y, w: boxWidth, h: height, centerX });
       }
-      rowInfo.push(info);
       y += rowHeight + (offset + columns < ordered.length ? 3 : 5);
     }
   }
@@ -682,7 +696,33 @@ export function computeLayout(run, width, { folded = new Set() } = {}) {
     markPath(points);
   }
   const fallbackEdges = edges.reduce((total, edge) => total + (edge.fallback ? 1 : 0), 0);
-  return { width, height, rows: rowInfo, boxes, edges, capped, hiddenNodes, fallbackEdges };
+  return {
+    width,
+    height,
+    key: graphLayoutKey(run, width, { folded }),
+    boxes,
+    edges,
+    capped,
+    hiddenNodes,
+    fallbackEdges,
+  };
+}
+
+// Reuse a supplied layout only when it describes exactly this frame's graph.
+// The width check is explicit as well as covered by the key: a layout built
+// for another pane is not the same geometry even if a caller forged a key.
+// A capped layout legitimately has fewer boxes than nodes, so its hidden
+// count must account for every missing box; an uncapped layout must cover the
+// whole run. Hidden nodes have no box and therefore no hitbox.
+export function graphLayoutMatches(layout, run, width, folded = new Set()) {
+  if (!layout?.boxes || layout.width !== width) return false;
+  const nodes = run?.nodes ?? [];
+  if (layout.capped) {
+    if (layout.boxes.size + (layout.hiddenNodes ?? 0) !== nodes.length) return false;
+  } else if (layout.boxes.size !== nodes.length) {
+    return false;
+  }
+  return layout.key === graphLayoutKey(run, width, { folded });
 }
 
 function drawWire(canvas, layout, { time, motion, palette, top = 0, bottom = layout.height }) {
