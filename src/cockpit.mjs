@@ -36,7 +36,10 @@ export function filterCounts(nodes = [], summary) {
     failed: count('failed'),
     blocked: count('blocked'),
     running: count('running'),
-    critical: criticalIds.size,
+    // The summary's critical path can name nodes another run owns (or nodes
+    // the snapshot dropped). The chip must agree with what the graph paints,
+    // so count the intersection instead of the raw summary size.
+    critical: count('critical'),
   };
 }
 

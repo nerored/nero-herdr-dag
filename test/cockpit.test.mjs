@@ -45,6 +45,17 @@ test('filters cover failed, blocked, running, and critical nodes', () => {
   assert.equal(nodeMatchesFilter(run.nodes[4], 'all'), true);
 });
 
+test('critical counts only nodes painted in the run', () => {
+  const summary = { critical: { nodeIds: ['a', 'missing', 'ghost'] } };
+  assert.deepEqual(filterCounts(run.nodes, summary), {
+    all: 6, failed: 2, blocked: 1, running: 1, critical: 1,
+  });
+  const painted = run.nodes.filter(item => nodeMatchesFilter(item, 'critical', criticalNodeIds(summary))).length;
+  assert.equal(filterCounts(run.nodes, summary).critical, painted);
+  assert.equal(filterCounts([], summary).critical, 0);
+  assert.equal(filterCounts(undefined, summary).critical, 0);
+});
+
 test('filters treat error, lost, and paused nodes as failed or blocked', () => {
   const nodes = [
     node('a', 'failed'),
