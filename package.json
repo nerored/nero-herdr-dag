@@ -29,6 +29,7 @@
     "demo:once": "bun src/viewer.mjs --demo --once --no-color --width 120 --height 40",
     "make-demo": "bun scripts/make-demo.mjs",
     "test": "bun test",
+    "bench": "bun scripts/bench.mjs",
     "build": "bun scripts/build.mjs",
     "prepare": "bun run build",
     "check": "bun run test && bun run build",
