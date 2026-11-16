@@ -6,10 +6,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nodeForTask, normalizeSnapshot, standaloneTasks } from '../src/model.mjs';
 import { navTasks, renderApp } from '../src/render.mjs';
+import { commandItems, filterCommands } from '../src/commands.mjs';
+import { messages, t } from '../src/i18n.mjs';
 import {
   ensureSelectionState, parseViewerArgs, selectRunById, selectRunOverview,
 } from '../src/viewer.mjs';
-import { baseUi as makeBaseUi, createTestViewer, themeFor } from './helpers.mjs';
+import { baseUi as makeBaseUi, createTestViewer, themeFor, within } from './helpers.mjs';
 
 const now = 1_000_000;
 const { palette, theme } = themeFor(0);
@@ -519,4 +521,395 @@ test('selecting a run keeps the run summary subject until a node is chosen', asy
   viewer.handleKey('Tab', { sequence: 'Tab', name: 'tab' });
   assert.equal(viewer.ui.runOverview, false);
   assert.ok(viewer.ui.selectedNodeId);
+});
+
+// --- cockpit command palette and tour matrix -------------------------------
+
+const collapse = text => String(text).replace(/\s+/g, ' ').trim();
+
+// Read only the inner rows of a painted overlay so box borders do not split a
+// wrapped sentence. This still asserts user-visible copy, not cell geometry.
+const panelText = (frame, panel) => {
+  const rows = [];
+  for (let row = panel.y + 2; row < panel.y + panel.h - 2; row++) {
+    let line = '';
+    for (let col = panel.x + 1; col < panel.x + panel.w - 1; col++) {
+      const cell = frame.canvas.cells[row]?.[col];
+      if (cell && !cell.cont) line += cell.ch;
+    }
+    rows.push(line);
+  }
+  return collapse(rows.join(' '));
+};
+
+// A run that exercises every command's precondition: nodes for focus/filters,
+// completed work for the undo command, and running work for the switcher.
+const commandSnapshot = () => normalizeSnapshot({
+  version: 3,
+  mode: 'live',
+  connected: true,
+  sessionId: 'command-palette',
+  generatedAt: '2026-11-10T00:00:00.000Z',
+  runs: [{
+    id: 'run',
+    name: 'Palette run',
+    status: 'running',
+    createdAt: '2026-11-10T00:00:00.000Z',
+    updatedAt: '2026-11-10T00:00:00.000Z',
+    nodes: [
+      { id: 'a', label: 'alpha', state: 'failed', task_id: 'st_a' },
+      { id: 'b', label: 'beta', state: 'blocked', task_id: 'st_b' },
+      { id: 'c', label: 'gamma', state: 'running', task_id: 'st_c' },
+      { id: 'd', label: 'delta', state: 'completed', task_id: 'st_d' },
+    ],
+    edges: [{ from: 'a', to: 'c' }, { from: 'b', to: 'c' }],
+  }],
+  tasks: [
+    { id: 'st_a', description: 'Alpha task', status: 'failed' },
+    { id: 'st_b', description: 'Beta task', status: 'blocked' },
+    { id: 'st_c', description: 'Gamma task', status: 'running' },
+    { id: 'st_d', description: 'Delta task', status: 'completed' },
+  ],
+});
+
+const commandViewer = async () => {
+  const viewer = await makeViewer();
+  viewer.acceptSnapshot(commandSnapshot(), { silent: true });
+  viewer.draw();
+  return viewer;
+};
+
+const openPalette = viewer => {
+  viewer.handleKey(':', { sequence: ':', name: ':' });
+  assert.equal(viewer.ui.palette, true, 'the colon key opens the palette');
+};
+
+// Type the shortest source query that isolates one command. Most ids are
+// already unique; the fallbacks cover words the palette would otherwise treat
+// as controls. The palette treats `j`/`k` as cursor movement and `:` as close,
+// so a query may not contain those characters.
+const PALETTE_QUERY_FALLBACKS = new Map([
+  ['filter-blocked', 'bloc'],
+  ['completed', 'toggle completed'],
+]);
+const paletteQueryFor = id => {
+  const items = commandItems('en');
+  const item = items.find(entry => entry.id === id);
+  assert.ok(item, `unknown command ${id}`);
+  const candidates = [PALETTE_QUERY_FALLBACKS.get(id), id, item.label].filter(Boolean);
+  for (const query of candidates) {
+    if (/[kj:]/.test(query)) continue;
+    const matches = filterCommands(items, query);
+    if (matches.length === 1 && matches[0].id === id) return query;
+  }
+  throw new Error(`no typeable palette query for ${id}`);
+};
+
+// Execute a command the way an operator does: open the palette, type the
+// filter, then press Enter. Every keystroke goes through handleKey.
+const runPaletteCommand = (viewer, id) => {
+  openPalette(viewer);
+  const query = paletteQueryFor(id);
+  for (const key of query) viewer.handleKey(key, { sequence: key, name: key });
+  assert.equal(viewer.ui.paletteFilter, query, `${id} receives the typed query`);
+  assert.deepEqual(
+    filterCommands(commandItems('en'), query).map(item => item.id),
+    [id],
+    `query "${query}" isolates ${id}`,
+  );
+  assert.equal(viewer.ui.paletteIndex, 0, `${id} stays on the first match`);
+  viewer.handleKey('\r', { name: 'return' });
+};
+
+const filterMutations = [
+  ['filter-failed', 'failed'],
+  ['filter-blocked', 'blocked'],
+  ['filter-running', 'running'],
+  ['filter-critical', 'critical'],
+  ['filter-clear', 'all'],
+].map(([id, expected]) => ({
+  id,
+  prepare: ui => {
+    ui.graphFilter = 'all';
+    ui.graphFocus = 'a';
+  },
+  verify: viewer => {
+    assert.equal(viewer.ui.graphFilter, expected);
+    assert.equal(viewer.ui.graphFocus, undefined);
+  },
+}));
+
+const paletteMutations = [
+  {
+    id: 'overview',
+    prepare: ui => {
+      ui.runOverview = false;
+      ui.selectedNodeId = 'a';
+      ui.selectedTaskId = 'st_a';
+      ui.focus = 'graph';
+    },
+    verify: viewer => {
+      assert.equal(viewer.ui.runOverview, true);
+      assert.equal(viewer.ui.selectedRunId, 'run');
+      assert.equal(viewer.ui.selectedNodeId, undefined);
+      assert.equal(viewer.ui.selectedTaskId, undefined);
+      assert.equal(viewer.ui.focus, 'details');
+    },
+  },
+  {
+    id: 'find',
+    verify: viewer => {
+      assert.ok(viewer.ui.switcher, 'find opens the switcher');
+      assert.equal(viewer.ui.switcher.query, '');
+      assert.equal(viewer.ui.palette, false);
+    },
+  },
+  ...filterMutations,
+  {
+    id: 'focus',
+    prepare: ui => {
+      ui.runOverview = true;
+      ui.selectedNodeId = 'a';
+      ui.selectedTaskId = undefined;
+      ui.selectedTaskUnlinked = false;
+      ui.focus = 'details';
+      ui.graphFocus = undefined;
+      ui.follow = true;
+    },
+    verify: viewer => {
+      assert.equal(viewer.ui.runOverview, false);
+      assert.equal(viewer.ui.selectedNodeId, 'a');
+      assert.equal(viewer.ui.selectedTaskId, 'st_a');
+      assert.equal(viewer.ui.selectedTaskUnlinked, false);
+      assert.equal(viewer.ui.graphFocus, 'a');
+      assert.equal(viewer.ui.focus, 'graph');
+      assert.equal(viewer.ui.follow, false);
+    },
+  },
+  {
+    id: 'scope',
+    prepare: ui => {
+      ui.taskScope = 'run';
+      ui.tasksScroll = 4;
+      ui.tasksScrollTarget = 4;
+    },
+    verify: viewer => {
+      assert.equal(viewer.ui.taskScope, 'all');
+      assert.equal(viewer.ui.tasksScroll, 0);
+      assert.equal(viewer.ui.tasksScrollTarget, 0);
+    },
+  },
+  {
+    id: 'completed',
+    prepare: ui => {
+      ui.completedCollapsed = true;
+      ui.tasksScroll = 3;
+      ui.tasksScrollTarget = 3;
+    },
+    verify: viewer => {
+      assert.equal(viewer.ui.completedCollapsed, false);
+      assert.equal(viewer.ui.tasksScroll, 0);
+      assert.equal(viewer.ui.tasksScrollTarget, 0);
+    },
+  },
+  {
+    id: 'verbose',
+    prepare: ui => { ui.verbose = false; },
+    verify: viewer => assert.equal(viewer.ui.verbose, true),
+  },
+  {
+    id: 'tour',
+    prepare: ui => { ui.tour = 0; },
+    verify: viewer => assert.equal(viewer.ui.tour, 1),
+  },
+  {
+    id: 'undo',
+    prepare: ui => {
+      ui.hiddenRunIds = new Set(['run']);
+      ui.hiddenTaskIds = new Set(['st_a']);
+      ui.undoClear = { runs: ['run'], tasks: ['st_a'] };
+    },
+    verify: viewer => {
+      assert.equal(viewer.ui.undoClear, null);
+      assert.equal(viewer.ui.hiddenRunIds.size, 0);
+      assert.equal(viewer.ui.hiddenTaskIds.size, 0);
+    },
+  },
+  {
+    id: 'help',
+    prepare: ui => {
+      ui.help = false;
+      ui.helpScroll = 4;
+    },
+    verify: viewer => {
+      assert.equal(viewer.ui.help, true);
+      assert.equal(viewer.ui.helpScroll, 0);
+    },
+  },
+  {
+    id: 'settings',
+    prepare: ui => {
+      ui.settingsMenu = false;
+      ui.help = false;
+    },
+    verify: viewer => {
+      assert.equal(viewer.ui.settingsMenu, true);
+      assert.equal(viewer.ui.help, false);
+    },
+  },
+];
+
+test('every command palette action mutates the state it names', async () => {
+  for (const entry of paletteMutations) {
+    const viewer = await commandViewer();
+    entry.prepare?.(viewer.ui);
+    runPaletteCommand(viewer, entry.id);
+    assert.equal(viewer.ui.palette, false, `${entry.id} closes the palette`);
+    entry.verify(viewer);
+  }
+});
+
+test('the quit command exits through the palette', async () => {
+  let resolveExit;
+  const exited = new Promise(resolve => { resolveExit = resolve; });
+  const { viewer } = await createTestViewer({
+    args: { noColor: true, noMotion: true, fps: 10 },
+    deps: {
+      loadConfig: async () => ({ language: 'en' }),
+      loadOmoTheme: async () => 'system',
+      loadOmoAppearance: async () => ({}),
+      columns: 140,
+      rows: 42,
+      exit: code => resolveExit(code),
+    },
+  });
+  viewer.ui.follow = false;
+  viewer.acceptSnapshot(commandSnapshot(), { silent: true });
+  viewer.draw();
+
+  runPaletteCommand(viewer, 'quit');
+
+  assert.equal(await within(exited, 1000, 'quit closes the viewer'), 0);
+});
+
+test('palette typing, backspace, and empty results track the filter', async () => {
+  const viewer = await commandViewer();
+  const items = commandItems('en');
+  openPalette(viewer);
+  assert.equal(viewer.ui.paletteFilter, '');
+  assert.equal(viewer.ui.paletteIndex, 0);
+
+  for (const key of 'crit') viewer.handleKey(key, { sequence: key, name: key });
+  assert.equal(viewer.ui.paletteFilter, 'crit');
+  assert.deepEqual(
+    filterCommands(items, 'crit').map(item => item.id),
+    ['filter-critical'],
+  );
+
+  viewer.ui.paletteIndex = 4;
+  viewer.handleKey('i', { sequence: 'i', name: 'i' });
+  assert.equal(viewer.ui.paletteFilter, 'criti');
+  assert.equal(viewer.ui.paletteIndex, 0, 'typing resets the cursor to the first match');
+
+  viewer.handleKey('\x7f', { name: 'backspace' });
+  assert.equal(viewer.ui.paletteFilter, 'crit');
+  for (let index = 0; index < 4; index++) viewer.handleKey('\x7f', { name: 'backspace' });
+  assert.equal(viewer.ui.paletteFilter, '');
+  viewer.handleKey('\x7f', { name: 'backspace' });
+  assert.equal(viewer.ui.paletteFilter, '', 'backspace on an empty filter is a no-op');
+
+  for (const key of 'zzzz') viewer.handleKey(key, { sequence: key, name: key });
+  assert.equal(viewer.ui.paletteFilter, 'zzzz');
+  assert.equal(filterCommands(items, 'zzzz').length, 0);
+  viewer.draw();
+  assert.equal(viewer.lastRender.hitboxes.palette.size, 0);
+  assert.ok(collapse(viewer.lastRender.text).includes(collapse(t('en', 'paletteEmpty'))));
+
+  viewer.handleKey('\r', { name: 'return' });
+  assert.equal(viewer.ui.palette, true, 'Enter with no match leaves the palette open');
+  assert.equal(viewer.ui.paletteFilter, 'zzzz');
+
+  viewer.handleKey('\x1b', { name: 'escape' });
+  assert.equal(viewer.ui.palette, false);
+  assert.equal(viewer.ui.paletteFilter, '');
+  assert.equal(viewer.ui.paletteIndex, 0);
+  viewer.draw();
+  assert.equal(viewer.lastRender.hitboxes.palette, null);
+});
+
+test('palette navigation wraps in both directions', async () => {
+  const viewer = await commandViewer();
+  const items = commandItems('en');
+  openPalette(viewer);
+
+  viewer.handleKey('\x1b[A', { name: 'up' });
+  assert.equal(viewer.ui.paletteIndex, items.length - 1);
+  viewer.handleKey('\x1b[B', { name: 'down' });
+  assert.equal(viewer.ui.paletteIndex, 0);
+
+  for (const key of 'filter') viewer.handleKey(key, { sequence: key, name: key });
+  const filtered = filterCommands(items, 'filter');
+  assert.ok(filtered.length > 1, 'the filter command family is still listed');
+  assert.equal(viewer.ui.paletteIndex, 0);
+  viewer.handleKey('\x1b[A', { name: 'up' });
+  assert.equal(viewer.ui.paletteIndex, filtered.length - 1);
+  viewer.handleKey('\x1b[B', { name: 'down' });
+  assert.equal(viewer.ui.paletteIndex, 0);
+});
+
+test('palette rows execute on click while the panel and backdrop stay modal', async () => {
+  const viewer = await commandViewer();
+  openPalette(viewer);
+  viewer.draw();
+
+  const row = viewer.lastRender.hitboxes.palette.get('filter-blocked');
+  assert.ok(row, 'the blocked filter row is painted');
+  viewer.selectAt(row.x, row.y);
+  assert.equal(viewer.ui.palette, false);
+  assert.equal(viewer.ui.graphFilter, 'blocked');
+
+  openPalette(viewer);
+  viewer.draw();
+  const filterRow = viewer.lastRender.hitboxes.paletteFilter;
+  viewer.selectAt(filterRow.x + 1, filterRow.y);
+  assert.equal(viewer.ui.palette, true, 'a click inside the panel does not dismiss it');
+
+  viewer.selectAt(0, 0);
+  assert.equal(viewer.ui.palette, false, 'a click on the backdrop dismisses the palette');
+});
+
+test('the tour advances through every source step and Esc closes it', async () => {
+  const viewer = await commandViewer();
+  const steps = Object.keys(messages.en)
+    .filter(key => /^tourStep\d+$/.test(key))
+    .map(key => Number(key.slice('tourStep'.length)))
+    .sort((left, right) => left - right);
+  assert.ok(steps.length > 0, 'the tour has localized steps');
+
+  runPaletteCommand(viewer, 'tour');
+  assert.equal(viewer.ui.tour, 1);
+
+  for (const step of steps) {
+    assert.equal(viewer.ui.tour, step, `step ${step} is active`);
+    viewer.draw();
+    const frame = viewer.lastRender;
+    assert.ok(frame.hitboxes.tourPanel, `step ${step} paints the tour panel`);
+    const text = panelText(frame, frame.hitboxes.tourPanel);
+    assert.ok(text.includes(collapse(t('en', `tourStep${step}`))), `step ${step} paints its source copy`);
+    assert.ok(text.includes(`${step}/${steps.length}`), `step ${step} paints its position`);
+    if (step % 2 === 1) viewer.handleKey('\r', { name: 'return' });
+    else viewer.handleKey(' ', { sequence: ' ', name: 'space' });
+  }
+
+  assert.equal(viewer.ui.tour, 0, 'advancing past the last step closes the tour');
+  viewer.draw();
+  assert.ok(!viewer.lastRender.hitboxes.tourPanel);
+
+  viewer.ui.tour = 1;
+  viewer.draw();
+  assert.ok(viewer.lastRender.hitboxes.tourPanel);
+  viewer.handleKey('\x1b', { name: 'escape' });
+  assert.equal(viewer.ui.tour, 0);
+  viewer.draw();
+  assert.ok(!viewer.lastRender.hitboxes.tourPanel);
 });

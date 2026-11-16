@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { commandItems } from '../src/commands.mjs';
+import { messages, t } from '../src/i18n.mjs';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { renderApp } from '../src/render.mjs';
 import { themeFor, viewerUi } from './helpers.mjs';
@@ -65,18 +67,60 @@ test('summary filter keys drive the graph filter line', () => {
   assert.match(critical.text, /path: alpha → gamma/);
 });
 
-test('the command palette and tour are modal overlays', () => {
+const collapse = text => String(text).replace(/\s+/g, ' ').trim();
+
+// Read only the inner rows of the tour panel so its box borders cannot split
+// the wrapped sentence the test is asserting.
+const panelText = (frame, panel) => {
+  const rows = [];
+  for (let row = panel.y + 2; row < panel.y + panel.h - 2; row++) {
+    let line = '';
+    for (let col = panel.x + 1; col < panel.x + panel.w - 1; col++) {
+      const cell = frame.canvas.cells[row]?.[col];
+      if (cell && !cell.cont) line += cell.ch;
+    }
+    rows.push(line);
+  }
+  return collapse(rows.join(' '));
+};
+const tourStepKeys = language => Object.keys(messages[language])
+  .filter(key => /^tourStep\d+$/.test(key))
+  .map(key => Number(key.slice('tourStep'.length)))
+  .sort((left, right) => left - right);
+
+test('the command palette paints every command and an empty query', () => {
+  const items = commandItems('en');
   const paletteFrame = render({ palette: true });
-  assert.match(paletteFrame.text, /COMMANDS/);
-  assert.equal(paletteFrame.hitboxes.palette.size, 16);
+  assert.equal(paletteFrame.hitboxes.palette.size, items.length);
+  assert.deepEqual([...paletteFrame.hitboxes.palette.keys()], items.map(item => item.id));
   assert.equal(paletteFrame.hitboxes.tasks.size, 0);
   assert.equal(paletteFrame.hitboxes.nodes.size, 0);
+  assert.equal(paletteFrame.hitboxes.runs.size, 0);
 
-  const tour = render({ tour: 1 });
-  assert.match(tour.text, /TOUR/);
-  assert.match(tour.text, /1\/5/);
-  assert.equal(tour.hitboxes.tasks.size, 0);
-  assert.equal(tour.hitboxes.nodes.size, 0);
+  const empty = render({ palette: true, paletteFilter: 'no such command' });
+  assert.equal(empty.hitboxes.palette.size, 0);
+  assert.ok(collapse(empty.text).includes(collapse(t('en', 'paletteEmpty'))));
+  assert.ok(collapse(empty.text).includes('no such command'));
+  assert.equal(empty.hitboxes.tasks.size, 0);
+  assert.equal(empty.hitboxes.nodes.size, 0);
+});
+
+test('every tour step paints its localized copy as a modal overlay', () => {
+  const steps = tourStepKeys('en');
+  assert.ok(steps.length > 0, 'the tour source has localized steps');
+  assert.deepEqual(steps, steps.map((_, index) => index + 1), 'tour steps are numbered from 1');
+  assert.deepEqual(tourStepKeys('zh'), steps, 'both languages document the same steps');
+
+  for (const step of steps) {
+    const tour = render({ tour: step });
+    assert.ok(tour.hitboxes.tourPanel, `step ${step} paints the tour panel`);
+    assert.equal(tour.hitboxes.tasks.size, 0);
+    assert.equal(tour.hitboxes.nodes.size, 0);
+    assert.equal(tour.hitboxes.runs.size, 0);
+    const text = panelText(tour, tour.hitboxes.tourPanel);
+    assert.ok(text.includes(collapse(t('en', `tourStep${step}`))), `step ${step} paints its source copy`);
+    assert.ok(text.includes(`${step}/${steps.length}`), `step ${step} paints its position`);
+  }
 });
 
 test('task scope and completed collapse shrink the navigation list', () => {
