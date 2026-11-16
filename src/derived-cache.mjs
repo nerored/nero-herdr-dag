@@ -22,6 +22,13 @@
 // Arrays and stats handed back are frozen: every caller holds the same object,
 // so a mutation would leak into the next frame. Sets stay internal to the
 // lookup and are read-only by convention, matching the old return values.
+//
+// Bound: every entry is either a WeakMap key (collected with the snapshot/run/
+// task it describes) or, for progressCounts, an inner Map keyed by object
+// identities that belong to that snapshot (tasks <= SNAPSHOT_LIMITS.tasks,
+// runs <= SNAPSHOT_LIMITS.runs). No frame path looks up a freshly synthesized
+// key object, so the inner maps are bounded by snapshot cardinality and die
+// with the WeakMap key. runSummary keeps its own four-clock ring.
 
 const EMPTY_LIST = Object.freeze([]);
 const EMPTY_SET = new Set();

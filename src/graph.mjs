@@ -210,7 +210,9 @@ function sameWireGeometry(a, b) {
 }
 
 // Exactly one raster is retained: the previous layout becomes garbage
-// instead of staying in a growing map.
+// instead of staying in a growing map. The cap is therefore 1 (`capacity` in
+// wireRasterStats); a new layout or viewport replaces the entry.
+const WIRE_RASTER_CACHE_LIMIT = 1;
 let sharedWireRaster = null;
 let wireRasterBuilds = 0;
 let wireRasterHits = 0;
@@ -239,6 +241,7 @@ export function wireRasterStats() {
     builds: wireRasterBuilds,
     hits: wireRasterHits,
     retained: sharedWireRaster ? 1 : 0,
+    capacity: WIRE_RASTER_CACHE_LIMIT,
     width: raster?.width ?? 0,
     rows: raster?.rows ?? 0,
     top: raster?.top ?? 0,

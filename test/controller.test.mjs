@@ -1107,3 +1107,14 @@ test('a pane from the current generation opens without a warning', async t => {
   assert.equal(await controller.open(), 'viewer');
   assert.deepEqual(messages, []);
 });
+
+test('controller warning coalescing never grows past its cap', async t => {
+  const messages = [];
+  const mock = fixture();
+  const { controller } = await setup(t, mock.herdr, { notify: message => messages.push(message) });
+  for (let index = 0; index < 300; index++) controller.warnOnce(`warning-${index}`, `message-${index}`);
+  assert.equal(controller.warnings.size, 256, 'the session warning set is bounded');
+  assert.equal(messages.length, 300, 'each first-seen key still notifies');
+  assert.equal(controller.warnings.has('warning-0'), false, 'the oldest key was evicted');
+  assert.equal(controller.warnings.has('warning-299'), true);
+});

@@ -1,7 +1,11 @@
 import { createFrameBuffers } from '../src/frame-primitives.mjs';
-import { computeLayout } from '../src/graph.mjs';
-import { dashboardLayout, renderApp } from '../src/render.mjs';
-import { createTheme, paletteAt } from '../src/theme.mjs';
+import { computeLayout, wireRasterStats } from '../src/graph.mjs';
+import { dashboardLayout, renderApp, subjectResolutionStats } from '../src/render.mjs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { TaskData } from '../src/task-data.mjs';
+import { textCacheStats } from '../src/text.mjs';
+import { createTheme, paletteAt, themeCacheStats } from '../src/theme.mjs';
 import { benchFixtures, FIXED_NOW, FRAME } from './bench-fixtures.mjs';
 
 // Published budgets: a regression past any of these is a release blocker, not
@@ -11,6 +15,16 @@ const LAYOUT_WARMUP = 1;
 const LAYOUT_SAMPLES = 5;
 const WARM_WARMUP = 3;
 const WARM_SAMPLES = 7;
+// Frame-lifetime memory gate. Ten thousand frames is roughly three minutes of
+// the shipped 60 fps demo. Every frame gets a fresh snapshot identity, which is
+// the adversarial case for per-snapshot caches: a cache that retains snapshots
+// strongly must fail this gate. The normal tree's WeakMap caches are collected
+// back to roughly the starting heap (+0.2MB), so 4MB leaves headroom for GC/JIT
+// noise while a snapshot-keyed leak of a few MB is caught.
+const MEMORY_FRAMES = 10_000;
+const MEMORY_WARMUP = 500;
+const MEMORY_GC_INTERVAL = 1_000;
+const MEMORY_GROWTH_LIMIT_MB = 4;
 
 const palette = paletteAt(0);
 const theme = createTheme({ palette, color: false });
@@ -173,6 +187,100 @@ function formatRow(row) {
   ].join('  ');
 }
 
+// The frame-path memory probe. It renders the committed demo fixture with a
+// fresh snapshot identity every eighth frame (a 10Hz accepted read), forcing
+// the snapshot-keyed caches to churn while the shared text/theme/wire/rate
+// caches stay capped. Heap is sampled after a forced collection every 1,000
+// frames, so retained growth is distinguishable from short-lived garbage.
+function memoryProbe({ snapshot }) {
+  const run = snapshot.runs[0];
+  const now = Date.parse(snapshot.provenance?.capturedAt ?? snapshot.generatedAt) || FIXED_NOW;
+  const ui = {
+    ...uiFor(run),
+    focus: 'details',
+    lastFocus: 'graph',
+    selectedNodeId: run.nodes[0]?.id,
+  };
+  const buffers = createFrameBuffers();
+  const layout = computeLayout(run, CONTENT_WIDTH);
+  const options = {
+    width: FRAME.width,
+    height: FRAME.height,
+    time: 0,
+    now,
+    palette,
+    theme,
+    graphLayout: layout,
+    buffers,
+  };
+  for (let index = 0; index < MEMORY_WARMUP; index++) renderApp(snapshot, ui, options);
+  // A real store-cache instance: the same TaskData the controller uses, with
+  // the demo tasks restored into its session cache. Its memoryStats() proves
+  // the shipped caps, not a copy of the constants.
+  const taskData = new TaskData({
+    sessionId: 'bench-memory-probe',
+    stateDirs: [{ root: join(tmpdir(), 'dag-studio-bench-memory'), origin: 'explicit', label: 'bench probe' }],
+    notify: () => {},
+  });
+  taskData.restore(snapshot.tasks ?? []);
+  collectGarbage();
+  const before = process.memoryUsage().heapUsed;
+  const samplesMb = [];
+  for (let index = 0; index < MEMORY_FRAMES; index++) {
+    // A fresh identity every frame: a 10kHz accepted-read stream is harsher
+    // than the product's 10Hz, and it makes any strong snapshot-keyed cache
+    // grow instead of hoping the collector catches the sparse case.
+    const view = { ...snapshot };
+    renderApp(view, ui, options);
+    if ((index + 1) % MEMORY_GC_INTERVAL === 0) {
+      collectGarbage();
+      samplesMb.push(round(process.memoryUsage().heapUsed / (1024 * 1024)));
+    }
+  }
+  collectGarbage();
+  const after = process.memoryUsage().heapUsed;
+  const growthMb = round((after - before) / (1024 * 1024));
+  const text = textCacheStats();
+  const themeCache = themeCacheStats();
+  const subject = subjectResolutionStats();
+  const wire = wireRasterStats();
+  const taskDataStats = taskData.memoryStats();
+  const taskDataCapsOk = ['cache', 'live', 'rateHistory', 'rateSeen', 'rateSources', 'warnings']
+    .every(name => taskDataStats[name].size <= taskDataStats[name].limit);
+  const capsOk = Object.entries(text.sizes).every(([kind, size]) => size <= text.limits[kind]) &&
+    themeCache.size <= themeCache.limit &&
+    subject.maxEntries <= subject.limit &&
+    wire.retained <= wire.capacity &&
+    taskDataCapsOk;
+  const heapOk = growthMb <= MEMORY_GROWTH_LIMIT_MB;
+  return {
+    frames: MEMORY_FRAMES,
+    snapshotRotations: MEMORY_FRAMES,
+    heapBeforeMb: round(before / (1024 * 1024)),
+    heapAfterMb: round(after / (1024 * 1024)),
+    growthMb,
+    limitMb: MEMORY_GROWTH_LIMIT_MB,
+    samplesMb,
+    caches: { text, theme: themeCache, subject, wire, taskData: taskDataStats },
+    capsOk,
+    pass: heapOk && capsOk,
+  };
+}
+
+function formatProbe(probe) {
+  const growth = probe.growthMb >= 0 ? `+${probe.growthMb}` : String(probe.growthMb);
+  return [
+    'memory'.padEnd(8),
+    `frames=${probe.frames}`,
+    `heap=${probe.heapBeforeMb.toFixed(1)}->${probe.heapAfterMb.toFixed(1)}MB (${growth}MB <= ${probe.limitMb}MB)`,
+    `wire=${probe.caches.wire.retained}/${probe.caches.wire.capacity}`,
+    `subject=${probe.caches.subject.maxEntries}/${probe.caches.subject.limit}`,
+    `text=${Object.entries(probe.caches.text.sizes).map(([kind, size]) => `${kind}:${size}/${probe.caches.text.limits[kind]}`).join(',')}`,
+    `theme=${probe.caches.theme.size}/${probe.caches.theme.limit}`,
+    probe.pass ? 'PASS' : 'FAIL',
+  ].join('  ');
+}
+
 function failuresFor(row) {
   const failures = [];
   if (!Number.isFinite(row.layout.medianMs)) {
@@ -193,11 +301,33 @@ function failuresFor(row) {
 }
 
 try {
-  const rows = benchFixtures().map(runFixture);
+  const fixtures = benchFixtures();
+  const rows = fixtures.map(runFixture);
+  const probe = memoryProbe({ snapshot: fixtures[0].snapshot });
   const failures = rows.flatMap(failuresFor);
-  const result = { budgets: BUDGETS, rows, pass: failures.length === 0 };
+  if (!probe.pass) {
+    if (probe.growthMb > probe.limitMb) {
+      failures.push(`memory probe heap grew ${probe.growthMb}MB > ${probe.limitMb}MB over ${probe.frames} frames`);
+    }
+    for (const [kind, size] of Object.entries(probe.caches.text.sizes)) {
+      if (size > probe.caches.text.limits[kind]) {
+        failures.push(`memory probe text.${kind} cache ${size} > ${probe.caches.text.limits[kind]}`);
+      }
+    }
+    if (probe.caches.theme.size > probe.caches.theme.limit) {
+      failures.push(`memory probe theme cache ${probe.caches.theme.size} > ${probe.caches.theme.limit}`);
+    }
+    if (probe.caches.subject.maxEntries > probe.caches.subject.limit) {
+      failures.push(`memory probe subject cache ${probe.caches.subject.maxEntries} > ${probe.caches.subject.limit}`);
+    }
+    if (probe.caches.wire.retained > probe.caches.wire.capacity) {
+      failures.push(`memory probe wire raster ${probe.caches.wire.retained} > ${probe.caches.wire.capacity}`);
+    }
+  }
+  const result = { budgets: BUDGETS, rows, memoryProbe: probe, pass: failures.length === 0 };
   console.log('fixture   nodes  edges  layout      warm        memory               budgets');
   for (const row of rows) console.log(formatRow(row));
+  console.log(formatProbe(probe));
   console.log(JSON.stringify(result, null, 2));
   if (failures.length) {
     for (const failure of failures) console.error(`BENCH FAIL: ${failure}`);

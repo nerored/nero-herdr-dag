@@ -9,8 +9,14 @@ import { clean } from './text.mjs';
 import { modeFor, normalizeRun, TERMINAL } from './model.mjs';
 import { todoTitleForRun, loadTodoEvents } from './todo-title.mjs';
 import { resolveTaskStateDirs, TaskData } from './task-data.mjs';
+import { BoundedKeySet } from './bounded-cache.mjs';
 
 const SCAN_BATCH = 8;
+// Warning coalescing is session-lifetime state: store and record names are
+// input-controlled, so the dedupe set needs a cap. Keep the newest keys; an
+// evicted failure may notify once more if it reappears after WARNING_KEYS newer
+// ones.
+const WARNING_KEYS = 256;
 // Checkpoint directories live in the project store, so a cloned or hostile
 // repository controls the names in them. Match the record-open cap in
 // render.mjs and never read more than one byte past it.
@@ -216,7 +222,7 @@ export class DagPane {
     this.cacheRunIds = new Set();
     this.liveRunIds = new Set();
     this.staleRunCache = 0;
-    this.warnings = new Set();
+    this.warnings = new BoundedKeySet(WARNING_KEYS, { name: 'controller-warnings' });
     this.stopped = false;
     this.todoEvents = [];
     this.todoFileKey = undefined;

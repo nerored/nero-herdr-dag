@@ -7,6 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { emitKeypressEvents } from 'node:readline';
 import { diagnosisForKey } from './diagnosis.mjs';
+import { SingleEntryCache } from './bounded-cache.mjs';
 import { osc52, pagerCommand, payloadLines } from './clipboard.mjs';
 import {
   DEFAULT_STALE_AFTER_MS, STALE_AFTER_ENV, loadConfig, saveConfig, staleAfterMs,
@@ -501,7 +502,11 @@ export async function createViewer(options = {}, deps = {}) {
   let lastCycle;
   let lastDemoAccept = 0;
   let helpFrameDrawn = false;
-  let graphLayoutCache = { key: '', layout: null };
+  // Exactly one graph layout is retained (cap = 1): changing the run, graph
+  // width, folded set or node/edge structure replaces the entry, so a viewer
+  // that watches many runs cannot retain their layouts. The wire raster inside
+  // computeLayout/drawGraph has its own single-entry cache (task 33).
+  const graphLayoutCache = new SingleEntryCache('graph-layout');
   // One buffer handle for the viewer's lifetime: the scratch grids survive
   // frames and are repainted per use. Closing the viewer drops them with it.
   const frameBuffers = createFrameBuffers();
@@ -981,16 +986,15 @@ export async function createViewer(options = {}, deps = {}) {
     const structure = run.nodes.map(node => node.id).join(',') + '|' +
       run.edges.map(edge => `${edge.from}>${edge.to}`).join(',');
     const key = `${run.id}|${metrics.width}|${foldedKey}|${structure}`;
-    if (graphLayoutCache.key !== key) {
-      let layout = null;
+    const layout = graphLayoutCache.get(key, () => {
       try {
-        layout = computeLayout(run, metrics.width, { folded: ui.folded });
+        return computeLayout(run, metrics.width, { folded: ui.folded });
       } catch {
         // Let renderApp handle and report a cyclic layout.
+        return null;
       }
-      graphLayoutCache = { key, layout };
-    }
-    return { ...metrics, layout: graphLayoutCache.layout };
+    });
+    return { ...metrics, layout };
   }
 
   function maxGraphScroll(info = graphLayoutInfo()) {
@@ -2181,6 +2185,7 @@ export async function createViewer(options = {}, deps = {}) {
     get snapshot() { return snapshot; },
     get fullSnapshot() { return fullSnapshot; },
     get lastRender() { return vm.frame; },
+    get graphLayoutCacheStats() { return graphLayoutCache.stats(); },
     acceptSnapshot,
     draw,
     handleKey,

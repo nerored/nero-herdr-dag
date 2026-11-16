@@ -1,4 +1,5 @@
 import { constants, watch, existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { BoundedCache, BoundedKeySet } from './bounded-cache.mjs';
 import { lstat, open, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -26,6 +27,31 @@ const MAX_TASK_RECORD_BYTES = 4 * 1024 * 1024;
 // per second so the chart has a time axis without turning every duplicate
 // merge into a bar.
 const RATE_SAMPLE_MS = 1000;
+
+// Session-lifetime caches and their documented caps. The task store itself is
+// not a cache (`entries` mirrors the selectable records), but everything kept
+// *around* those records is keyed by ids that can disappear or be fabricated:
+// - cache/live: restored or live-overlay entries kept between refreshes. The
+//   caps match SNAPSHOT_LIMITS.tasks, so a snapshot the viewer accepts cannot
+//   lose a record to eviction; only a longer out-of-band payload is trimmed.
+// - rate*: one series/seen/source marker per task id, pruned against the
+//   visible entries after every refresh; the cap is the backstop for a session
+//   that never reaches that prune (watcher-only live overlays) or a store that
+//   keeps producing new ids.
+// - warnings: one coalescing key per store/record failure. Recency matters
+//   (a store that fails every refresh should not re-notify forever), so a key
+//   evicted after TASK_DATA_LIMITS.warnings newer failures may notify once
+//   more.
+// - legacyProbes: module-level root+session scan cache; root/session keys are
+//   small but unbounded across a directory tree, so keep the newest probes.
+export const TASK_DATA_LIMITS = Object.freeze({
+  cacheEntries: 8_192,
+  liveEntries: 8_192,
+  rateTaskIds: 8_192,
+  rateSamples: 32,
+  warnings: 256,
+  legacyProbes: 64,
+});
 
 function pathValue(value) {
   if (typeof value !== 'string') return undefined;
@@ -101,7 +127,11 @@ function sessionRoot(sessionFile) {
 // mtime: repeated resolutions re-read nothing while the directory is stable,
 // and a newly written record invalidates the cached negative result. The scan
 // itself is bounded so a large legacy store cannot stall session_start.
-const legacyProbes = new Map();
+const legacyProbes = new BoundedCache(TASK_DATA_LIMITS.legacyProbes, { name: 'legacy-probes' });
+
+export function legacyProbeStats() {
+  return legacyProbes.stats();
+}
 
 function storeHasSessionTasks(root, sessionId, report) {
   if (!sessionId) return false;
@@ -301,8 +331,10 @@ export class TaskData {
     notify = message => console.warn(message), onChange = () => {} } = {}) {
     Object.assign(this, { sessionId, notify, onChange });
     // warnOnce() is used while resolving roots, so the dedupe set exists before
-    // the first descriptor can fail to canonicalize.
-    this.warnings = new Set();
+    // the first descriptor can fail to canonicalize. It is capped: a long
+    // session may see unbounded distinct failure keys, but only the newest
+    // TASK_DATA_LIMITS.warnings coalescing keys are retained.
+    this.warnings = new BoundedKeySet(TASK_DATA_LIMITS.warnings, { name: 'task-warnings' });
     const report = problem => this.reportStoreProblem(problem);
     this.directories = Array.isArray(stateDirs) && stateDirs.length
       ? normalizeDescriptors(stateDirs, report)
@@ -314,11 +346,11 @@ export class TaskData {
     // per live payload instead of copying and scanning every record.
     this.childSessions = new Map();
     this.indexedEntries = this.entries;
-    this.cache = new Map();
-    this.live = new Map();
-    this.rateHistory = new Map();
-    this.rateSeen = new Map();
-    this.rateSources = new Map();
+    this.cache = new BoundedCache(TASK_DATA_LIMITS.cacheEntries, { name: 'task-cache' });
+    this.live = new BoundedCache(TASK_DATA_LIMITS.liveEntries, { name: 'task-live' });
+    this.rateHistory = new BoundedCache(TASK_DATA_LIMITS.rateTaskIds, { name: 'rate-history' });
+    this.rateSeen = new BoundedCache(TASK_DATA_LIMITS.rateTaskIds, { name: 'rate-seen' });
+    this.rateSources = new BoundedCache(TASK_DATA_LIMITS.rateTaskIds, { name: 'rate-sources' });
     this.sourceStatuses = [];
     this.staleCache = 0;
     this.stopped = false;
@@ -330,6 +362,22 @@ export class TaskData {
 
   get sources() {
     return this.sourceStatuses;
+  }
+
+  // Read-only cache inventory for scripts/bench.mjs and the memory tests.
+  // `entries` mirrors the selectable store records (not a cache); everything
+  // else reports its documented cap, current size and eviction total.
+  memoryStats() {
+    return {
+      entries: this.entries.size,
+      childSessions: this.childSessions.size,
+      cache: this.cache.stats(),
+      live: this.live.stats(),
+      rateHistory: this.rateHistory.stats(),
+      rateSeen: this.rateSeen.stats(),
+      rateSources: this.rateSources.stats(),
+      warnings: this.warnings.stats(),
+    };
   }
 
   // Keep one timestamped rate series per task. A changed rate always extends
@@ -372,7 +420,9 @@ export class TaskData {
     // One copy for the append, then trim in place: prior may be the shared
     // stored series and the retained history must stay immutable for losers.
     const history = [...prior, { at, rate: value }];
-    if (history.length > 32) history.splice(0, history.length - 32);
+    if (history.length > TASK_DATA_LIMITS.rateSamples) {
+      history.splice(0, history.length - TASK_DATA_LIMITS.rateSamples);
+    }
     task.tokenRateHistory = history;
     this.rateHistory.set(task.id, history);
     this.rateSeen.set(task.id, { at, rate: value, wall: now });
@@ -428,6 +478,9 @@ export class TaskData {
   }
 
   restore(tasks = []) {
+    // The restored cache mirrors a saved snapshot, which the viewer bounds to
+    // SNAPSHOT_LIMITS.tasks. The LRU cap is the backstop for a hand-built or
+    // corrupt state file; the oldest restored ids are dropped first.
     for (const raw of Array.isArray(tasks) ? tasks : []) {
       if (!raw || !taskId(raw.id)) continue;
       const isChild = taskId(raw.parentTaskId);

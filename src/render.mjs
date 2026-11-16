@@ -1,3 +1,4 @@
+import { BoundedCache } from './bounded-cache.mjs';
 import { Canvas } from './canvas.mjs';
 import {
   createFrameBuffers, detailLine, detailSection, drawScrollbar, fixedBodyLines, graphCanvasFor,
@@ -1221,20 +1222,53 @@ export { recordForKey } from './records.mjs';
 // repaints the same snapshot many times between accepted reads, so cache one
 // resolution per snapshot object and details subject. An accepted read
 // replaces the snapshot; mutating it in place is not supported.
+//
+// Cap: SUBJECT_RESOLUTION_LIMIT resolved subjects per snapshot. A frame paints
+// one details subject, so more than a handful only happens when the operator
+// cycles selection quickly; the LRU then drops the least recently painted
+// subject rather than retaining every key a snapshot ever saw. The WeakMap key
+// is the snapshot itself, so an accepted read releases the whole inner cache
+// with the old snapshot.
+export const SUBJECT_RESOLUTION_LIMIT = 8;
 const subjectResolutionCache = new WeakMap();
+const subjectResolutionCounters = {
+  snapshots: 0,
+  hits: 0,
+  misses: 0,
+  evictions: 0,
+  maxEntries: 0,
+};
+
+export function subjectResolutionStats() {
+  return { limit: SUBJECT_RESOLUTION_LIMIT, ...subjectResolutionCounters };
+}
+
 export function selectionResolution(snapshot, args, key) {
-  let byKey = subjectResolutionCache.get(snapshot);
-  if (!byKey) {
-    byKey = new Map();
-    subjectResolutionCache.set(snapshot, byKey);
+  let entry = subjectResolutionCache.get(snapshot);
+  if (!entry) {
+    entry = {
+      cache: new BoundedCache(SUBJECT_RESOLUTION_LIMIT, { name: 'subject-resolution' }),
+      evictionsSeen: 0,
+    };
+    subjectResolutionCache.set(snapshot, entry);
+    subjectResolutionCounters.snapshots++;
   }
-  if (byKey.has(key)) return byKey.get(key);
+  const cached = entry.cache.get(key);
+  if (cached !== undefined) {
+    subjectResolutionCounters.hits++;
+    return cached;
+  }
+  subjectResolutionCounters.misses++;
   const resolved = {
     record: recordTargetFor(snapshot, args),
     diagnosis: diagnosisFor(args),
   };
-  if (byKey.size >= 8) byKey.clear();
-  byKey.set(key, resolved);
+  entry.cache.set(key, resolved);
+  subjectResolutionCounters.evictions += entry.cache.evictions - entry.evictionsSeen;
+  entry.evictionsSeen = entry.cache.evictions;
+  if (entry.cache.size > subjectResolutionCounters.maxEntries) {
+    subjectResolutionCounters.maxEntries = entry.cache.size;
+  }
   return resolved;
 }
 

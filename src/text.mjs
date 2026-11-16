@@ -9,10 +9,33 @@ const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 // keep the pure result of each string and drop the oldest entry at the cap, so
 // a long-lived viewer cannot grow without limit on unique log lines.
 const CACHE_LIMIT = 4096;
+const CHAR_WIDTH_LIMIT = 1024;
 const cleanCache = new Map();
 const segmentCache = new Map();
 const charWidthCache = new Map();
 const widthCache = new Map();
+
+export const TEXT_CACHE_LIMITS = Object.freeze({
+  clean: CACHE_LIMIT,
+  segments: CACHE_LIMIT,
+  charWidth: CHAR_WIDTH_LIMIT,
+  width: CACHE_LIMIT,
+});
+
+// Read-only sizes for scripts/bench.mjs and the memory-bound tests. Each map
+// evicts its oldest inserted entry at the limit; labels are a finite input in
+// practice, so FIFO order is the cheapest correct bound here.
+export function textCacheStats() {
+  return {
+    limits: TEXT_CACHE_LIMITS,
+    sizes: {
+      clean: cleanCache.size,
+      segments: segmentCache.size,
+      charWidth: charWidthCache.size,
+      width: widthCache.size,
+    },
+  };
+}
 
 function cached(map, key, compute, limit = CACHE_LIMIT) {
   const hit = map.get(key);
@@ -70,7 +93,7 @@ export function segments(text) {
 
 export function charWidth(segment) {
   if (!segment) return 0;
-  return cached(charWidthCache, segment, () => measureCharWidth(segment), 1024);
+  return cached(charWidthCache, segment, () => measureCharWidth(segment), CHAR_WIDTH_LIMIT);
 }
 
 function measureCharWidth(segment) {

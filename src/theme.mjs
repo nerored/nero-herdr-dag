@@ -175,6 +175,10 @@ export function paletteAt(index) {
 // color, so the same dozens of palette strings are parsed thousands of times
 // per frame. Cache the pure result; callers only read the channels.
 const hexCache = new Map();
+export const HEX_CACHE_LIMIT = 512;
+export function themeCacheStats() {
+  return { limit: HEX_CACHE_LIMIT, size: hexCache.size };
+}
 export function parseHex(value) {
   const key = String(value ?? '');
   const hit = hexCache.get(key);
@@ -184,7 +188,7 @@ export function parseHex(value) {
     const number = Number.parseInt(match[1], 16);
     return [(number >> 16) & 255, (number >> 8) & 255, number & 255];
   })() : null;
-  if (hexCache.size >= 512) hexCache.delete(hexCache.keys().next().value);
+  if (hexCache.size >= HEX_CACHE_LIMIT) hexCache.delete(hexCache.keys().next().value);
   hexCache.set(key, result);
   return result;
 }
