@@ -1,8 +1,8 @@
+import { isBlockedState, isFailedState } from './model.mjs';
+
 // Pure triage helpers shared by the renderer and the viewer. Keeping the
 // filter/focus rules here means the graph, the summary chips, and the key
 // handlers cannot disagree about what "failed" or "critical" means.
-
-export const GRAPH_FILTERS = Object.freeze(['all', 'failed', 'blocked', 'running', 'critical']);
 
 export function nodeState(node) {
   return node?.state ?? node?.status;
@@ -16,9 +16,9 @@ export function nodeMatchesFilter(node, filter, criticalIds = new Set()) {
   const states = [nodeState(node), node?.status].filter(Boolean);
   switch (filter) {
     case 'failed':
-      return states.includes('failed') || states.includes('error') || states.includes('lost');
+      return states.some(isFailedState);
     case 'blocked':
-      return states.includes('blocked') || states.includes('paused');
+      return states.some(isBlockedState);
     case 'running':
       return states.includes('running');
     case 'critical':

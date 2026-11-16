@@ -1,5 +1,6 @@
-import { clean, clock, compactDuration, segments } from './text.mjs';
+import { clean, clock, compactDuration } from './text.mjs';
 import { t } from './i18n.mjs';
+import { byteLength, defined, integer, iso, number, text } from './normalize.mjs';
 import {
   cacheEvidence, errorEvidence, inferredTokenRate, normalizeRateHistory, replyEvidence,
   retryEvidence, retryFields, turnEvidence,
@@ -10,6 +11,13 @@ export const STATUSES = new Set([
   'completed', 'failed', 'cancelled', 'skipped', 'error', 'interrupted', 'lost',
 ]);
 export const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'skipped', 'error', 'interrupted', 'lost']);
+// Triage buckets, not raw states: the sidebar, graph filter and run summary
+// must agree that an error or lost node is a failure and paused work is
+// blocked. `done` stays completed-only progress.
+const FAILED_STATES = new Set(['failed', 'error', 'lost']);
+const BLOCKED_STATES = new Set(['blocked', 'paused']);
+export const isFailedState = state => FAILED_STATES.has(state);
+export const isBlockedState = state => BLOCKED_STATES.has(state);
 export const ACTIVITY_PHASES = new Set(['waiting', 'text', 'thinking', 'toolArgs', 'tool', 'retry']);
 export const STALL_TOKEN_MS = 30_000;
 export const STALL_WAIT_MS = 90_000;
@@ -17,32 +25,6 @@ export const MODES = new Set(['live', 'saved', 'demo']);
 export const PROVENANCE_FIELDS = ['state', 'percent', 'agent', 'model', 'thinking', 'reply', 'error', 'retries'];
 export const PROVENANCE_KINDS = new Set(['recorded', 'derived', 'simulated', 'unavailable', 'unknown']);
 const PROVENANCE_ORIGINS = new Set(['controller', 'demo-engine', 'legacy-snapshot', 'viewer-placeholder']);
-
-// A code-unit slice can end inside a surrogate pair or an emoji/ZWJ cluster,
-// leaving invalid Unicode in persisted excerpts. Keep whole graphemes only.
-const graphemeSlice = (value, limit) => {
-  if (value.length <= limit) return value;
-  let out = '';
-  for (const segment of segments(value)) {
-    if (out.length + segment.length > limit) break;
-    out += segment;
-  }
-  return out;
-};
-const text = (value, limit = 4096) => {
-  if (typeof value !== 'string') return undefined;
-  const valueText = clean(value).trim();
-  return valueText ? graphemeSlice(valueText, limit) : undefined;
-};
-const number = value => Number.isFinite(value) ? value : undefined;
-const integer = value => Number.isSafeInteger(value) && value >= 0 ? value : undefined;
-const iso = value => {
-  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
-};
-const byteLength = value => Buffer.byteLength(value, 'utf8');
-const defined = object => Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined));
 
 const provenanceEntry = (kind, from, truncated) => defined({ kind, from, truncated: truncated === true ? true : undefined });
 const unavailable = () => provenanceEntry('unavailable');
@@ -53,16 +35,19 @@ function explicitProvenanceEntry(value) {
   return provenanceEntry(value.kind, text(value.from, 64), value.truncated);
 }
 
-export function normalizeProvenance(raw, { fallback = 'unknown' } = {}) {
-  const source = raw && typeof raw === 'object' ? raw : {};
-  return Object.fromEntries(PROVENANCE_FIELDS.map(field => [
-    field,
-    explicitProvenanceEntry(source[field]) ?? provenanceEntry(fallback),
-  ]));
-}
-
-function allProvenance(kind) {
-  return Object.fromEntries(PROVENANCE_FIELDS.map(field => [field, provenanceEntry(kind)]));
+// One builder for every entity provenance record. Callers supply the entries
+// their source can prove; this function applies the one precedence rule:
+// explicit producer provenance, then the computed entry, then the legacy or
+// unavailable marker. Demo snapshots are simulated as a whole.
+function buildProvenance(raw, computed, { mode = 'live', legacy = false, fields = PROVENANCE_FIELDS, resolve } = {}) {
+  if (mode === 'demo') {
+    return Object.fromEntries(fields.map(field => [field, provenanceEntry('simulated')]));
+  }
+  return Object.fromEntries(fields.map(field => {
+    const explicit = provenanceField(raw, field);
+    const resolved = resolve ? resolve(field, explicit, computed) : explicit;
+    return [field, resolved ?? (legacy ? provenanceEntry('unknown') : computed[field] ?? provenanceEntry('unavailable'))];
+  }));
 }
 
 function inheritedProvenance(entry, fallbackFrom) {
@@ -103,20 +88,48 @@ export function snapshotProvenance(raw, mode = modeFor(raw)) {
   })).filter(([, value]) => value !== undefined));
 }
 
-export function taskProvenance(raw, mode = 'live', { legacy = false } = {}) {
-  if (mode === 'demo') return allProvenance('simulated');
+const modelDisplay = value => text(value?.display, 128) ?? text(value?.model_id, 128) ?? text(value, 128);
+
+function ownerFields(owner) {
+  if (!owner || typeof owner !== 'object') return {};
+  return {
+    ownerKind: text(owner.kind, 32),
+    ownerRunId: text(owner.runId, 80),
+    ownerNodeId: text(owner.nodeId, 80),
+    ownerTaskId: text(owner.taskId, 80),
+  };
+}
+
+// Plan artifacts are referenced inside the task prompt, but the prompt itself
+// is never persisted (the snapshot whitelist forbids prompt/transcript data).
+// Extract only the plan path, the acting role and the working directory.
+function planFields(spawn) {
+  const spec = spawn && typeof spawn === 'object' ? spawn : {};
+  const prompt = typeof spec.prompt === 'string' ? spec.prompt : '';
+  const match = /(?:^|[\s(])(\.omo\/(?:plans|drafts)\/[A-Za-z0-9._\/-]+\.md)/.exec(prompt);
+  const role = ['plan-reviewer', 'plan-consultant', 'ulw-execute', 'ulw-plan', 'mass-ulw']
+    .find(candidate => prompt.includes(candidate));
+  return {
+    planPath: match?.[1] ? text(match[1], 512) : undefined,
+    planRole: role ? text(role, 64) : undefined,
+    workdir: text(spec.cwd, 512),
+  };
+}
+
+function taskProvenanceValues(raw) {
   const stats = raw?.run_stats ?? raw?.runStats;
   const reply = replyEvidence(raw ?? {}, { live: raw?.live_progress });
   const error = errorEvidence(raw ?? {});
   const retry = retryEvidence(raw ?? {}, stats);
-  const computed = {
+  return {
     state: STATUSES.has(raw?.status) ? provenanceEntry('recorded', 'status') : provenanceEntry('derived', 'status'),
     percent: number(raw?.percent) !== undefined ? provenanceEntry('recorded', 'percent')
       : raw?.status === 'completed' ? provenanceEntry('derived', 'completed status') : unavailable(),
-    agent: text(raw?.agent, 64) ? provenanceEntry('recorded', 'agent')
-      : text(raw?.agent_type, 64) ? provenanceEntry('derived', 'agent_type')
-        : text(raw?.category, 64) ? provenanceEntry('derived', 'category') : unavailable(),
-    model: text(raw?.model ?? raw?.resolved_model?.display, 96) ? provenanceEntry('recorded', 'model') : unavailable(),
+    agent: text(raw?.agent, 128) ? provenanceEntry('recorded', 'agent')
+      : text(raw?.agent_type, 128) ? provenanceEntry('derived', 'agent_type')
+        : text(raw?.category, 128) ? provenanceEntry('derived', 'category') : unavailable(),
+    model: text(raw?.resolved_model?.display ?? raw?.model, 256)
+      ? provenanceEntry('recorded', 'model') : unavailable(),
     thinking: text(raw?.thinking ?? raw?.reasoning ?? raw?.reasoning_content ?? raw?.live_progress?.thinking, 1200)
       ? provenanceEntry('recorded', 'thinking') : unavailable(),
     reply: reply.reply !== undefined
@@ -127,14 +140,9 @@ export function taskProvenance(raw, mode = 'live', { legacy = false } = {}) {
       ? provenanceEntry(retry.retriesKind ?? 'recorded', retry.retriesSource)
       : unavailable(),
   };
-  return Object.fromEntries(PROVENANCE_FIELDS.map(field => [
-    field,
-    provenanceField(raw, field) ?? (legacy ? provenanceEntry('unknown') : computed[field]),
-  ]));
 }
 
-export function nodeProvenance(source, task, mode = 'live', { legacy = false } = {}) {
-  if (mode === 'demo') return allProvenance('simulated');
+function nodeProvenanceValues(source, task) {
   const stats = source?.run_stats ?? source?.runStats;
   const ownReply = replyEvidence(source ?? {});
   const ownError = errorEvidence(source ?? {});
@@ -161,33 +169,24 @@ export function nodeProvenance(source, task, mode = 'live', { legacy = false } =
       ? provenanceEntry(ownRetry.retriesKind ?? 'recorded', ownRetry.retriesSource)
       : task?.retries !== undefined ? inheritedProvenance(task.provenance?.retries, 'task.retries') : unavailable(),
   };
-  const resolve = field => {
-    const explicit = provenanceField(source, field);
-    // Older normalized snapshots can carry an explicit "unavailable" agent
-    // even though the linked task now supplies a category. That category is
-    // real evidence, so the derived value replaces the stale marker.
-    if (field === 'agent' && explicit?.kind === 'unavailable'
-      && computed.agent.kind === 'derived' && computed.agent.from === 'category') {
-      return computed.agent;
-    }
-    return explicit ?? (legacy ? provenanceEntry('unknown') : computed[field]);
-  };
-  return Object.fromEntries(PROVENANCE_FIELDS.map(field => [field, resolve(field)]));
+  // Older normalized snapshots can carry an explicit "unavailable" agent
+  // even though the linked task now supplies a category. That category is
+  // real evidence, so the derived value replaces the stale marker.
+  const resolve = (field, explicit) => field === 'agent' && explicit?.kind === 'unavailable'
+    && computed.agent.kind === 'derived' && computed.agent.from === 'category'
+    ? computed.agent
+    : explicit;
+  return { computed, resolve };
 }
 
-export function runProvenance(raw, nodes, mode = 'live', { legacy = false } = {}) {
-  if (mode === 'demo') return Object.fromEntries(['state', 'percent'].map(field => [field, provenanceEntry('simulated')]));
-  // An empty run has no nodes to derive a percentage from. Every on an empty
-  // array would otherwise claim a derived percentage for work that is absent.
+function runProvenanceValues(raw, nodes) {
+  // An empty run has no nodes to derive a percentage from. Every node on an
+  // empty array would otherwise claim a derived percentage for absent work.
   const known = nodes.length > 0 && nodes.every(node => Number.isFinite(node.percent));
-  const computed = {
+  return {
     state: STATUSES.has(raw?.status) ? provenanceEntry('recorded', 'status') : provenanceEntry('derived', 'nodes'),
     percent: known ? provenanceEntry('derived', 'nodes') : unavailable(),
   };
-  return Object.fromEntries(['state', 'percent'].map(field => [
-    field,
-    provenanceField(raw, field) ?? (legacy ? provenanceEntry('unknown') : computed[field]),
-  ]));
 }
 
 function outputEvidence(raw) {
@@ -295,67 +294,90 @@ export function normalizeChild(raw) {
   };
 }
 
-export function normalizeTask(raw, { mode = 'live', legacy = false } = {}) {
+// One task normalizer for the snapshot and host-store paths. `host` keeps the
+// 2000-unit text budget the task store promises and applies the host-only
+// owner/spawn-spec fields; every shared field follows one precedence so the
+// same record cannot render one value from TaskData and another from a
+// snapshot.
+export function normalizeTask(raw, { mode = 'live', legacy = false, host = false } = {}) {
   if (!raw || typeof raw !== 'object') return null;
-  const id = text(raw.id ?? raw.task_id, 80);
+  const id = text(host ? raw.task_id : raw.id ?? raw.task_id, 80);
   if (!id) return null;
+  const live = raw.live_progress;
   const stats = raw.run_stats ?? raw.runStats;
   // An unrecognized host status is not evidence of a pending task. Keep it
   // explicit so counts, ordering, and the status pill cannot claim a
   // lifecycle state the producer never reported.
   const status = STATUSES.has(raw.status) ? raw.status : 'unknown';
+  const percentSource = raw.percent ?? live?.percent;
+  const descriptionLimit = host ? 2000 : 240;
+  const owner = ownerFields(raw.owner);
+  const plan = planFields(raw.spawn_spec);
+  const rateHistory = normalizeRateHistory(raw.tokenRateHistory);
+  const tool = text(live?.current_tool, 128);
+  const liveLine = text(live?.last_assistant_line, 512);
+  const progress = text(raw.progress, 512)
+    ?? text([tool ? `[${tool}]` : undefined, liveLine].filter(Boolean).join(' '), 512)
+    ?? text(live?.activity, 512);
+  // Both paths must read the same percent evidence. A live-only percent is
+  // recorded percent provenance on the host task and on a snapshot task.
+  const provenanceRaw = { ...raw, status, percent: percentSource };
   const task = {
     id,
-    description: text(raw.description ?? raw.task_description ?? raw.name, 240) ?? id,
-    summary: text(raw.summary, 240),
+    description: text(raw.description, descriptionLimit)
+      ?? text(raw.task_description, descriptionLimit)
+      ?? text(raw.task_summary, descriptionLimit)
+      ?? text(raw.name, descriptionLimit)
+      ?? (host ? undefined : id),
+    summary: text(raw.summary, 240) ?? text(raw.task_summary, 240),
     status,
     parentTaskId: text(raw.parentTaskId ?? raw.parent_task_id, 80),
-    agent: text(raw.agent, 64) ?? text(raw.agent_type, 64),
-    model: text(raw.model ?? raw.resolved_model?.display, 96),
-    modelRequested: text(raw.modelRequested, 96),
-    modelEffective: text(raw.modelEffective, 96),
-    modelResolved: text(raw.modelResolved, 96),
-    category: text(raw.category, 64),
-    ownerKind: text(raw.ownerKind, 32),
-    ownerRunId: text(raw.ownerRunId, 80),
-    ownerNodeId: text(raw.ownerNodeId, 80),
-    ownerTaskId: text(raw.ownerTaskId, 80),
-    executionMode: text(raw.executionMode, 32),
-    backgroundMode: text(raw.backgroundMode, 32),
+    agent: text(raw.agent, 128) ?? text(raw.agent_type, 128),
+    model: text(raw.resolved_model?.display, 256) ?? text(raw.model, 256),
+    modelRequested: text(raw.modelRequested, 128) ?? modelDisplay(raw.requested_model),
+    modelEffective: text(raw.modelEffective, 128) ?? modelDisplay(raw.effective_model),
+    modelResolved: text(raw.modelResolved, 128) ?? modelDisplay(raw.resolved_model),
+    category: text(raw.category, 128),
+    ownerKind: text(raw.ownerKind, 32) ?? owner.ownerKind,
+    ownerRunId: text(raw.ownerRunId, 80) ?? owner.ownerRunId,
+    ownerNodeId: text(raw.ownerNodeId, 80) ?? owner.ownerNodeId,
+    ownerTaskId: text(raw.ownerTaskId, 80) ?? owner.ownerTaskId,
+    executionMode: text(raw.executionMode ?? raw.execution_mode, 32),
+    backgroundMode: text(raw.backgroundMode ?? raw.background_mode, 32),
     depth: number(raw.depth),
-    residencyState: text(raw.residencyState, 32),
-    parentSessionId: text(raw.parentSessionId, 80),
-    rootSessionId: text(raw.rootSessionId, 80),
-    childSessionId: text(raw.childSessionId, 80),
-    runtimeMs: number(raw.runtimeMs),
-    generationMs: number(raw.generationMs),
-    tokensPerSecond: number(raw.tokensPerSecond),
-    costUsd: number(raw.costUsd),
-    cacheHitRate: number(raw.cacheHitRate),
-    planPath: text(raw.planPath, 512),
-    planRole: text(raw.planRole, 64),
-    workdir: text(raw.workdir, 512),
-    progress: text(raw.progress ?? raw.live_progress?.last_assistant_line, 512),
-    thinking: text(raw.thinking ?? raw.reasoning ?? raw.reasoning_content ?? raw.live_progress?.thinking, 1200),
-    percent: number(raw.percent) ?? (status === 'completed' ? 100 : undefined),
-    tokensIn: number(raw.tokensIn ?? raw.tokens_in ?? stats?.input_tokens),
-    tokensOut: number(raw.tokensOut ?? raw.tokens_out ?? stats?.output_tokens),
+    residencyState: text(raw.residencyState ?? raw.residency_state, 32),
+    configGeneration: integer(raw.configGeneration ?? raw.config_generation),
+    parentSessionId: text(raw.parentSessionId ?? raw.parent_session_id, 80),
+    rootSessionId: text(raw.rootSessionId ?? raw.root_session_id, 80),
+    childSessionId: text(raw.childSessionId ?? raw.child_session_id, 80),
+    runtimeMs: number(raw.runtimeMs ?? raw.runtime_ms ?? stats?.runtime_ms),
+    generationMs: number(raw.generationMs ?? raw.generation_ms ?? stats?.generation_ms),
+    tokensPerSecond: number(raw.tokensPerSecond ?? raw.tokens_per_second ?? stats?.tokens_per_second),
+    planPath: text(raw.planPath, 512) ?? plan.planPath,
+    planRole: text(raw.planRole, 64) ?? plan.planRole,
+    workdir: text(raw.workdir, 512) ?? plan.workdir,
+    progress,
+    thinking: text(raw.thinking ?? raw.reasoning ?? raw.reasoning_content ?? live?.thinking, 1200),
+    percent: percentFor({ percent: percentSource, state: status }),
+    tokensIn: number(raw.tokensIn ?? raw.tokens_in ?? raw.usage?.input_tokens ?? raw.token_usage?.input ?? stats?.input_tokens),
+    tokensOut: number(raw.tokensOut ?? raw.tokens_out ?? raw.usage?.output_tokens ?? raw.token_usage?.output ?? stats?.output_tokens),
     ...inferredTokenRate(raw, stats),
-    ...(normalizeRateHistory(raw.tokenRateHistory) ? { tokenRateHistory: normalizeRateHistory(raw.tokenRateHistory) } : {}),
+    ...(rateHistory ? { tokenRateHistory: rateHistory } : {}),
     ...cacheEvidence(raw, stats),
     ...retryFields(retryEvidence(raw, stats)),
-    ...replyEvidence(raw, { live: raw.live_progress }),
+    ...replyEvidence(raw, { live }),
     ...errorEvidence(raw),
     ...turnEvidence(raw, stats),
-    startedAt: iso(raw.startedAt ?? raw.started_at ?? raw.created_at),
-    completedAt: iso(raw.completedAt ?? raw.completed_at ?? raw.terminal_at),
+    startedAt: iso(raw.startedAt ?? raw.started_at ?? live?.started_at ?? raw.created_at),
+    completedAt: iso(raw.completedAt ?? raw.completed_at ?? raw.terminal_at)
+      ?? (TERMINAL.has(status) ? iso(raw.updatedAt ?? raw.updated_at) : undefined),
     updatedAt: iso(raw.updatedAt ?? raw.updated_at),
     activity: normalizeActivity(raw.activity),
     logs: Array.isArray(raw.logs) ? raw.logs.map(line => text(line, 240)).filter(Boolean).slice(-12) : undefined,
     children: Array.isArray(raw.children) ? raw.children.map(normalizeChild).filter(Boolean) : undefined,
     source: text(raw.source, 80),
     variants: normalizeVariants(raw.variants),
-    provenance: taskProvenance(raw, mode, { legacy }),
+    provenance: buildProvenance(provenanceRaw, taskProvenanceValues(provenanceRaw), { mode, legacy }),
   };
   if (TERMINAL.has(status)) {
     delete task.progress;
@@ -396,7 +418,7 @@ export function normalizeRun(raw, taskMap = new Map(), { mode = 'live', legacy =
     const task = taskId ? taskMap.get(taskId) : undefined;
     const stats = source.runStats ?? source.run_stats;
     const state = source.state;
-    const percent = number(source.percent) ?? number(task?.percent) ?? (state === 'completed' ? 100 : undefined);
+    const { computed: provenanceValues, resolve } = nodeProvenanceValues(source, task);
     nodes.push({
       id: nodeId,
       label: text(source.label, 80) ?? task?.description ?? nodeId,
@@ -404,7 +426,7 @@ export function normalizeRun(raw, taskMap = new Map(), { mode = 'live', legacy =
       attempt: integer(source.attempt) ?? 1,
       taskId,
       task,
-      percent: percent === undefined ? undefined : Math.max(0, Math.min(100, percent)),
+      percent: percentFor({ percent: source.percent ?? task?.percent, state }),
       category: text(source.category, 64) ?? text(source.route?.category, 64) ?? task?.category,
       agent: text(source.agent, 64) ?? task?.agent,
       model: text(source.model, 96) ?? task?.model,
@@ -432,7 +454,7 @@ export function normalizeRun(raw, taskMap = new Map(), { mode = 'live', legacy =
       ...errorEvidence(source, task),
       ...outputEvidence(source),
       ...artifactEvidence(source),
-      provenance: nodeProvenance(source, task, mode, { legacy }),
+      provenance: buildProvenance(source, provenanceValues, { mode, legacy, resolve }),
     });
   }
   const edges = [];
@@ -467,7 +489,7 @@ export function normalizeRun(raw, taskMap = new Map(), { mode = 'live', legacy =
     checkpointSeq: integer(raw.checkpointSeq ?? raw.checkpoint_seq),
     source: text(raw.source, 80),
     variants: normalizeVariants(raw.variants),
-    provenance: runProvenance(raw, nodes, mode, { legacy }),
+    provenance: buildProvenance(raw, runProvenanceValues(raw, nodes), { mode, legacy, fields: ['state', 'percent'] }),
     ...(warnings.length ? { warnings, warningCount: warnings.length } : {}),
     nodes,
     edges,
@@ -476,9 +498,9 @@ export function normalizeRun(raw, taskMap = new Map(), { mode = 'live', legacy =
 
 export function deriveRunStatus(nodes) {
   if (!nodes.length) return 'pending';
-  if (nodes.some(node => node.state === 'failed' || node.state === 'error' || node.state === 'lost')) return 'failed';
+  if (nodes.some(node => isFailedState(node.state))) return 'failed';
   if (nodes.some(node => node.state === 'running')) return 'running';
-  if (nodes.some(node => node.state === 'blocked' || node.state === 'paused')) return 'blocked';
+  if (nodes.some(node => isBlockedState(node.state))) return 'blocked';
   if (nodes.some(node => node.state === 'interrupted')) return 'interrupted';
   if (nodes.every(node => TERMINAL.has(node.state))) {
     return nodes.every(node => node.state === 'completed' || node.state === 'skipped') ? 'completed' : 'cancelled';
@@ -573,18 +595,20 @@ export function runStats(run) {
   let sum = 0;
   let percentKnown = total > 0;
   let finished = 0;
+  let failed = 0;
+  let blocked = 0;
   for (const node of run.nodes) {
     counts[node.state] = (counts[node.state] ?? 0) + 1;
     if (TERMINAL.has(node.state)) finished += 1;
+    if (isFailedState(node.state)) failed += 1;
+    if (isBlockedState(node.state)) blocked += 1;
     if (Number.isFinite(node.percent)) sum += node.percent;
     else percentKnown = false;
   }
-  // `failed` and `blocked` are triage buckets, not raw state names: the
-  // sidebar, the graph filter and the run summary must agree that an error or
-  // lost node is a failure and paused work is blocked. `done` stays
-  // completed-only progress; `finished` counts every terminal state.
-  counts.failed += counts.error + counts.lost;
-  counts.blocked += counts.paused;
+  // `failed` and `blocked` are triage buckets, not raw state names: `done`
+  // stays completed-only progress; `finished` counts every terminal state.
+  counts.failed = failed;
+  counts.blocked = blocked;
   return {
     total,
     counts,
@@ -593,12 +617,6 @@ export function runStats(run) {
     done: counts.completed,
     finished,
   };
-}
-
-export function taskStatusCounts(tasks) {
-  const counts = {};
-  for (const task of tasks) counts[task.status] = (counts[task.status] ?? 0) + 1;
-  return counts;
 }
 
 export function linkedTaskIds(snapshot) {
@@ -715,20 +733,13 @@ export function activitySummary(activity, { now = Date.now(), language = 'en' } 
   };
 }
 
-export function percentOf(entity) {
+// The only entity-percent derivation. A recorded value is clamped to the
+// renderable range; a completed entity without one is a derived 100%.
+export function percentFor(entity) {
   if (!entity) return undefined;
   if (Number.isFinite(entity.percent)) return Math.max(0, Math.min(100, entity.percent));
-  if (entity.state === 'completed' || entity.status === 'completed') return 100;
-  return undefined;
-}
-
-export function projectNode(node, run, snapshot) {
-  const task = node.task ?? snapshot?.tasks?.find(candidate => candidate.id === node.taskId);
-  return { ...node, task };
-}
-
-export function taskForNode(node, snapshot) {
-  return node.task ?? snapshot?.tasks?.find(task => task.id === node.taskId);
+  const state = entity.state ?? entity.status;
+  return state === 'completed' ? 100 : undefined;
 }
 
 // The inverse lookup used by the navigation panel: a task has a place in the

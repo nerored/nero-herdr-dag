@@ -1,4 +1,5 @@
-import { clean, segments } from './text.mjs';
+import { clean, graphemeSlice } from './text.mjs';
+import { byteLength, defined, integer, iso, number, text } from './normalize.mjs';
 
 // One normalizer for host-record evidence. Both the persisted OmO task path
 // (task-data.normalizeOmOTask) and the snapshot path (model.normalizeTask /
@@ -7,31 +8,6 @@ import { clean, segments } from './text.mjs';
 // fallbacks differed depending on which entry point read the same record.
 // Keeping the rules here makes one host field mean one value everywhere.
 
-// A code-unit slice can end inside a surrogate pair or an emoji/ZWJ cluster,
-// leaving invalid Unicode in persisted excerpts. Keep whole graphemes only.
-const graphemeSlice = (value, limit) => {
-  if (value.length <= limit) return value;
-  let out = '';
-  for (const segment of segments(value)) {
-    if (out.length + segment.length > limit) break;
-    out += segment;
-  }
-  return out;
-};
-const text = (value, limit = 4096) => {
-  if (typeof value !== 'string') return undefined;
-  const valueText = clean(value).trim();
-  return valueText ? graphemeSlice(valueText, limit) : undefined;
-};
-const number = value => Number.isFinite(value) ? value : undefined;
-const integer = value => Number.isSafeInteger(value) && value >= 0 ? value : undefined;
-const iso = value => {
-  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
-};
-const byteLength = value => Buffer.byteLength(value, 'utf8');
-const defined = object => Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined));
 const RATE_KINDS = new Set(['instant', 'average', 'history']);
 const rateKind = value => RATE_KINDS.has(value) ? value : undefined;
 

@@ -1,7 +1,8 @@
-// Pure run-level aggregation for the run overview. No I/O, no i18n, no clock
-// reads beyond the `now` the caller supplies: live snapshots pass the wall
-// clock, saved/stale snapshots pass the capture instant so durations freeze.
-const number = value => (Number.isFinite(value) ? value : undefined);
+import { number } from './normalize.mjs';
+
+// Pure run-level aggregation for the run overview. No I/O, no i18n reads and
+// no clock reads beyond the `now` the caller supplies: live snapshots pass the
+// wall clock, saved/stale snapshots pass the capture instant so durations freeze.
 const time = value => {
   const ms = Date.parse(value ?? '');
   return Number.isFinite(ms) ? ms : undefined;

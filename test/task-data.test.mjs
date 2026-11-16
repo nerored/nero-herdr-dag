@@ -1185,3 +1185,24 @@ test('F-42 task-data and model share reply, retry, cache, rate, and turn evidenc
   assert.equal(legacy.reply.length, 1200);
   assert.equal(legacy.replyTruncated, true);
 });
+
+test('host and snapshot tasks share a live-only percent provenance', () => {
+  const running = {
+    task_id: 'st_livepct', id: 'st_livepct', status: 'running',
+    live_progress: { percent: 40 },
+  };
+  const hostRunning = normalizeOmOTask(running);
+  const snapshotRunning = normalizeTask(running);
+  assert.equal(hostRunning.percent, 40);
+  assert.equal(snapshotRunning.percent, 40);
+  assert.deepEqual(hostRunning.provenance.percent, { kind: 'recorded', from: 'percent' });
+  assert.deepEqual(snapshotRunning.provenance.percent, hostRunning.provenance.percent);
+
+  const completed = { ...running, status: 'completed' };
+  const hostCompleted = normalizeOmOTask(completed);
+  const snapshotCompleted = normalizeTask(completed);
+  assert.equal(hostCompleted.percent, 40);
+  assert.equal(snapshotCompleted.percent, 40);
+  assert.deepEqual(hostCompleted.provenance.percent, { kind: 'recorded', from: 'percent' });
+  assert.deepEqual(snapshotCompleted.provenance.percent, hostCompleted.provenance.percent);
+});

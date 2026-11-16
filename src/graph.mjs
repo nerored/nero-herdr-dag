@@ -770,10 +770,6 @@ export function drawGraph(canvas, layout, options) {
 
 export { WIRE_GLYPHS, WireGrid, wirePoints, routeWirePoints, cellsAlong, pathHitsBox, MAX_LAYOUT_ROWS };
 
-export function graphHeight(layout) {
-  return layout.height;
-}
-
 export function nodeScrollTarget(layout, nodeId, viewportHeight) {
   const box = layout.boxes.get(nodeId);
   if (!box) return 0;

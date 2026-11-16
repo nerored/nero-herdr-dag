@@ -2,13 +2,12 @@ import { statSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import { modeFor } from './model.mjs';
 import { absolutePath, safeFileWithin } from './safe-path.mjs';
+import { defined } from './normalize.mjs';
 
 // A raw record is one task/checkpoint JSON document. Keep the read surface
 // bounded so a hostile store cannot stream an arbitrary file into the terminal.
 export const MAX_RECORD_BYTES = 4 * 1024 * 1024;
 const SAFE_RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
-
-const defined = object => Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined));
 
 // Record roots come from snapshot provenance or a store descriptor and are
 // always absolute, control-free paths. Everything below the root is derived.

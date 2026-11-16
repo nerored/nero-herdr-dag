@@ -163,30 +163,18 @@ function referenceCounts(file, name, { local = false } = {}) {
   return { internal, production, test };
 }
 
-// GAP-9 in .omo/plans/quality-and-next.md. Every entry is exported (or, for
-// `count`, declared) but has no production reader. GRAPH_FILTERS survives only
-// because a test reads it. Task 26 deletes these symbols; when it does, shrink
-// this list in the same commit and the scan stays green.
-const GAP9_SYMBOLS = Object.freeze([
-  { name: 'normalizeProvenance', file: 'src/model.mjs', kind: 'export', status: 'dead' },
-  { name: 'taskStatusCounts', file: 'src/model.mjs', kind: 'export', status: 'dead' },
-  { name: 'percentOf', file: 'src/model.mjs', kind: 'export', status: 'dead' },
-  { name: 'projectNode', file: 'src/model.mjs', kind: 'export', status: 'dead' },
-  { name: 'taskForNode', file: 'src/model.mjs', kind: 'export', status: 'dead' },
-  { name: 'graphHeight', file: 'src/graph.mjs', kind: 'export', status: 'dead' },
-  { name: 'GRAPH_FILTERS', file: 'src/cockpit.mjs', kind: 'export', status: 'test-only' },
-  { name: 'count', file: 'src/task-data.mjs', kind: 'local', status: 'dead' },
+// GAP-9 in .omo/plans/quality-and-next.md. Task 26 deleted every symbol; this
+// list now pins the removal so a reintroduced export or lookup fails the scan.
+const GAP9_REMOVED = Object.freeze([
+  { name: 'normalizeProvenance', file: 'src/model.mjs', kind: 'export' },
+  { name: 'taskStatusCounts', file: 'src/model.mjs', kind: 'export' },
+  { name: 'percentOf', file: 'src/model.mjs', kind: 'export' },
+  { name: 'projectNode', file: 'src/model.mjs', kind: 'export' },
+  { name: 'taskForNode', file: 'src/model.mjs', kind: 'export' },
+  { name: 'graphHeight', file: 'src/graph.mjs', kind: 'export' },
+  { name: 'GRAPH_FILTERS', file: 'src/cockpit.mjs', kind: 'export' },
+  { name: 'count', file: 'src/task-data.mjs', kind: 'local' },
 ]);
-
-function classify(spec) {
-  const counts = referenceCounts(spec.file, spec.name, { local: spec.kind === 'local' });
-  if (spec.kind === 'local') {
-    return { ...spec, ...counts, exported: false, status: counts.internal === 0 ? 'dead' : 'live' };
-  }
-  const exported = declaredExports(spec.file).has(spec.name);
-  const status = counts.production > 0 ? 'live' : counts.test > 0 ? 'test-only' : 'dead';
-  return { ...spec, ...counts, exported, status };
-}
 
 const MATRIX_MODULES = [
   'src/render.mjs',
@@ -253,45 +241,33 @@ test('viewer imports render only through the public frame API', () => {
   assert.deepEqual(outside, [], `viewer reached past the public frame API: ${outside.join(', ')}`);
 });
 
-test('the GAP-9 dead and test-only export list is detected exactly', t => {
-  const report = GAP9_SYMBOLS.map(classify);
-
-  for (const item of report) {
-    const expected = GAP9_SYMBOLS.find(spec => spec.name === item.name).status;
-    if (item.kind === 'export') {
-      assert.ok(item.exported, `${item.name} is expected to still be exported from ${item.file}`);
-      assert.equal(item.production, 0, `${item.name} gained a production reader; remove it from the GAP-9 list`);
-    } else {
-      assert.equal(item.exported, false, `${item.name} is a module-local symbol`);
+test('the GAP-9 dead and duplicate symbols are gone', t => {
+  for (const spec of GAP9_REMOVED) {
+    if (spec.kind === 'export') {
+      assert.equal(declaredExports(spec.file).has(spec.name), false,
+        `${spec.name} was deleted from ${spec.file}`);
     }
-    assert.equal(item.status, expected, `${item.name} is no longer ${expected}`);
+    const counts = referenceCounts(spec.file, spec.name, { local: spec.kind === 'local' });
+    const readers = spec.kind === 'local'
+      ? counts.internal
+      : counts.internal + counts.production + counts.test;
+    assert.equal(readers, 0, `${spec.name} still has a reader`);
   }
 
-  assert.deepEqual(
-    report.map(item => `${item.name}:${item.status}`),
-    GAP9_SYMBOLS.map(spec => `${spec.name}:${spec.status}`),
-    'the detected dead/test-only set no longer matches the GAP-9 list',
-  );
-
-  const filters = report.find(item => item.name === 'GRAPH_FILTERS');
-  assert.ok(filters.test > 0, 'GRAPH_FILTERS should still be read by a test');
-
-  // GAP-9 also calls out the duplicate lookup. It is private, so it cannot
-  // leak into the public boundary; nodeForTask stays the one public lookup.
-  assert.equal(declaredExports('src/render.mjs').has('linkedNodeForTask'), false, 'linkedNodeForTask must stay private');
+  // GAP-9 also calls out the duplicate lookup. The renderer now reads
+  // model.nodeForTask, the one public task-to-node lookup.
+  assert.equal(declaredExports('src/render.mjs').has('linkedNodeForTask'), false,
+    'linkedNodeForTask must stay deleted');
   assert.ok(declaredExports('src/model.mjs').has('nodeForTask'), 'model.nodeForTask is the public lookup');
   const duplicate = referenceCounts('src/render.mjs', 'linkedNodeForTask');
-  const duplicateState = duplicate.internal > 0
-    ? `private duplicate still has ${duplicate.internal} call site(s)`
-    : 'duplicate already removed';
+  assert.equal(duplicate.internal + duplicate.production + duplicate.test, 0,
+    'the private duplicate lookup must have no reader');
 
   t.diagnostic('architecture boundary matrix');
   for (const row of boundaryMatrix()) {
     t.diagnostic(`  ${row.file} -> ${row.imports.length ? row.imports.join(', ') : '(none)'}${row.fs ? ' [+fs]' : ''}`);
   }
-  t.diagnostic('GAP-9 dead/test-only symbols');
-  for (const item of report) {
-    t.diagnostic(`  ${item.name} @ ${item.file} ${item.kind} ${item.status} (internal ${item.internal}, production ${item.production}, test ${item.test})`);
-  }
-  t.diagnostic(`duplicate lookup: render.linkedNodeForTask ${duplicateState}`);
+  t.diagnostic('GAP-9 removed symbols');
+  for (const spec of GAP9_REMOVED) t.diagnostic(`  ${spec.name} @ ${spec.file} ${spec.kind} removed`);
+  t.diagnostic('duplicate lookup: render.linkedNodeForTask removed');
 });

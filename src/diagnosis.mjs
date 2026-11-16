@@ -1,9 +1,10 @@
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { normalizeLanguage, statusLabel, t } from './i18n.mjs';
-import { modeFor, nodeActivity } from './model.mjs';
+import { isBlockedState, modeFor, nodeActivity } from './model.mjs';
 import { recordEntry, relativeDisplay } from './records.mjs';
 import { absolutePath, safeFileWithin, safeOpenRecordPath } from './safe-path.mjs';
 import { clean } from './text.mjs';
+import { defined } from './normalize.mjs';
 
 // States that stop a subject before its nominal goal. They own a diagnosis
 // card and a copyable evidence bundle; they never expose a retry action.
@@ -15,8 +16,6 @@ export const DIAGNOSIS_ACTIONS = Object.freeze(['c', 'p', 'o']);
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 const SAFE_RELATIVE = /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
-
-const defined = object => Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined));
 
 function blockedUpstream(run, node) {
   if (!run || !node) return [];
@@ -100,7 +99,7 @@ export function diagnosisFor({ snapshot, run, node, task, subject } = {}) {
   const taskId = taskEntity?.id ?? node?.taskId;
   const root = simulated ? undefined : absolutePath(snapshot?.provenance?.taskStateDir);
   const reason = entity.error;
-  const blockedBy = state === 'blocked' || state === 'paused' ? blockedUpstream(run, node) : [];
+  const blockedBy = isBlockedState(state) ? blockedUpstream(run, node) : [];
 
   const records = [];
   if (root && taskId && SAFE_ID.test(taskId)) {

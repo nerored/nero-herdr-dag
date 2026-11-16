@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  GRAPH_FILTERS, criticalNodeIds, filterCounts, focusSubgraph, nextNodeId, nodeMatchesFilter, nodeState,
+  criticalNodeIds, filterCounts, focusSubgraph, nextNodeId, nodeMatchesFilter, nodeState,
 } from '../src/cockpit.mjs';
 
 const node = (id, state, overrides = {}) => ({ id, label: id, state, ...overrides });
@@ -31,7 +31,6 @@ test('node state falls back between state and status', () => {
 
 test('filters cover failed, blocked, running, and critical nodes', () => {
   const summary = { critical: { nodeIds: ['a', 'b', 'c'] } };
-  assert.deepEqual(GRAPH_FILTERS, ['all', 'failed', 'blocked', 'running', 'critical']);
   assert.deepEqual(filterCounts(run.nodes, summary), {
     all: 6, failed: 2, blocked: 1, running: 1, critical: 3,
   });

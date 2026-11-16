@@ -21,7 +21,7 @@ import { computeLayout, drawGraph, nodeScrollTarget, spinnerFrame } from './grap
 import { statusLabel, t } from './i18n.mjs';
 import {
   activitySummary, compareNavigationTasks, elapsedLabel, incoming, isActiveRun, modeFor, nodeActivity,
-  nodeMap, outgoing, PROVENANCE_FIELDS, PROVENANCE_KINDS, runStats, TERMINAL,
+  nodeForTask, nodeMap, outgoing, percentFor, PROVENANCE_FIELDS, PROVENANCE_KINDS, runStats, TERMINAL,
 } from './model.mjs';
 import { recordTargetFor } from './records.mjs';
 import { scrollbarGeometry } from './scroll.mjs';
@@ -423,24 +423,21 @@ export function percentInfo(entity, language, counts) {
   // carries `unknown` provenance for an explicit percent, and an explicit
   // `unavailable` entry can still own a finite value; both keep the numeric
   // label instead of claiming a provenance the producer never supplied.
-  const derived = entry?.kind === 'derived';
+  // Completed status is a recorded fact. Without a recorded percent the only
+  // honest completion value is the derived 100% the model supplies.
+  const completedFallback = !Number.isFinite(entity?.percent) && state === 'completed';
+  const derived = entry?.kind === 'derived' || completedFallback;
   const completedDerived = derived && state === 'completed';
   const derivedStatusLabel = value => t(language, 'percentDerivedStatus', { value });
-  // Completed status is a recorded fact. Without a recorded percent the only
-  // honest completion value is a derived 100%; a recorded value always wins.
-  if (!Number.isFinite(entity?.percent) && state === 'completed') {
-    const value = 100;
-    const label = derivedStatusLabel(value);
-    return { known: true, derived: true, value, label, compact: label };
-  }
-  if (Number.isFinite(entity?.percent)) {
-    const value = Math.round(Math.max(0, Math.min(100, entity.percent)));
+  const value = percentFor(entity);
+  if (value !== undefined) {
+    const rounded = Math.round(value);
     const label = derived
-      ? (completedDerived && value === 100
-        ? derivedStatusLabel(value)
-        : t(language, 'percentDerived', { value }))
-      : `${value}%`;
-    return { known: true, derived, value, label, compact: label };
+      ? (completedDerived && rounded === 100
+        ? derivedStatusLabel(rounded)
+        : t(language, 'percentDerived', { value: rounded }))
+      : `${rounded}%`;
+    return { known: true, derived, value: rounded, label, compact: label };
   }
   const running = entityState(entity) === 'running';
   // Done/total is the honest progress signal when the producer supplies no
@@ -1171,15 +1168,6 @@ function thinkingOutput(canvas, x, y, w, bottom, source, palette, language) {
   return y;
 }
 
-function linkedNodeForTask(snapshot, taskId) {
-  for (const run of snapshot?.runs ?? []) {
-    const node = run.nodes.find(candidate => candidate.taskId === taskId);
-    if (node) return { run, node };
-  }
-  return undefined;
-}
-
-
 export function diagnosisForSelection(snapshot, ui) {
   const selection = resolveSelection(snapshot, ui);
   return selection.subject ? diagnosisFor({ ...selection, subject: selection.kind }) : null;
@@ -1230,7 +1218,7 @@ export function resolveSelection(snapshot, ui, { allowRunFallback = false } = {}
   const focusedTask = tasks.find(candidate => candidate.id === ui?.selectedTaskId);
   const taskFocus = ui?.focus === 'tasks' || (ui?.focus === 'details' && ui?.lastFocus === 'tasks');
   const showTask = Boolean(taskFocus && focusedTask);
-  const linked = showTask ? linkedNodeForTask(snapshot, focusedTask.id) : undefined;
+  const linked = showTask ? nodeForTask(snapshot, focusedTask.id) : undefined;
   const run = linked?.run ?? baseRun;
   const node = showTask
     ? linked?.node
@@ -1276,7 +1264,7 @@ function taskDetails(canvas, rect, task, snapshot, ui, {
   now, time, motion = true, palette, language, viewportH, freshness,
 }) {
   const viewNow = freshness?.stale ? freshness.frozenNow : now;
-  const linked = linkedNodeForTask(snapshot, task.id);
+  const linked = nodeForTask(snapshot, task.id);
   const { diagnosis, record } = selectionResolution(
     snapshot,
     { snapshot, run: linked?.run, node: linked?.node, task, subject: 'task' },

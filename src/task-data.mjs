@@ -4,29 +4,16 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { clean, graphemeSlice } from './text.mjs';
-import { TERMINAL } from './model.mjs';
-import {
-  cacheEvidence, errorEvidence, inferredTokenRate, normalizeRateHistory, replyEvidence,
-  retryEvidence, turnEvidence,
-} from './evidence.mjs';
+import { normalizeTask, TERMINAL } from './model.mjs';
+import { normalizeRateHistory } from './evidence.mjs';
+import { iso } from './normalize.mjs';
 import { projectKey } from './omo.mjs';
 import { readEnv } from './env.mjs';
 
 const taskId = value => typeof value === 'string' && /^st_[A-Za-z0-9_-]{1,253}$/.test(value);
-// Host text is cleaned, trimmed, then cut on a grapheme boundary so a
-// surrogate pair or ZWJ cluster is never split. Whitespace-only values are
-// absent, not an empty string.
-const text = (value, limit = 2000) => {
-  if (typeof value !== 'string') return undefined;
-  const normalized = clean(value).trim();
-  return normalized ? graphemeSlice(normalized, limit) : undefined;
-};
-const count = value => Number.isSafeInteger(value) && value >= 0 ? value : undefined;
-const numeric = value => Number.isFinite(value) ? value : undefined;
 // Notifications are rendered as-is by the host UI, so strip terminal control
 // sequences and cap length before interpolating record names or fs errors.
 const notifyText = (value, limit = 240) => graphemeSlice(clean(value), limit);
-const defined = object => Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined));
 const ACTIVE = new Set(['pending', 'running']);
 const SCAN_BATCH = 8;
 // The legacy flat store can hold arbitrarily many sessions. Cap the probe so
@@ -252,104 +239,11 @@ export function resolveTaskStateDir(options = {}) {
   return join(agentDir, 'projects', projectKey(working), 'senpi-task');
 }
 
-function iso(value) {
-  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
-}
-
-const modelDisplay = value => text(value?.display, 128) ?? text(value?.model_id, 128) ?? text(value, 128);
-
-function ownerFields(owner) {
-  if (!owner || typeof owner !== 'object') return {};
-  return defined({
-    ownerKind: text(owner.kind, 32),
-    ownerRunId: text(owner.runId, 80),
-    ownerNodeId: text(owner.nodeId, 80),
-    ownerTaskId: text(owner.taskId, 80),
-  });
-}
-
-// Plan artifacts are referenced inside the task prompt, but the prompt itself
-// is never persisted (the snapshot whitelist forbids prompt/transcript data).
-// Extract only the plan path, the acting role and the working directory.
-function planFields(spawn) {
-  const spec = spawn && typeof spawn === 'object' ? spawn : {};
-  const prompt = typeof spec.prompt === 'string' ? spec.prompt : '';
-  const match = /(?:^|[\s(])(\.omo\/(?:plans|drafts)\/[A-Za-z0-9._\/-]+\.md)/.exec(prompt);
-  const role = ['plan-reviewer', 'plan-consultant', 'ulw-execute', 'ulw-plan', 'mass-ulw']
-    .find(candidate => prompt.includes(candidate));
-  return defined({
-    planPath: match?.[1] ? text(match[1], 512) : undefined,
-    planRole: role ? text(role, 64) : undefined,
-    workdir: text(spec.cwd, 512),
-  });
-}
-
-function runStatsFields(stats) {
-  if (!stats || typeof stats !== 'object') return {};
-  return defined({
-    runtimeMs: numeric(stats.runtime_ms),
-    generationMs: numeric(stats.generation_ms),
-    tokensPerSecond: numeric(stats.tokens_per_second),
-    costUsd: numeric(stats.cost_usd),
-    cacheHitRate: numeric(stats.cache_hit_rate_run ?? stats.cache_hit_rate_last),
-  });
-}
-
+// The host store and the snapshot path share one task normalizer. The wrapper
+// keeps the task-id gate the flat store has always enforced.
 export function normalizeOmOTask(raw) {
   if (!raw || !taskId(raw.task_id)) return null;
-  const live = raw.live_progress;
-  const stats = raw.run_stats ?? raw.runStats;
-  const retry = retryEvidence(raw, stats);
-  const tool = text(live?.current_tool, 128);
-  const line = text(live?.last_assistant_line, 512);
-  const progress = [tool ? `[${tool}]` : undefined, line].filter(Boolean).join(' ');
-  const status = text(raw.status, 64) ?? 'pending';
-  const values = {
-    id: raw.task_id,
-    description: text(raw.description) ?? text(raw.task_summary) ?? text(raw.name),
-    summary: text(raw.task_summary, 240),
-    agent: text(raw.agent, 128) ?? text(raw.agent_type, 128),
-    category: text(raw.category, 128),
-    model: text(raw.resolved_model?.display, 256) ?? text(raw.model, 256),
-    modelRequested: modelDisplay(raw.requested_model),
-    modelEffective: modelDisplay(raw.effective_model),
-    modelResolved: modelDisplay(raw.resolved_model),
-    status,
-    ...ownerFields(raw.owner),
-    ...planFields(raw.spawn_spec),
-    executionMode: text(raw.execution_mode, 32),
-    backgroundMode: text(raw.background_mode, 32),
-    depth: numeric(raw.depth),
-    residencyState: text(raw.residency_state, 32),
-    configGeneration: numeric(raw.config_generation),
-    parentSessionId: text(raw.parent_session_id, 80),
-    rootSessionId: text(raw.root_session_id, 80),
-    childSessionId: text(raw.child_session_id, 80),
-    ...runStatsFields(stats),
-    percent: numeric(raw.percent ?? live?.percent),
-    tokensIn: numeric(raw.tokens_in ?? raw.usage?.input_tokens ?? raw.token_usage?.input ?? stats?.input_tokens),
-    tokensOut: numeric(raw.tokens_out ?? raw.usage?.output_tokens ?? raw.token_usage?.output ?? stats?.output_tokens),
-    ...inferredTokenRate(raw, stats),
-    ...(normalizeRateHistory(raw.tokenRateHistory) ? { tokenRateHistory: normalizeRateHistory(raw.tokenRateHistory) } : {}),
-    ...cacheEvidence(raw, stats),
-    ...defined({ failedTurns: retry.failedTurns, retries: retry.retries, retriesSource: retry.retriesSource }),
-    provenance: {
-      retries: retry.retries !== undefined
-        ? defined({ kind: retry.retriesKind, from: retry.retriesSource })
-        : { kind: 'unavailable' },
-    },
-    ...replyEvidence(raw, { live }),
-    ...errorEvidence(raw),
-    startedAt: iso(live?.started_at) ?? iso(raw.created_at),
-    completedAt: iso(raw.terminal_at) ?? (TERMINAL.has(status) ? iso(raw.updated_at) : undefined),
-    progress: TERMINAL.has(status) ? undefined : text(progress, 512) ?? text(live?.activity, 512),
-    thinking: text(raw.thinking ?? raw.reasoning ?? raw.reasoning_content ?? live?.thinking, 1200),
-    ...turnEvidence(raw, stats),
-    logs: Array.isArray(raw.logs) ? raw.logs.map(value => text(value, 240)).filter(Boolean).slice(-12) : undefined,
-  };
-  return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined));
+  return normalizeTask(raw, { host: true });
 }
 
 function compareTaskVersions(candidate, current) {
