@@ -28,7 +28,7 @@
     "│                    ║  t                   toggle task scope (run/all)                 ║                     │",
     "│  ● RUNNING   —  att║  T                   collapse / expand completed tasks           ║                    █│",
     "│ build pipeline · ru║  1–5                 graph filter: all/failed/blocked/running/…  ║                    █│",
-    "│ build pipeline · 1/║  1 / 2 / 3           focus runs / cells / current node (narrow…  ║                    █│",
+    "│ build pipeline · 1/║  1 / 2 / 3 / 4       4 tasks · 1-3 runs/cells/node (narrow)      ║                    █│",
     "│ ███████████████████║  z                   focus selected node and neighbors           ║─────────────── 54% █│",
     "│                    ║  n / N               previous / next node                        ║                    █│",
     "│ error none recorded║  [ / ]               previous / next details section             ║                    █│",

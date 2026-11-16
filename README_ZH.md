@@ -106,7 +106,7 @@ kernel 检查、反例搜索、解析例外集估计、归纳步骤、独立评�
 | `t` | 宽屏 investigation 布局且侧栏可见时切换任务范围（运行/全部）；其他布局打开查找 |
 | `T` | 折叠或展开任务列表中的已完成任务 |
 | `1-5` | 打开运行汇总时过滤图谱：全部、失败、阻塞、运行中、关键路径 |
-| `1` / `2` / `3` | 窄屏 duty 布局下聚焦 RUNS、CELLS 或当前节点面板 |
+| `1` / `2` / `3` / `4` | 窄屏 duty 布局下聚焦 RUNS、CELLS、当前节点面板，或没有运行关联的孤立任务 TASKS 列表。宽屏布局下 `4` 聚焦侧栏任务列表 |
 | `z` | 聚焦选中节点及其直接邻居；再按一次清除聚焦 |
 | `n` / `N` | 图谱或 cells 面板聚焦时按图谱顺序选择下一个/上一个节点 |
 | `[` / `]` | 详情聚焦时切换到上一个/下一个详情段落。`Enter` 折叠或展开当前段落 |
@@ -185,9 +185,10 @@ generation；`/dag-studio` 会复用仍在运行的 pane，而不是替换它。
 
 viewer 通过 `herdr pane split --ratio 0.667 --no-focus` 并带 `--pane` 标志打开。
 Herdr 的 ratio 是原 pane 的占比，所以原 pane 保留三分之二，嵌入 viewer pane
-占整体宽度三分之一。窄 pane 纵向堆叠 RUNS、CELLS 和当前节点/详情面板，
-活动面板带有焦点字形；该宽度不显示图谱。放大或全屏后，导航栏和图谱会自动
-恢复显示。手动关闭的 pane 不会被后台事件重新打开，只有 `/dag-studio` 会强制重开。
+占整体宽度三分之一。窄 pane 纵向堆叠 RUNS、CELLS、没有运行关联的孤立任务
+TASKS 列表（存在时）和当前节点/详情面板，活动面板带有焦点字形；该宽度不显示图谱。
+放大或全屏后，导航栏和图谱会自动恢复显示。手动关闭的 pane 不会被后台事件
+重新打开，只有 `/dag-studio` 会强制重开。
 
 ## 配置
 
@@ -274,7 +275,7 @@ OmO 进程                                  Herdr viewer 进程
 - `src/render.mjs`：组装布局、侧栏、图和详情外壳，并导出 `renderApp`。
 - `src/render-chrome.mjs`：绘制 header 的品牌、面包屑和状态，以及 footer 的
   图例、提示和设置入口。
-- `src/render-duty.mjs`：绘制宽屏 duty 面板与窄屏 RUNS/CELLS/DUTY 界面；
+- `src/render-duty.mjs`：绘制宽屏 duty 面板与窄屏 RUNS/CELLS/TASKS/DUTY 界面；
   duty 正文由本模块自己绘制，并复用对象标签与失败状态辅助函数、摘要区块
   和紧凑诊断卡。
 - `src/render-subject.mjs`：构建节点/任务对象，并绘制宽屏详情面板的对象正文。
@@ -296,6 +297,13 @@ OmO 进程                                  Herdr viewer 进程
   任务和切换器选择。
 - `src/commands.mjs`：列出命令面板条目。
 - `src/cockpit.mjs`：保存渲染器与 viewer 共用的失败、阻塞、关键节点分类规则。
+
+**性能与内存**
+
+- `src/bounded-cache.mjs`：会话级状态共用的有界 LRU 缓存与去重集合，容量精确，
+  并记录淘汰计数。
+- `src/derived-cache.mjs`：按快照、run 或任务身份记忆化逐帧纯派生结果，快照被
+  替换后条目随之回收。
 
 **宿主与运行时**
 

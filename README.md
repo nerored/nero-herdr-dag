@@ -140,7 +140,7 @@ bun src/viewer.mjs --demo --scenario late
 | `t` | Toggle task scope between run and all on the investigation layout with the sidebar visible; other layouts open the finder |
 | `T` | Collapse or expand completed tasks in the task list |
 | `1-5` | With a run summary open, filter the graph to all, failed, blocked, running, or critical path |
-| `1` / `2` / `3` | In the narrow duty layout, focus RUNS, CELLS, or the current node panel |
+| `1` / `2` / `3` / `4` | In the narrow duty layout, focus RUNS, CELLS, the current node panel, or the TASKS list of tasks that no run links to a node. On a wide layout, `4` focuses the sidebar task list |
 | `z` | Focus the selected node and its direct neighbors; press again to clear the focus |
 | `n` / `N` | Select the next/previous node in graph order while the graph or cells pane has focus |
 | `[` / `]` | Previous/next details section while details are focused. `Enter` collapses or expands the current section |
@@ -248,9 +248,10 @@ The extension only activates when all of these are true:
 The viewer is opened with `herdr pane split --ratio 0.667 --no-focus` and the
 `--pane` flag. Herdr's ratio is the source pane's share, so the source keeps
 two-thirds and the embedded viewer takes one-third of the width. While narrow it
-stacks RUNS, CELLS, and the current node/details panel, with a focus glyph on
-the active pane; there is no graph at this width. Widening or zooming the pane
-to full screen restores the navigation column and the graph. A live viewer is reused; a manually closed
+stacks RUNS, CELLS, a TASKS list of tasks no run links to a node, and the current
+node/details panel, with a focus glyph on the active pane; there is no graph at
+this width. Widening or zooming the pane to full screen restores the navigation
+column and the graph. A live viewer is reused; a manually closed
 viewer stays closed until `/dag-studio` is run.
 
 ## Configuration
@@ -349,9 +350,9 @@ Modules are grouped by role. Every module in `src/` is listed once below.
   exports `renderApp`.
 - `src/render-chrome.mjs` paints the header brand, breadcrumb and status, plus
   the footer legend, hints, and settings entry.
-- `src/render-duty.mjs` paints the wide duty pane and the narrow RUNS/CELLS/DUTY
-  surface with its own compact duty body, and reuses the subject label and
-  failure-state helpers plus summary and diagnosis sections.
+- `src/render-duty.mjs` paints the wide duty pane and the narrow
+  RUNS/CELLS/TASKS/DUTY surface with its own compact duty body, and reuses the
+  subject label and failure-state helpers plus summary and diagnosis sections.
 - `src/render-subject.mjs` builds node and task subjects and paints the wide
   details-pane subject body.
 - `src/render-summary.mjs` paints metric cards, the run summary, and warnings.
@@ -377,6 +378,13 @@ Modules are grouped by role. Every module in `src/` is listed once below.
 - `src/commands.mjs` lists the command palette entries.
 - `src/cockpit.mjs` holds the pure failure, blocked, and critical triage rules
   shared by the renderer and the viewer.
+
+**Performance and memory**
+
+- `src/bounded-cache.mjs` provides the bounded LRU cache and dedupe set for
+  session-lifetime state, with exact caps and eviction counters.
+- `src/derived-cache.mjs` memoizes per-frame pure derivations by snapshot, run,
+  or task identity, so a replaced snapshot is collected with its entries.
 
 **Host and runtime**
 

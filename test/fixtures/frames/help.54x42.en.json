@@ -29,7 +29,7 @@
     "╭─║  t                   toggle task scope (run/…  ║ ╮",
     "│ ║  T                   collapse / expand compl…  ║ │",
     "│ ║  1–5                 graph filter: all/faile…  ║█│",
-    "│ ║  1 / 2 / 3           focus runs / cells / cu…  ║█│",
+    "│ ║  1 / 2 / 3 / 4       4 tasks · 1-3 runs/cell…  ║█│",
     "│ ║  z                   focus selected node and…  ║█│",
     "│ ║  n / N               previous / next node      ║█│",
     "│ ║  [ / ]               previous / next details…  ║█│",

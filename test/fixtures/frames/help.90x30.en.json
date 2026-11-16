@@ -27,7 +27,7 @@
     "│ █████████║  t                   toggle task scope (run/all)                 ║──── 54% █│",
     "│          ║  T                   collapse / expand completed tasks           ║         ░│",
     "│ error non║  1–5                 graph filter: all/failed/blocked/running/…  ║         ░│",
-    "│ agent not║  1 / 2 / 3           focus runs / cells / current node (narrow…  ║         ░│",
+    "│ agent not║  1 / 2 / 3 / 4       4 tasks · 1-3 runs/cells/node (narrow)      ║         ░│",
     "│ e details║  z                   focus selected node and neighbors           ║         ░│",
     "│ RUN SUMMA║  n / N               previous / next node                        ║─────────░│",
     "│ × 0 faile║  Data: LIVE · controller · 2026-11-16T12:00:00Z                  ║         ░│",

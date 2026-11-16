@@ -70,7 +70,7 @@ function renderHelp(canvas, width, height, {
     ['t', t(language, 'helpTaskFocus')],
     ['T', t(language, 'helpCompleted')],
     ['1–5', t(language, 'helpFilters')],
-    ['1 / 2 / 3', t(language, 'helpDutyFocus')],
+    ['1 / 2 / 3 / 4', t(language, 'helpDutyFocus')],
     ['z', t(language, 'helpFocusNode')],
     ['n / N', t(language, 'helpNodes')],
     ['[ / ]', t(language, 'helpSections')],

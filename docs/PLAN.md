@@ -10,7 +10,7 @@
   footer 状态提示、平滑滚动（无过冲）。
 - 更完整的细节：耗时、token、轮次、工具调用、重试、活动阶段、
   模型思考/回复摘录、最近日志（详细模式）、依赖、子任务、错误、运行级统计。
-- 自适应布局：宽屏三栏；窄屏或紧凑 pane 使用 duty 单面布局，只显示 RUNS、CELLS 和当前对象/详情，不渲染图谱；`S` 只在 112 列以上的宽屏生效。
+- 自适应布局：宽屏三栏；窄屏或紧凑 pane 使用 duty 单面布局，只显示 RUNS、CELLS、孤立任务存在时的 TASKS 列表和当前对象/详情，不渲染图谱；`S` 只在 112 列以上的宽屏生效。
 - 演示模式：无需 OmO/Herdr，直接在当前终端用确定性假数据渲染并持续演化。
 - 中英文界面：footer 右侧的 `⚙ 设置` 打开设置菜单，语言选择持久化到
   `~/.config/nero-herdr-dag/config.json`。
@@ -58,7 +58,7 @@ OmO 扩展入口：源码为 `extension.mjs`，安装后为 `<agent-dir>/extensi
 ### 布局断点
 
 - `width >= 112`：三栏可用。侧栏 26–34 列，详情 34–44 列，中间为画布。
-- `width < 112`：duty 单面布局，只显示 RUNS、CELLS 和当前对象/详情，不渲染图谱；`S` 只在宽屏生效。
+- `width < 112`：duty 单面布局，只显示 RUNS、CELLS、孤立任务存在时的 TASKS 列表和当前对象/详情，不渲染图谱；`S` 只在宽屏生效。
 - `--pane` 启动时优先紧凑；pane 变宽/全屏后自动恢复导航栏，仍可用 `S` 手动切换。
 
 ### 面板
@@ -234,37 +234,51 @@ viewer 解析 `generatedAt` 的顺序是：`generatedAt`、`updatedAt`、`genera
 ```text
 bin/dag-studio.mjs        CLI: demo / view / install / uninstall / --help / --version（-h、-v 为别名）
 extension.mjs             OmO 生命周期、事件订阅、/dag-studio
+src/model.mjs             快照 v1/v2/v3 规范化、模式与字段来源、运行排序、拓扑分层
+src/normalize.mjs         宿主值原语（文本、数字、整数、ISO 时间、字节长度、已定义字段）
+src/evidence.mjs          任务/运行证据字段的统一规范化（回复、错误、重试、turn、run_stats）
+src/task-data.mjs         任务存储读取、合并、父子关系
+src/run-summary.mjs       运行级聚合（token/成本/缓存/时长/关键路径/并行度）
+src/demo.mjs              周期性假数据引擎
+src/records.mjs           记录文件的有界读取、条目元数据与相对显示路径
+src/viewer-snapshot.mjs   状态文件有界读取、快照上限校验、读取失败占位与证据、会话标识
 src/text.mjs              grapheme、宽字符、fit/fitTail/wrap
 src/theme.mjs             调色板、truecolor/256 色、颜色插值、明暗外观探测
 src/canvas.mjs            单元格画布、边框、裁剪、ANSI 输出
-src/model.mjs             快照 v1/v2/v3 规范化、模式与字段来源、运行排序、拓扑分层
-src/evidence.mjs          任务/运行证据字段的统一规范化（回复、错误、重试、turn、run_stats）
-src/demo.mjs              周期性假数据引擎
+src/frame-primitives.mjs  单帧单元格缓冲、面板/药丸/滚动条/详情行与指标格式化
 src/graph.mjs             DAG 布局、线网、流动点
-src/render.mjs            仪表盘布局、侧栏、图谱、详情、header/footer/toast、命令面板、过滤、tour、设置菜单与 help
 src/i18n.mjs              英文/中文文案表与插值
+src/render.mjs            组装布局、侧栏、图谱与详情外壳，导出 renderApp
+src/render-chrome.mjs     header 品牌/面包屑/状态与 footer 图例/提示/设置入口
+src/render-duty.mjs       宽屏 duty 面板与窄屏 RUNS/CELLS/TASKS/DUTY 界面
+src/render-subject.mjs    节点/任务对象构建与宽屏详情正文
+src/render-summary.mjs    指标卡、run 摘要与警告
+src/render-diagnosis.mjs  诊断卡、错误来源与完整原因
+src/render-overlays.mjs   命令面板、切换器、tour、帮助、设置浮层与点击区域失效
+src/view-model.mjs        编排与渲染器接缝：快照/UI 状态/上一帧、选择/焦点/折叠/滚动/指针
+src/viewer-selection.mjs  点击、按键、切换器行和 follow 共用的选择 reducer
+src/viewer-keymap.mjs     按键拼写与移动归一化、有序的模态/全局按键表
+src/scroll.mjs            滚动意图、区域命中、滚动条几何与指数缓动
+src/mouse.mjs             SGR/X10 鼠标事件解析
+src/view-state.mjs        视图偏好 sidecar、112 列布局断点、切换器选择
+src/commands.mjs          命令面板条目、标签与查询过滤
+src/cockpit.mjs           图谱过滤、过滤计数、聚焦子图与节点步进、失败/阻塞分类
+src/bounded-cache.mjs     有界 LRU 缓存与去重集合，达到上限时淘汰最久未用项
+src/derived-cache.mjs     按快照/run/task 身份记忆化逐帧派生（navTasks、runStats、runSummary 等）
+src/viewer.mjs            主循环、输入、跟随、平滑滚动、鼠标点击与滚轮、文件监听
+src/controller.mjs        事件串行队列、快照写入、pane 生命周期
+src/omo.mjs               OmO agent 目录、project key、主题与明暗外观
 src/config.mjs            语言/主题配置读取与串行原子保存（~/.config/nero-herdr-dag/config.json）、STALE 阈值
 src/env.mjs               所有环境变量的单一解析入口（配置、状态、任务存储、runtime、herdr）
-src/commands.mjs          命令面板条目、标签与查询过滤
-src/scroll.mjs            滚动意图、区域命中、滚动条几何与指数缓动
-src/cockpit.mjs           图谱过滤、过滤计数、聚焦子图与节点步进
-src/run-summary.mjs       运行级聚合（token/成本/缓存/时长/关键路径/并行度）
-src/viewer.mjs            主循环、输入、跟随、平滑滚动、鼠标点击与滚轮、文件监听
-src/view-state.mjs        视图偏好 sidecar、112 列布局断点、切换器选择
-src/storage.mjs           原子 JSON 读写
-src/controller.mjs        事件串行队列、快照写入、pane 生命周期
-src/task-data.mjs         任务存储读取、合并、父子关系
-src/stream-tap.mjs        子任务流式活动捕获
-src/records.mjs           记录文件的有界读取、条目元数据与相对显示路径
-src/safe-path.mjs         绝对路径校验、根目录内 JSON 记录的安全打开
-src/diagnosis.mjs         失败/阻塞诊断卡与可复制证据包
-src/clipboard.mjs         OSC52/pager 证据复制，诊断与路径函数的兼容再导出
-src/mouse.mjs             SGR/X10 鼠标事件解析
-src/omo.mjs               OmO agent 目录、project key、主题与明暗外观
-src/todo-title.mjs        OmO TODO 事件到 run 标题的匹配
 src/herdr.mjs             herdr pane CLI 封装
 src/runtime.mjs           Bun 1.4+ / Node 24+ 探测
+src/storage.mjs           原子 JSON 读写
 src/retention.mjs         过期快照清理
+src/stream-tap.mjs        子任务流式活动捕获
+src/todo-title.mjs        OmO TODO 事件到 run 标题的匹配
+src/diagnosis.mjs         失败/阻塞诊断模型与可复制证据包
+src/clipboard.mjs         OSC52/pager 证据复制，诊断与路径函数的兼容再导出
+src/safe-path.mjs         绝对路径校验、根目录内 JSON 记录的安全打开
 scripts/install.mjs       分代安装
 scripts/install-lib.mjs   安装/卸载共享参数解析、布局检查与文件系统守卫
 scripts/uninstall.mjs     安全卸载（保留配置与状态）

@@ -606,6 +606,7 @@ test('help scrolls to every documented key at 54x20 with the data line pinned', 
   assert.match(end.text, /\bs\s+open settings/);
   assert.match(end.text, /\bx \/ X \/ u\s+x clears/);
   assert.match(end.text, /\br\s+restart demo cycle/);
+  assert.match(end.text, /1 \/ 2 \/ 3 \/ 4\s+4 tasks/, 'Help lists the fourth duty key and names TASKS');
   const all = top.text + end.text;
   for (const key of ['s', 'r', '? / Esc', 'q', 'g / G', 'Home/End']) {
     assert.ok(all.includes(key), `help key missing ${key}`);
