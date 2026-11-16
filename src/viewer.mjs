@@ -26,7 +26,12 @@ import { recordForKey } from './records.mjs';
 import { paletteFor, createTheme, supportsTruecolor, themeNames, normalizeThemeName } from './theme.mjs';
 import { clamp, clean } from './text.mjs';
 import { createHerdr } from './herdr.mjs';
-import { extractMouse, isLeftClick, mouseTrackingSequence, parseMouse, wheelDirectionFromButton } from './mouse.mjs';
+import { extractMouse, mouseTrackingSequence, wheelDirectionFromButton } from './mouse.mjs';
+import {
+  GLOBAL_KEYMAP, MODAL_ORDER, PALETTE_KEYMAP, SETTINGS_KEYMAP, SWITCHER_KEYMAP, TOUR_KEYMAP,
+  applyHelpScroll, dutyFocusForKey, helpKeyAction, helpScrollMetrics, isEscapeKey, keyToken,
+  matchingKeys, resolveKey,
+} from './viewer-keymap.mjs';
 import { keyboardScrollTarget, regionAt, smoothScroll } from './scroll.mjs';
 import {
   advanceRunSelection, collapseTransition, completedItems, expandTransition, foldedFromView,
@@ -57,6 +62,14 @@ export {
   revealScrollOffset, selectNode, selectRunById, selectRunOverview, selectTaskAtPoint,
   selectTaskHit, selectionScrollTarget, setNodeSubject,
 } from './viewer-selection.mjs';
+
+// Key normalization and the ordered key tables live in viewer-keymap.mjs.
+// Re-exporting the pure helpers keeps the existing viewer imports and tests
+// working while callers move to the module.
+export {
+  DUTY_FOCUS_KEYS, HELP_MAX_ROWS, HELP_ROWS, applyHelpScroll, dutyFocusForKey, helpKeyAction,
+  helpScrollForKey, helpScrollMetrics, helpViewportRows, settingsHotkey,
+} from './viewer-keymap.mjs';
 
 const INSTALL_GENERATION = (() => {
   const match = /(?:^|[/\\])(generation-\d+)(?:[/\\]|$)/.exec(fileURLToPath(import.meta.url));
@@ -366,17 +379,6 @@ export function createViewerState({
   };
 }
 
-// N3 duty focus contract. 1/2/3 request the RUNS, CELLS, and DUTY regions; the
-// structural class decides which focus value is actually meaningful. The
-// renderer paints runs/cells/details focus in duty, while investigation falls
-// back to the panes that are painted there (tasks/graph/details).
-
-export const DUTY_FOCUS_KEYS = Object.freeze({ '1': 'runs', '2': 'cells', '3': 'details' });
-
-export function dutyFocusForKey(key) {
-  return DUTY_FOCUS_KEYS[key];
-}
-
 // Frame metrics exist before focus can be trusted: a region with viewportH 0
 // is not painted. When the caller supplies last-frame scroll info, focus is
 // normalized onto a painted region so a hidden RUNS/CELLS/tasks pane cannot
@@ -454,58 +456,6 @@ export function detailsVerboseAvailable(structural) {
   return structural === 'investigation' || structural === 'expanded';
 }
 
-// N4 Help geometry mirrors renderHelp exactly: the modal is
-// min(26, height - 3) rows tall, its list starts two rows below the title and
-// stops before the pinned data line. Keep this in sync with renderHelp's row
-// budget. The renderer clamps the painted slice; this viewport bounds End/G so
-// the last documented row (q) is reachable and never publishes a scroll offset
-// the frame cannot show.
-
-export const HELP_ROWS = 32;
-
-export const HELP_MAX_ROWS = 36;
-
-export function helpViewportRows(height) {
-  const h = Math.min(HELP_MAX_ROWS, Math.max(1, Math.floor(Number(height) || 0) - 3));
-  return Math.max(1, h - 4);
-}
-
-export function helpScrollMetrics(height, { rows = HELP_ROWS } = {}) {
-  const viewport = helpViewportRows(height);
-  return { rows, viewport, maxScroll: Math.max(0, rows - Math.max(1, viewport)) };
-}
-
-export function helpScrollForKey(key, pressed, { viewport = 1, rows = HELP_ROWS } = {}) {
-  const maxScroll = Math.max(0, rows - Math.max(1, viewport));
-  const page = Math.max(1, viewport - 1);
-  const lower = String(key ?? '').toLowerCase();
-  // readline names DECCKM/application-cursor reports down/up/home/end while
-  // their sequence is \x1bOB/\x1bOA/\x1bOH/\x1bOF. handleKey dispatches the
-  // sequence first, so Help must accept both spellings of every key it claims.
-  const name = typeof pressed?.name === 'string' ? pressed.name.toLowerCase() : '';
-  if (key === 'j' || key === '\x1b[B' || key === '\x1bOB' || lower === 'down' || name === 'down') return 1;
-  if (key === 'k' || key === '\x1b[A' || key === '\x1bOA' || lower === 'up' || name === 'up') return -1;
-  if (key === '\x1b[6~' || lower === 'pagedown' || name === 'pagedown') return page;
-  if (key === '\x1b[5~' || lower === 'pageup' || name === 'pageup') return -page;
-  if (key === 'G' || key === '\x1b[F' || key === '\x1bOF' || key === '\x1b[4~' || lower === 'end' || name === 'end') return maxScroll;
-  if (key === 'g' || key === '\x1b[H' || key === '\x1bOH' || key === '\x1b[1~' || lower === 'home' || name === 'home') return -maxScroll;
-  return undefined;
-}
-
-export function applyHelpScroll(ui, key, pressed, metrics = {}) {
-  const { viewport = 1, rows = HELP_ROWS } = metrics;
-  const delta = helpScrollForKey(key, pressed, { viewport, rows });
-  if (delta === undefined) return false;
-  const maxScroll = Math.max(0, rows - Math.max(1, viewport));
-  ui.helpScroll = clamp((ui.helpScroll ?? 0) + delta, 0, maxScroll);
-  return true;
-}
-
-export function helpKeyAction(key, pressed, metrics = {}) {
-  if (key === '?' || key === '\x1b' || key === 'escape' || pressed?.name === 'escape') return 'close';
-  return helpScrollForKey(key, pressed, metrics) === undefined ? 'blocked' : 'scroll';
-}
-
 // N4 footer actions. The render lane owns the padded hitboxes; the viewer only
 // activates the actions when a pointer lands inside one of them.
 export function footerActionAt(hitboxes, x, y) {
@@ -542,10 +492,6 @@ export function chromeActionAt(hitboxes, x, y) {
   if (inside(hitboxes.helpHint)) return 'help';
   if (inside(hitboxes.settings)) return 'settings';
   return undefined;
-}
-
-export function settingsHotkey(key) {
-  return key === 's';
 }
 
 // Each viewer owns its snapshot, watcher, render cache, and UI state. The
@@ -1050,23 +996,22 @@ export async function createViewer(options = {}, deps = {}) {
   }
 
   function handlePaletteKey(key, pressed) {
-    if (isEscapeKey(key, pressed) || key === ':') { closePalette(); return; }
-    const up = key === '\x1b[A' || key === 'k' || pressed?.name === 'up';
-    const down = key === '\x1b[B' || key === 'j' || pressed?.name === 'down';
-    if (up) { movePalette(-1); return; }
-    if (down) { movePalette(1); return; }
-    if (key === '\r' || key === '\n' || pressed?.name === 'return' || pressed?.name === 'enter') {
+    const action = resolveKey(PALETTE_KEYMAP, key, pressed);
+    if (!action) return;
+    if (action.id === 'close') { closePalette(); return; }
+    if (action.id === 'move') { movePalette(action.value); return; }
+    if (action.id === 'confirm') {
       const { active } = paletteView();
       if (active) applyPaletteCommand(active.id);
       return;
     }
-    if (key === '\x7f' || key === '\b' || pressed?.name === 'backspace') {
+    if (action.id === 'backspace') {
       ui.paletteFilter = ui.paletteFilter.slice(0, -1);
       ui.paletteIndex = 0;
       return;
     }
-    if (typeof key === 'string' && key.length === 1 && key.charCodeAt(0) >= 32 && key !== '\x7f') {
-      ui.paletteFilter += key;
+    if (action.id === 'type') {
+      ui.paletteFilter += action.value;
       ui.paletteIndex = 0;
     }
   }
@@ -1793,10 +1738,6 @@ export async function createViewer(options = {}, deps = {}) {
     }
   }
 
-  function isEscapeKey(key, pressed) {
-    return key === '\x1b' || key === 'escape' || pressed?.name === 'escape';
-  }
-
   function childExit(child) {
     return new Promise(resolve => {
       let settled = false;
@@ -1908,9 +1849,261 @@ export async function createViewer(options = {}, deps = {}) {
     return true;
   }
 
+  function handleSwitcherKey(key, pressed) {
+    const action = resolveKey(SWITCHER_KEYMAP, key, pressed);
+    if (!action) return;
+    switch (action.id) {
+      case 'quit':
+        void close({ closePane: true });
+        return;
+      case 'close':
+        ui.switcher = null;
+        return;
+      case 'move':
+        moveSwitcherSelection(action.value);
+        return;
+      case 'confirm':
+        confirmSwitcher(undefined);
+        return;
+      case 'backspace': {
+        const query = ui.switcher.query.slice(0, -1);
+        ui.switcher = { ...ui.switcher, query };
+        return;
+      }
+      case 'clearQuery':
+        ui.switcher = { ...ui.switcher, query: '' };
+        return;
+      case 'type':
+        ui.switcher = { ...ui.switcher, query: `${ui.switcher.query}${action.value}` };
+        return;
+      default:
+        // '/' and every unconsumed key are modal no-ops: the switcher owns the
+        // keyboard while it is open.
+        return;
+    }
+  }
+
+  function handleTourKey(key, pressed) {
+    const action = resolveKey(TOUR_KEYMAP, key, pressed);
+    if (action?.id === 'close') { ui.tour = 0; return; }
+    if (action?.id === 'advance') { ui.tour = ui.tour >= 5 ? 0 : ui.tour + 1; }
+  }
+
+  function handleHelpKey(key, pressed) {
+    const metrics = helpScrollMetrics(terminalHeight());
+    const action = helpKeyAction(key, pressed, metrics);
+    if (action === 'close') {
+      ui.help = false;
+      ui.helpScroll = 0;
+      helpFrameDrawn = false;
+      void draw();
+    } else if (action === 'scroll' && applyHelpScroll(ui, key, pressed, metrics)) {
+      helpFrameDrawn = false;
+      void draw();
+    }
+  }
+
+  function handleSettingsKey(key, pressed) {
+    const action = resolveKey(SETTINGS_KEYMAP, key, pressed);
+    if (!action) return;
+    if (action.id === 'close') { ui.settingsMenu = false; return; }
+    if (action.id === 'cycle') {
+      ui.settingsIndex = (ui.settingsIndex + action.value + 3) % 3;
+      return;
+    }
+    if (action.id === 'apply') applySetting(ui.settingsIndex);
+  }
+
+  const MODAL_HANDLERS = {
+    switcher: handleSwitcherKey,
+    palette: handlePaletteKey,
+    tour: handleTourKey,
+    help: handleHelpKey,
+    settings: handleSettingsKey,
+  };
+
+  // Ordered modal dispatch: an open modal owns every key, and the first active
+  // row in MODAL_ORDER wins. Global keys never fire underneath an overlay
+  // unless the row explicitly yields that key (Settings yields the quit keys).
+  function dispatchModal(key, pressed) {
+    for (const modal of MODAL_ORDER) {
+      if (!modal.active(ui)) continue;
+      if (modal.preemptedBy?.(key, pressed)) continue;
+      MODAL_HANDLERS[modal.id](key, pressed);
+      return true;
+    }
+    return false;
+  }
+
+  function runGlobalAction({ id, value }, key, pressed) {
+    switch (id) {
+      case 'quit':
+        void close({ closePane: true });
+        return true;
+      case 'escape': {
+        if (ui.graphFilter !== 'all' || ui.graphFocus) {
+          ui.graphFilter = 'all';
+          ui.graphFocus = undefined;
+          return true;
+        }
+        const collapsed = collapseTransition(ui);
+        if (collapsed) Object.assign(ui, collapsed);
+        return true;
+      }
+      case 'runOverviewBack': {
+        const run = snapshot?.runs?.[ui.runIndex];
+        if (!run) return false;
+        selectRunOverview(ui, snapshot, run.id, lastRender?.scroll);
+        return true;
+      }
+      case 'graphFilter':
+        ui.graphFilter = ['all', 'failed', 'blocked', 'running', 'critical'][value];
+        ui.graphFocus = undefined;
+        return true;
+      case 'focusNode': {
+        const run = snapshot?.runs[ui.runIndex];
+        if (!run?.nodes?.length) return true;
+        if (ui.graphFocus) {
+          ui.graphFocus = undefined;
+          return true;
+        }
+        const nodeId = ui.selectedNodeId ?? run.nodes[0].id;
+        ui.selectedNodeId = nodeId;
+        ui.runOverview = false;
+        ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
+        ui.selectedTaskUnlinked = false;
+        ui.focus = lastRender?.layout?.layout === 'duty' ? 'cells' : 'graph';
+        ui.graphFocus = nodeId;
+        ui.follow = false;
+        ui.followTarget = undefined;
+        return true;
+      }
+      case 'stepNode':
+        stepGraphNode(value);
+        return true;
+      case 'undo':
+        undoCleared();
+        return true;
+      case 'palette':
+        openPalette();
+        return true;
+      case 'help':
+        ui.help = !ui.help;
+        ui.helpScroll = 0;
+        helpFrameDrawn = false;
+        return true;
+      case 'settings':
+        openSettingsMenu();
+        return true;
+      case 'mouseCapture':
+        setMouseCapture(!ui.mouseCapture);
+        return true;
+      case 'clearCompleted':
+        clearCompleted();
+        return true;
+      case 'restoreHidden':
+        restoreHidden();
+        return true;
+      case 'sidebar':
+        if (terminalWidth() >= 112) {
+          ui.sidebar = !ui.sidebar;
+          addToast(t(ui.language, ui.sidebar ? 'toastSidebarOn' : 'toastSidebarOff'), 'info');
+        } else addToast(t(ui.language, 'toastSidebarHidden'), 'warning');
+        return true;
+      case 'follow':
+        ui.follow = !ui.follow;
+        if (ui.follow) {
+          ui.runPinned = false;
+          follow();
+        }
+        addToast(t(ui.language, ui.follow ? 'toastFollowOn' : 'toastFollowOff'), 'info');
+        return true;
+      case 'demoReset':
+        engine.reset();
+        ui.hiddenRunIds.clear();
+        ui.hiddenTaskIds.clear();
+        ui.toasts = [];
+        addToast(t(ui.language, 'toastDemoReset'), 'warning');
+        return true;
+      case 'verbose': {
+        const structural = lastRender?.layout?.layout ?? structuralFor(terminalWidth(), {
+          expanded: ui.expanded, sidebar: sidebarEnabled(),
+        });
+        if (!detailsVerboseAvailable(structural)) {
+          addToast(t(ui.language, 'toastDetailsWideOnly'), 'warning');
+          return true;
+        }
+        ui.verbose = !ui.verbose;
+        addToast(t(ui.language, ui.verbose ? 'toastDetailsVerbose' : 'toastDetailsCompact'), 'info');
+        return true;
+      }
+      case 'dutyFocus': {
+        const structural = lastRender?.layout?.layout ?? structuralFor(terminalWidth(), {
+          expanded: ui.expanded, sidebar: sidebarEnabled(),
+        });
+        applyFocusRequest(ui, value.focus, structural, lastRender?.scroll);
+        helpFrameDrawn = false;
+        return true;
+      }
+      case 'diagnosis':
+        return handleDiagnosisKey(key);
+      case 'expand':
+        if (!ui.expanded) Object.assign(ui, expandTransition(ui));
+        return true;
+      case 'switcher':
+        openSwitcher();
+        return true;
+      case 'completed':
+        ui.completedCollapsed = !ui.completedCollapsed;
+        ui.tasksScroll = 0;
+        ui.tasksScrollTarget = 0;
+        return true;
+      case 'taskScope': {
+        const structural = structuralFor(terminalWidth(), {
+          expanded: ui.expanded, sidebar: sidebarEnabled(),
+        });
+        if (structural !== 'investigation' || !sidebarEnabled() || ui.expanded) {
+          openSwitcher();
+          return true;
+        }
+        ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
+        ui.tasksScroll = 0;
+        ui.tasksScrollTarget = 0;
+        return true;
+      }
+      case 'cycle':
+        cycle(value);
+        return true;
+      case 'switchRun':
+        switchRun(value);
+        return true;
+      case 'keyboardScroll':
+        return dispatchKeyboardScroll(key, pressed);
+      case 'detailsSection':
+        jumpDetailsSection(value);
+        return true;
+      case 'detailsToggle':
+        toggleDetailsSection();
+        return true;
+      case 'fold':
+        toggleFold();
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  function handleGlobalKey(key, pressed) {
+    for (const hit of matchingKeys(GLOBAL_KEYMAP, key, pressed, { ui, context: { demoMode } })) {
+      if (runGlobalAction(hit, key, pressed) !== false) return;
+    }
+  }
+
   function handleKey(text, pressed) {
     if (pagerActive) return;
-    const key = pressed?.sequence || pressed?.name || text;
+    const key = keyToken(text, pressed);
+    // Dismissal is exempt from the close/pointer debounce: Esc must always
+    // close Help or Settings, even while a mouse report is still settling.
     if (isEscapeKey(key, pressed) && (ui.settingsMenu || ui.help)) {
       ui.settingsMenu = false;
       ui.help = false;
@@ -1919,278 +2112,8 @@ export async function createViewer(options = {}, deps = {}) {
       return;
     }
     if (closing || Date.now() < ignoreKeysUntil || Date.now() < mousePendingUntil) return;
-    if (ui.switcher) {
-      if (key === '\x03') { void close({ closePane: true }); return; }
-      if (isEscapeKey(key, pressed) || key === 'v') {
-        ui.switcher = null;
-        return;
-      }
-      const up = key === '\x1b[A' || key === 'k' || pressed?.name === 'up';
-      const down = key === '\x1b[B' || key === 'j' || pressed?.name === 'down';
-      if (up || down) {
-        moveSwitcherSelection(up ? -1 : 1);
-        return;
-      }
-      if (key === '\x1b[5~' || pressed?.name === 'pageup') {
-        moveSwitcherSelection(-8);
-        return;
-      }
-      if (key === '\x1b[6~' || pressed?.name === 'pagedown') {
-        moveSwitcherSelection(8);
-        return;
-      }
-      if (key === '\x1b[H' || pressed?.name === 'home') {
-        moveSwitcherSelection(-9999);
-        return;
-      }
-      if (key === '\x1b[F' || pressed?.name === 'end') {
-        moveSwitcherSelection(9999);
-        return;
-      }
-      if (key === '\r' || key === '\n' || pressed?.name === 'return' || pressed?.name === 'enter') {
-        confirmSwitcher(undefined);
-        return;
-      }
-      if (key === '\x7f' || key === '\b' || pressed?.name === 'backspace') {
-        const query = ui.switcher.query.slice(0, -1);
-        ui.switcher = { ...ui.switcher, query };
-        return;
-      }
-      if (key === '\x15') {
-        ui.switcher = { ...ui.switcher, query: '' };
-        return;
-      }
-      if (key === '/') return;
-      if (typeof key === 'string' && key.length === 1 && key.charCodeAt(0) >= 32 && key !== '\x7f') {
-        ui.switcher = { ...ui.switcher, query: `${ui.switcher.query}${key}` };
-        return;
-      }
-      return;
-    }
-    if (ui.palette) {
-      handlePaletteKey(key, pressed);
-      return;
-    }
-    if (ui.tour) {
-      if (isEscapeKey(key, pressed)) { ui.tour = 0; return; }
-      if (key === '\r' || key === '\n' || key === ' ' || pressed?.name === 'return' || pressed?.name === 'enter') {
-        ui.tour = ui.tour >= 5 ? 0 : ui.tour + 1;
-        return;
-      }
-      return;
-    }
-    if (isEscapeKey(key, pressed)) {
-      if (ui.graphFilter !== 'all' || ui.graphFocus) {
-        ui.graphFilter = 'all';
-        ui.graphFocus = undefined;
-        return;
-      }
-      const collapsed = collapseTransition(ui);
-      if (collapsed) Object.assign(ui, collapsed);
-      return;
-    }
-    const mouse = parseMouse(key);
-    if (mouse) {
-      if (ui.settingsMenu) {
-        if (isLeftClick(key)) selectAt(mouse.x, mouse.y);
-        return;
-      }
-      if (ui.help) {
-        if (mouse.button & 64) {
-          const direction = wheelDirectionFromButton(mouse.button);
-          if (direction) scrollHelpPage(direction);
-        } else if (isLeftClick(key)) {
-          ui.help = false;
-          ui.helpScroll = 0;
-          helpFrameDrawn = false;
-          void draw();
-        }
-        return;
-      }
-      if (mouse.button & 64) {
-        applyWheel(mouse);
-      } else if (isLeftClick(key)) {
-        selectAt(mouse.x, mouse.y);
-      }
-      return;
-    }
-    // N4: Help is a real modal. Only close keys and Help scroll keys reach the
-    // pane; every background action is consumed while the overlay is open.
-    if (ui.help) {
-      const metrics = helpScrollMetrics(terminalHeight());
-      const action = helpKeyAction(key, pressed, metrics);
-      if (action === 'close') {
-        ui.help = false;
-        ui.helpScroll = 0;
-        helpFrameDrawn = false;
-        void draw();
-      } else if (action === 'scroll' && applyHelpScroll(ui, key, pressed, metrics)) {
-        helpFrameDrawn = false;
-        void draw();
-      }
-      return;
-    }
-    if (key === 'q' || key === '\x03' || key === '\x04') { void close({ closePane: true }); return; }
-    if (ui.settingsMenu) {
-      if (settingsHotkey(key)) { ui.settingsMenu = false; return; }
-      const up = key === '\x1b[A' || key === 'k' || pressed?.name === 'up'
-        || (pressed?.name === 'tab' && pressed.shift);
-      const down = key === '\x1b[B' || key === 'j' || key === 'Tab' || pressed?.name === 'down'
-        || (pressed?.name === 'tab' && !pressed.shift);
-      const left = key === '\x1b[D' || pressed?.name === 'left';
-      const right = key === '\x1b[C' || pressed?.name === 'right';
-      if (up || down || left || right) {
-        const delta = up || left ? -1 : 1;
-        ui.settingsIndex = (ui.settingsIndex + delta + 3) % 3;
-        return;
-      }
-      if (key === '\r' || key === '\n' || key === ' ' || pressed?.name === 'return' || pressed?.name === 'enter') {
-        applySetting(ui.settingsIndex);
-        return;
-      }
-      return;
-    }
-    if ((key === '\x7f' || key === '\b' || pressed?.name === 'backspace') && !ui.runOverview) {
-      const run = snapshot?.runs?.[ui.runIndex];
-      if (run) {
-        selectRunOverview(ui, snapshot, run.id, lastRender?.scroll);
-        return;
-      }
-    }
-    if (/^[1-5]$/.test(key) && ui.runOverview) {
-      ui.graphFilter = ['all', 'failed', 'blocked', 'running', 'critical'][Number(key) - 1];
-      ui.graphFocus = undefined;
-      return;
-    }
-    if (key === 'z') {
-      const run = snapshot?.runs[ui.runIndex];
-      if (!run?.nodes?.length) return;
-      if (ui.graphFocus) {
-        ui.graphFocus = undefined;
-        return;
-      }
-      const nodeId = ui.selectedNodeId ?? run.nodes[0].id;
-      ui.selectedNodeId = nodeId;
-      ui.runOverview = false;
-      ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
-      ui.selectedTaskUnlinked = false;
-      ui.focus = lastRender?.layout?.layout === 'duty' ? 'cells' : 'graph';
-      ui.graphFocus = nodeId;
-      ui.follow = false;
-      ui.followTarget = undefined;
-      return;
-    }
-    if ((key === 'n' || key === 'N') && (ui.focus === 'graph' || ui.focus === 'cells')) {
-      stepGraphNode(key === 'N' ? -1 : 1);
-      return;
-    }
-    if (key === 'u') {
-      undoCleared();
-      return;
-    }
-    if (key === ':') {
-      openPalette();
-      return;
-    }
-    if (key === '?') {
-      ui.help = !ui.help;
-      ui.helpScroll = 0;
-      helpFrameDrawn = false;
-      return;
-    }
-    if (settingsHotkey(key)) { openSettingsMenu(); return; }
-    if (key === 'm') { setMouseCapture(!ui.mouseCapture); return; }
-    if (key === 'x') { clearCompleted(); return; }
-    if (key === 'X') { restoreHidden(); return; }
-    if (key === 'S') {
-      if (terminalWidth() >= 112) {
-        ui.sidebar = !ui.sidebar;
-        addToast(t(ui.language, ui.sidebar ? 'toastSidebarOn' : 'toastSidebarOff'), 'info');
-      } else addToast(t(ui.language, 'toastSidebarHidden'), 'warning');
-      return;
-    }
-    if (key === 'f') {
-      ui.follow = !ui.follow;
-      if (ui.follow) {
-        ui.runPinned = false;
-        follow();
-      }
-      addToast(t(ui.language, ui.follow ? 'toastFollowOn' : 'toastFollowOff'), 'info');
-      return;
-    }
-    if (key === 'r' && demoMode) {
-      engine.reset();
-      ui.hiddenRunIds.clear();
-      ui.hiddenTaskIds.clear();
-      ui.toasts = [];
-      addToast(t(ui.language, 'toastDemoReset'), 'warning');
-      return;
-    }
-    if (key === 'd') {
-      const structural = lastRender?.layout?.layout ?? structuralFor(terminalWidth(), {
-        expanded: ui.expanded, sidebar: sidebarEnabled(),
-      });
-      if (!detailsVerboseAvailable(structural)) {
-        addToast(t(ui.language, 'toastDetailsWideOnly'), 'warning');
-        return;
-      }
-      ui.verbose = !ui.verbose;
-      addToast(t(ui.language, ui.verbose ? 'toastDetailsVerbose' : 'toastDetailsCompact'), 'info');
-      return;
-    }
-    const requestedFocus = dutyFocusForKey(key);
-    if (requestedFocus) {
-      const structural = lastRender?.layout?.layout ?? structuralFor(terminalWidth(), {
-        expanded: ui.expanded, sidebar: sidebarEnabled(),
-      });
-      applyFocusRequest(ui, requestedFocus, structural, lastRender?.scroll);
-      helpFrameDrawn = false;
-      return;
-    }
-    if (handleDiagnosisKey(key)) return;
-    if (key === 'e') {
-      if (ui.expanded) return;
-      Object.assign(ui, expandTransition(ui));
-      return;
-    }
-    if (!ui.help && (key === 'v' || key === '/')) {
-      openSwitcher();
-      return;
-    }
-    if (key === 'T') {
-      ui.completedCollapsed = !ui.completedCollapsed;
-      ui.tasksScroll = 0;
-      ui.tasksScrollTarget = 0;
-      return;
-    }
-    if (key === 't') {
-      const structural = structuralFor(terminalWidth(), {
-        expanded: ui.expanded, sidebar: sidebarEnabled(),
-      });
-      if (structural !== 'investigation' || !sidebarEnabled() || ui.expanded) {
-        openSwitcher();
-        return;
-      }
-      ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
-      ui.tasksScroll = 0;
-      ui.tasksScrollTarget = 0;
-      return;
-    }
-    if (key === 'Tab' || pressed?.name === 'tab') { cycle(pressed?.shift ? -1 : 1); return; }
-    if (key === '\x1b[Z') { cycle(-1); return; }
-    if (key === '\x1b[C') { switchRun(1); return; }
-    if (key === '\x1b[D') { switchRun(-1); return; }
-    if (dispatchKeyboardScroll(key, pressed)) return;
-    if ((key === ']' || key === '[') && ui.focus === 'details') {
-      jumpDetailsSection(key === ']' ? 1 : -1);
-      return;
-    }
-    if ((key === '\r' || key === '\n' || pressed?.name === 'return' || pressed?.name === 'enter')
-        && ui.focus === 'details') {
-      toggleDetailsSection();
-      return;
-    }
-    if (key === ' ' || key === '\r' || key === '\n') { toggleFold(); return; }
+    if (dispatchModal(key, pressed)) return;
+    handleGlobalKey(key, pressed);
   }
 
   function scheduleWatchRetry() {
