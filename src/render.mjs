@@ -877,7 +877,6 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
   time, now, viewNow = now, palette, motion, language, graphLayout, freshness, buffers,
 }) {
   const stats = run ? runStats(run) : null;
-  const graphSummary = run ? runSummary(run, { now: viewNow }) : undefined;
   const warningCount = runWarningCount(run);
   // Degradation is evidence, not noise: a dropped record, a capped layout, or
   // a stub wire must be counted in the panel badge instead of disappearing.
@@ -889,9 +888,10 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
     parts.push(text);
     return parts.join(' · ');
   };
-  const criticalIds = criticalNodeIds(graphSummary);
   const graphRun = focusSubgraph(run, ui.graphFocus);
   const filter = ui.graphFilter ?? 'all';
+  const graphSummary = filter === 'all' ? undefined : runSummary(run, { now: viewNow });
+  const criticalIds = filter === 'all' ? undefined : criticalNodeIds(graphSummary);
   const selectedTask = navTasks(snapshot).find(candidate => candidate.id === ui.selectedTaskId);
   const unlinked = Boolean(ui.selectedTaskUnlinked && selectedTask);
   if (unlinked) {
