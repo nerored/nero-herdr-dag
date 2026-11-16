@@ -146,4 +146,6 @@ test('language and status identifiers normalize predictably', () => {
   assert.equal(languageLabel('en'), 'English');
   assert.equal(statusLabel('zh', 'running'), '运行中');
   assert.equal(statusLabel('en', 'completed'), 'Completed');
+  assert.equal(statusLabel('en', 'unknown'), 'Unknown');
+  assert.equal(statusLabel('zh', 'unknown'), '未知');
 });

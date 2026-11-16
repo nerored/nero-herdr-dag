@@ -2,9 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   activitySummary, compareNavigationTasks, deriveRunStatus, elapsedLabel, elapsedMs, findRunningTarget, layers,
-  modeFor, nodeActivity, nodeForTask, normalizeRun, normalizeSnapshot, normalizeTask, orderRuns, runStats,
+  modeFor, nodeActivity, nodeForTask, normalizeChild, normalizeRun, normalizeSnapshot, normalizeTask, orderRuns, runStats,
   standaloneTasks,
 } from '../src/model.mjs';
+import { messages, statusLabel } from '../src/i18n.mjs';
+import { paletteFor, statusColor, statusIcon } from '../src/theme.mjs';
 import { DemoEngine } from '../src/demo.mjs';
 
 const at = time => new DemoEngine({ now: 1_000_000, startOffset: 0 }).snapshot(1_000_000 + time);
@@ -716,6 +718,29 @@ test('unknown task statuses stay explicit instead of queuing as pending', () => 
   });
   assert.equal(snapshot.tasks[0].status, 'unknown');
   assert.equal(snapshot.tasks[1].status, 'pending');
+});
+
+test('unknown child statuses render a localized label with safe fallbacks', () => {
+  const child = normalizeChild({ id: 'st_child', status: 'succeeded' });
+  assert.equal(child.status, 'unknown');
+
+  const en = statusLabel('en', child.status);
+  const zh = statusLabel('zh', child.status);
+  assert.equal(en, messages.en.status_unknown);
+  assert.equal(en.toLowerCase(), 'unknown');
+  assert.equal(zh, '未知');
+  for (const label of [en, en.toUpperCase(), zh]) {
+    assert.doesNotMatch(label, /STATUS_UNKNOWN/i);
+  }
+
+  const palette = paletteFor('dark');
+  assert.equal(statusColor(palette, child.status), palette.dim);
+  assert.equal(statusIcon(child.status), '?');
+
+  assert.equal(statusLabel('en', 'running'), 'Running');
+  assert.equal(statusLabel('zh', 'running'), '运行中');
+  assert.equal(statusColor(palette, 'failed'), palette.failed);
+  assert.equal(statusIcon('failed'), '×');
 });
 
 test('a run drops malformed nodes and edges but keeps valid work with warnings', () => {

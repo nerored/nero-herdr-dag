@@ -302,7 +302,7 @@ export function rgbToAnsi256([r, g, b]) {
 
 export function statusColor(palette, status) {
   if (status === 'error') return palette.failed;
-  if (status === 'interrupted' || status === 'lost') return palette.dim;
+  if (status === 'interrupted' || status === 'lost' || status === 'unknown') return palette.dim;
   return palette[status] ?? palette.dim;
 }
 
@@ -320,6 +320,7 @@ export function statusIcon(status) {
     error: '×',
     interrupted: '−',
     lost: '?',
+    unknown: '?',
   }[status] ?? '○';
 }
 
