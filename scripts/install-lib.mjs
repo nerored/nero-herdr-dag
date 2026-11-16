@@ -6,6 +6,7 @@ import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm } from 'nod
 import { constants } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
+import { generationPointer, integrationDirectory, studioDirectory } from '../src/layout.mjs';
 
 export const marker = '// managed by herdr-dag-studio';
 export const entry = 'omo-herdr-dag-studio.js';
@@ -81,8 +82,9 @@ export async function realpathOptional(path) {
 // The returned `inodes` let a caller prove the container it inspected is still
 // the container it is about to delete.
 export async function inspectLayout(agentDir) {
-  const studio = join(agentDir, 'herdr-dag-studio');
-  const container = join(studio, 'integration');
+  const studio = studioDirectory(agentDir);
+  const container = integrationDirectory(agentDir);
+  const pointer = generationPointer(container);
   const extensions = join(agentDir, 'extensions');
   const wrapper = join(extensions, entry);
   const realAgent = (await realpathOptional(agentDir)) ?? agentDir;
@@ -108,7 +110,7 @@ export async function inspectLayout(agentDir) {
       throw new Error(`Refusing to use ${label} outside the agent directory: ${path}`);
     }
   }
-  return { studio, container, extensions, wrapper, inodes };
+  return { studio, container, pointer, extensions, wrapper, inodes };
 }
 
 export async function optionalText(path) {

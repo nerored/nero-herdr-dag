@@ -5,53 +5,53 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import extension, { installLocation } from '../extension.mjs';
+import { inspectLayout } from '../scripts/install-lib.mjs';
 import { viewKey } from '../src/controller.mjs';
+import { generationPointer, integrationDirectory } from '../src/layout.mjs';
 
-test('installLocation only names a generation for an installed module', t => {
-  if (process.platform === 'win32') return t.skip('POSIX path fixture');
-  assert.deepEqual(
-    installLocation('file:///agent/herdr-dag-studio/integration/generation-000007/extension.mjs'),
-    { generation: 'generation-000007', pointer: '/agent/herdr-dag-studio/current.json' },
-  );
-  assert.deepEqual(installLocation('file:///repo/extension.mjs'), {
-    generation: undefined, pointer: undefined,
-  });
-});
-
-test('the dag-studio command warns once when the live pane predates the install', async t => {
-  if (process.platform === 'win32') return t.skip('POSIX executable fixture');
-  const dir = mkdtempSync(join(tmpdir(), 'dag-extension-generation-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const bin = join(dir, 'herdr');
-  writeFileSync(bin, `#!/bin/sh
+const fixtureBin = `#!/bin/sh
 case "$2" in
   get) printf '%s\\n' '{"result":{"pane":{"pane_id":"viewer-old","tab_id":"t1","label":"DAG Studio · old"}}}' ;;
   list) printf '%s\\n' '{"result":{"panes":[{"pane_id":"parent","tab_id":"t1"},{"pane_id":"viewer-old","tab_id":"t1","label":"DAG Studio · old"}]}}' ;;
   *) printf '%s\\n' '{"result":{}}' ;;
 esac
-`);
+`;
+
+// Build the tree scripts/install.mjs actually publishes: the module runs from
+// integration/generation-NNNNNN and current.json sits in the integration
+// directory beside it. `pointer: null` reproduces a pointer that was never
+// written. Returns the notices raised while /dag-studio is opened twice.
+async function runInstalled(t, {
+  pointer = { generation: 'generation-000002' },
+  paneGeneration = pointer?.generation,
+} = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'dag-extension-generation-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const bin = join(dir, 'herdr');
+  writeFileSync(bin, fixtureBin);
   chmodSync(bin, 0o755);
   const socket = join(dir, 'herdr.sock');
   writeFileSync(socket, '');
-  const container = join(dir, 'agent', 'herdr-dag-studio');
-  mkdirSync(container, { recursive: true });
-  writeFileSync(join(container, 'current.json'), JSON.stringify({ generation: 'generation-000003' }));
-  const record = join(container, `${viewKey(socket, 'pane-1', 'session-1')}.pane.json`);
+  const agent = join(dir, 'agent');
+  const studio = join(agent, 'herdr-dag-studio');
+  const container = join(studio, 'integration');
+  const generation = 'generation-000002';
+  mkdirSync(join(container, generation), { recursive: true });
+  if (pointer !== null) writeFileSync(generationPointer(container), JSON.stringify(pointer));
+  const record = join(studio, `${viewKey(socket, 'pane-1', 'session-1')}.pane.json`);
   writeFileSync(record, JSON.stringify({
-    paneId: 'viewer-old', ready: true, generation: 'generation-000001',
+    paneId: 'viewer-old', ready: true, generation: paneGeneration,
   }));
-  const moduleUrl = pathToFileURL(
-    join(container, 'integration', 'generation-000002', 'extension.mjs'),
-  ).href;
+  const moduleUrl = pathToFileURL(join(container, generation, 'extension.mjs')).href;
 
-  const keys = ['HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_SOCKET_PATH', 'HERDR_BIN_PATH', 'OMO_HERDR_DAG_STUDIO_STATE_DIR'];
+  const keys = ['HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_SOCKET_PATH', 'HERDR_BIN_PATH', 'OMO_CODING_AGENT_DIR'];
   const saved = new Map(keys.map(key => [key, process.env[key]]));
   Object.assign(process.env, {
     HERDR_ENV: '1',
     HERDR_PANE_ID: 'pane-1',
     HERDR_SOCKET_PATH: socket,
     HERDR_BIN_PATH: bin,
-    OMO_HERDR_DAG_STUDIO_STATE_DIR: container,
+    OMO_CODING_AGENT_DIR: agent,
   });
 
   try {
@@ -77,19 +77,59 @@ esac
     await commands.get('dag-studio').handler([], ctx);
     await commands.get('dag-studio').handler([], ctx);
     await handlers.get('session_shutdown')({}, ctx);
-
-    const warnings = notices.filter(notice => notice.message.includes('current install'));
-    assert.equal(warnings.length, 1);
-    assert.equal(warnings[0].level, 'warning');
-    assert.match(warnings[0].message, /generation-000001/);
-    assert.match(warnings[0].message, /generation-000003/);
-    assert.equal(existsSync(record), true);
+    return { notices, record };
   } finally {
     for (const [key, value] of saved) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
   }
+}
+
+test('installLocation names the pointer the installer publishes', async t => {
+  if (process.platform === 'win32') return t.skip('POSIX path fixture');
+  const agentDir = '/agent';
+  const pointer = generationPointer(integrationDirectory(agentDir));
+  assert.equal(pointer, '/agent/herdr-dag-studio/integration/current.json');
+  assert.deepEqual(
+    installLocation(pathToFileURL(join(integrationDirectory(agentDir), 'generation-000007', 'extension.mjs')).href),
+    { generation: 'generation-000007', pointer },
+  );
+  // The installer derives the pointer from the agent directory while the
+  // installed extension derives it from its own generation directory. Both
+  // must land on the file install.mjs writes.
+  assert.equal((await inspectLayout(agentDir)).pointer, pointer);
+  assert.deepEqual(installLocation('file:///repo/extension.mjs'), {
+    generation: undefined, pointer: undefined,
+  });
+});
+
+test('an installed pane from the current generation opens without a warning', async t => {
+  if (process.platform === 'win32') return t.skip('POSIX executable fixture');
+  const { notices } = await runInstalled(t);
+  assert.deepEqual(notices, []);
+});
+
+test('the dag-studio command warns once when the live pane predates the install', async t => {
+  if (process.platform === 'win32') return t.skip('POSIX executable fixture');
+  const { notices, record } = await runInstalled(t, { paneGeneration: 'generation-000001' });
+  const warnings = notices.filter(notice => notice.message.includes('current install'));
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].level, 'warning');
+  assert.match(warnings[0].message, /generation-000001/);
+  assert.match(warnings[0].message, /generation-000002/);
+  assert.deepEqual(notices.filter(notice => notice.message.includes('cannot read the install generation')), []);
+  assert.equal(existsSync(record), true);
+});
+
+test('a missing generation pointer warns distinctly from a stale pane', async t => {
+  if (process.platform === 'win32') return t.skip('POSIX executable fixture');
+  const { notices } = await runInstalled(t, { pointer: null, paneGeneration: 'generation-000001' });
+  const warnings = notices.filter(notice => notice.message.includes('cannot read the install generation'));
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].level, 'warning');
+  assert.match(warnings[0].message, /is missing/);
+  assert.deepEqual(notices.filter(notice => notice.message.includes('current install')), []);
 });
 
 test('session_start skips non-TUI modes before constructing a DagPane', async t => {

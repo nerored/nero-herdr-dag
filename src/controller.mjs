@@ -277,6 +277,13 @@ export class DagPane {
         `DAG Studio: cannot read the install generation: ${clean(error?.message ?? error)}`);
       return;
     }
+    // An installed extension always has a pointer next to its generation; when
+    // it is gone the install is broken, which is not a stale pane.
+    if (installed === null) {
+      this.warnOnce('generation-pointer',
+        `DAG Studio: cannot read the install generation: ${this.generationFile} is missing.`);
+      return;
+    }
     const current = generationNumber(installed?.generation);
     if (current === undefined || current <= pane) return;
     this.warnOnce('pane-generation',

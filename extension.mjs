@@ -3,20 +3,22 @@ import { fileURLToPath } from 'node:url';
 import { DagPane } from './src/controller.mjs';
 import { createHerdr, herdrSession } from './src/herdr.mjs';
 import { readEnv } from './src/env.mjs';
+import { generationPointer } from './src/layout.mjs';
 import { resolveViewerRuntime } from './src/runtime.mjs';
 import { tapStreams } from './src/stream-tap.mjs';
 import { resolveTaskStateDirs } from './src/task-data.mjs';
 
 // The installer places this module at
 // <agent-dir>/herdr-dag-studio/integration/generation-NNNNNN/extension.mjs and
-// keeps current.json beside the integration directory. A checkout load has
-// neither, so the pane-generation check is simply unavailable there.
+// writes current.json in the integration directory beside the generation. A
+// checkout load has neither, so the pane-generation check is simply unavailable
+// there.
 export function installLocation(moduleUrl) {
   const dir = dirname(fileURLToPath(moduleUrl));
   const generation = /^generation-\d+$/.test(basename(dir)) ? basename(dir) : undefined;
   return {
     generation,
-    pointer: generation === undefined ? undefined : join(dir, '..', '..', 'current.json'),
+    pointer: generation === undefined ? undefined : generationPointer(dirname(dir)),
   };
 }
 

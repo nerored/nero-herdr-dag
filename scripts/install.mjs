@@ -44,13 +44,13 @@ async function ensureDirectory(path, label) {
 async function main(argv) {
   const { agentDir, dryRun, keepGenerations } = parseArgs(argv);
   const layout = await inspectLayout(agentDir);
-  const { container, wrapper } = layout;
+  const { container, pointer, wrapper } = layout;
 
   let entries;
   try { entries = await readdir(container); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
 
-  const currentText = await optionalText(join(container, 'current.json'));
+  const currentText = await optionalText(pointer);
   const current = currentText === undefined ? undefined : JSON.parse(currentText).generation;
   if (currentText !== undefined && (typeof current !== 'string' || !/^generation-\d+$/.test(current))) {
     throw new Error(`Invalid installation generation: ${container}`);
@@ -115,7 +115,7 @@ async function main(argv) {
   active.add(integration);
   await mkdirExclusive(staged, 'staging directory');
   active.add(staged);
-  const pointerTmp = join(container, `current.json.tmp-${stamp}`);
+  const pointerTmp = `${pointer}.tmp-${stamp}`;
   const wrapperTmp = `${wrapper}.tmp-${stamp}`;
   try {
     await cp(join(source, 'src'), join(staged, 'src'), { recursive: true });
@@ -129,7 +129,7 @@ async function main(argv) {
 
     await writeFileNoFollow(pointerTmp, JSON.stringify({ generation }) + '\n', { agentDir, kind: 'generation pointer' });
     active.add(pointerTmp);
-    await rename(pointerTmp, join(container, 'current.json'));
+    await rename(pointerTmp, pointer);
     active.delete(pointerTmp);
 
     const text = `${marker}\nexport { default } from '../herdr-dag-studio/integration/${generation}/extension.mjs';\n`;
