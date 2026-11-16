@@ -3,7 +3,7 @@ import { lstat, open, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
-import { clean } from './text.mjs';
+import { clean, graphemeSlice } from './text.mjs';
 import { TERMINAL } from './model.mjs';
 import {
   cacheEvidence, errorEvidence, inferredTokenRate, normalizeRateHistory, replyEvidence,
@@ -13,12 +13,19 @@ import { projectKey } from './omo.mjs';
 import { readEnv } from './env.mjs';
 
 const taskId = value => typeof value === 'string' && /^st_[A-Za-z0-9_-]{1,253}$/.test(value);
-const text = (value, limit = 2000) => typeof value === 'string' && value.trim() ? clean(value).slice(0, limit) : undefined;
+// Host text is cleaned, trimmed, then cut on a grapheme boundary so a
+// surrogate pair or ZWJ cluster is never split. Whitespace-only values are
+// absent, not an empty string.
+const text = (value, limit = 2000) => {
+  if (typeof value !== 'string') return undefined;
+  const normalized = clean(value).trim();
+  return normalized ? graphemeSlice(normalized, limit) : undefined;
+};
 const count = value => Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 const numeric = value => Number.isFinite(value) ? value : undefined;
 // Notifications are rendered as-is by the host UI, so strip terminal control
 // sequences and cap length before interpolating record names or fs errors.
-const notifyText = (value, limit = 240) => clean(value).slice(0, limit);
+const notifyText = (value, limit = 240) => graphemeSlice(clean(value), limit);
 const defined = object => Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined));
 const ACTIVE = new Set(['pending', 'running']);
 const SCAN_BATCH = 8;

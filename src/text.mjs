@@ -32,6 +32,21 @@ function zeroWidthFormat(cp) {
     cp === 0xfeff || (cp >= 0xe0000 && cp <= 0xe007f);
 }
 
+// A code-unit slice can end inside a surrogate pair or an emoji/ZWJ cluster,
+// leaving invalid Unicode in persisted excerpts. Keep whole graphemes only.
+// The limit stays a code-unit budget so callers keep their historical cap.
+// Segment the raw value: segments() cleans its input, and a caller that has
+// already cleaned must not have its clusters rewritten a second time.
+export function graphemeSlice(value, limit) {
+  if (value.length <= limit) return value;
+  let out = '';
+  for (const { segment } of segmenter.segment(value)) {
+    if (out.length + segment.length > limit) break;
+    out += segment;
+  }
+  return out;
+}
+
 export function clean(value) {
   const key = String(value ?? '');
   return cached(cleanCache, key, () => {

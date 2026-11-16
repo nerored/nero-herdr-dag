@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { normalizeOmOTask, resolveTaskStateDirs, TaskData } from '../src/task-data.mjs';
 import { normalizeSnapshot, normalizeTask } from '../src/model.mjs';
+import { graphemeSlice, segments } from '../src/text.mjs';
 import { writeJson } from '../src/storage.mjs';
 
 const sessionId = 'session-1';
@@ -121,6 +122,41 @@ test('explicit task token fields take precedence over run_stats', () => {
 
 test('zero token-rate samples are preserved', () => {
   assert.deepEqual(normalizeOmOTask({ task_id: 'st_zero_rate', tokenRate: [0] }).tokenRate, [0]);
+});
+
+test('task text trims surrounding whitespace after cleaning', () => {
+  const task = normalizeOmOTask({ task_id: 'st_trim', status: 'running', description: '  a  ' });
+  assert.equal(task.description, 'a');
+  const summary = normalizeOmOTask({ task_id: 'st_trim_summary', status: 'running', task_summary: '\t padded \n' });
+  assert.equal(summary.summary, 'padded');
+  // Cleaned-to-whitespace text is absent, not a one-space string.
+  const blank = normalizeOmOTask({ task_id: 'st_trim_blank', status: 'running', description: ' \u001b[31m\t ' });
+  assert.equal('description' in blank, false);
+});
+
+test('task text truncation keeps whole graphemes at the 2000-unit default', () => {
+  // clean() drops ZWJ as a zero-width character, so exercise the shared slice
+  // directly at a real ZWJ boundary: 181 whole family clusters fit in 2000
+  // UTF-16 units and the 182nd would split the cluster.
+  const family = '\u{1F468}\u200d\u{1F469}\u200d\u{1F467}\u200d\u{1F466}';
+  const sliced = graphemeSlice(family.repeat(2000), 2000);
+  assert.equal(sliced.isWellFormed(), true);
+  assert.equal(sliced, family.repeat(181));
+
+  // A keycap cluster is 3 UTF-16 units, so a plain code-unit cut would split it.
+  const keycap = '1\uFE0F\u20E3';
+  const task = normalizeOmOTask({ task_id: 'st_emoji_cluster', status: 'running', description: keycap.repeat(1000) });
+  assert.equal(task.description, keycap.repeat(666));
+  assert.equal(task.description.isWellFormed(), true);
+  assert.equal(segments(task.description).length, 666);
+
+  const surrogate = normalizeOmOTask({ task_id: 'st_emoji_surrogate', status: 'running', description: '\u{1F600}'.repeat(2000) });
+  assert.equal(surrogate.description, '\u{1F600}'.repeat(1000));
+  assert.equal(surrogate.description.isWellFormed(), true);
+
+  // ASCII keeps the same 2000-character cap as before.
+  const ascii = normalizeOmOTask({ task_id: 'st_ascii', status: 'running', description: 'x'.repeat(2001) });
+  assert.equal(ascii.description.length, 2000);
 });
 
 test('agent identity stays separate from a category-only host record', () => {
