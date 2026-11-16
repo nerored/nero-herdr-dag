@@ -971,11 +971,13 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
   // though the pane shows ~35 of them.
   const clipTop = layout.height <= viewportH ? 0 : scroll;
   const clipBottom = layout.height <= viewportH ? layout.height : scroll + viewportH;
-  const graphCanvas = graphCanvasFor(buffers, layout.width, layout.height, palette);
+  // Clear, paint, and blit all use one window: the rows this frame shows.
+  const viewportClip = { top: clipTop, bottom: clipBottom };
+  const graphCanvas = graphCanvasFor(buffers, layout.width, layout.height, palette, viewportClip);
   drawGraph(graphCanvas, layout, {
     time, motion, palette, selectedId: ui.selectedNodeId, folded: ui.folded,
     now: viewNow, connected: isActiveSnapshot(snapshot), language,
-    clip: { top: clipTop, bottom: clipBottom },
+    clip: viewportClip,
   });
   if (filter !== 'all') {
     for (const box of layout.boxes.values()) {

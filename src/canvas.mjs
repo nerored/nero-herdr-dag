@@ -163,8 +163,16 @@ export class Canvas {
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
     const baseX = Math.floor(dx);
     const baseY = Math.floor(dy);
-    for (let sy = 0; sy < source.height; sy++) {
-      for (let sx = 0; sx < source.width; sx++) {
+    // A clipped blit can only show one source window, so iterate that window
+    // instead of every column/row of the source. The graph canvas is as tall
+    // as the layout (thousands of rows) while the pane shows a few dozen; a
+    // full scan made the copy cost grow with layout height, not viewport.
+    const firstX = Math.max(0, Math.ceil(clip.x - baseX));
+    const lastX = Math.min(source.width, Math.ceil(clip.x + clip.w - baseX));
+    const firstY = Math.max(0, Math.ceil(clip.y - baseY));
+    const lastY = Math.min(source.height, Math.ceil(clip.y + clip.h - baseY));
+    for (let sy = firstY; sy < lastY; sy++) {
+      for (let sx = firstX; sx < lastX; sx++) {
         const src = source.cells[sy][sx];
         if (src.cont) continue;
         const tx = baseX + sx;

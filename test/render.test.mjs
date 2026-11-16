@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DemoEngine } from '../src/demo.mjs';
 import { Canvas } from '../src/canvas.mjs';
+import { createFrameBuffers, graphCanvasFor } from '../src/frame-primitives.mjs';
 import { normalizeSnapshot, modeFor } from '../src/model.mjs';
 import { diagnosisFor } from '../src/diagnosis.mjs';
 import {
@@ -274,6 +275,115 @@ test('the cached wire raster paints the identical full frame as a cold build', (
     assert.equal(warm.text, cold.text, `${label}: ANSI text differs between cached and cold`);
     assert.deepEqual(warm.canvas.cells, cold.canvas.cells, `${label}: cell grid differs`);
     assert.deepEqual([...warm.hitboxes.nodes], [...cold.hitboxes.nodes], `${label}: node hitboxes differ`);
+  }
+});
+
+// The graph canvas is as tall as the layout (thousands of rows for a capped
+// chain) while the pane shows a few dozen. These witnesses count the source
+// rows each step actually touches, so a regression back to a full-height
+// clear or blit fails here instead of only showing up as a slower frame.
+function rowAccessSpy(canvas) {
+  const rows = new Set();
+  canvas.cells = new Proxy(canvas.cells, {
+    get(target, key) {
+      if (typeof key === 'string' && /^\d+$/.test(key)) rows.add(Number(key));
+      return target[key];
+    },
+  });
+  return rows;
+}
+
+function tallChainSnapshot(nodes) {
+  const id = index => `n${String(index).padStart(4, '0')}`;
+  return ghostSnapshot(
+    Array.from({ length: nodes }, (_, index) => ({
+      id: id(index),
+      label: `task-${String(index + 1).padStart(3, '0')}`,
+      state: index === nodes - 1 ? 'running' : 'completed',
+      percent: index === nodes - 1 ? 50 : 100,
+    })),
+    Array.from({ length: nodes - 1 }, (_, index) => ({ from: id(index), to: id(index + 1) })),
+  );
+}
+
+test('blit reads only the source rows its destination clip can show', () => {
+  const source = new Canvas(20, 900);
+  const destination = new Canvas(20, 12);
+  const rows = rowAccessSpy(source);
+  destination.blit(source, 0, -400, { x: 0, y: 3, w: 20, h: 10 });
+  assert.deepEqual(
+    [...rows].sort((a, b) => a - b),
+    Array.from({ length: 10 }, (_, index) => 403 + index),
+    'the blit must read only the visible source window',
+  );
+});
+
+test('a reused graph canvas clears only the viewport rows', () => {
+  const buffers = createFrameBuffers();
+  const height = 4096;
+  const canvas = graphCanvasFor(buffers, 52, height, palette, { top: 0, bottom: 33 });
+  const rows = rowAccessSpy(canvas);
+  assert.equal(graphCanvasFor(buffers, 52, height, palette, { top: 17, bottom: 50 }), canvas);
+  assert.deepEqual(
+    [...rows].sort((a, b) => a - b),
+    Array.from({ length: 33 }, (_, index) => 17 + index),
+    'the clear must touch only the clipped viewport rows',
+  );
+  assert.equal(canvas.height, height, 'the full layout grid keeps its dimensions');
+});
+
+test('a new graph canvas is blank without a clear pass', () => {
+  const buffers = createFrameBuffers();
+  const first = graphCanvasFor(buffers, 52, 40, palette, { top: 0, bottom: 40 });
+  const rows = rowAccessSpy(first);
+  const fresh = graphCanvasFor(buffers, 52, 12, palette, { top: 0, bottom: 12 });
+  assert.notEqual(fresh, first);
+  assert.equal(rows.size, 0, 'the old grid is not cleared when a new one is allocated');
+  assert.ok(fresh.cells.every(row => row.every(cell => cell.ch === ' ' && cell.cont === false &&
+    cell.width === 1 && cell.flags === 0 && cell.fg === palette.text && cell.bg === palette.panel)));
+});
+
+test('a reused graph frame touches viewport rows and matches fresh buffers', () => {
+  const tall = tallChainSnapshot(100);
+  const variant = { ...ui, selectedNodeId: 'n0000' };
+  const buffers = createFrameBuffers();
+  const frame = { width: 120, height: 40, time: 0, now, palette, theme, buffers };
+  const seed = renderApp(tall, variant, frame);
+  const layout = seed.graph.layout;
+  assert.ok(layout, 'the tall graph paints');
+  assert.ok(layout.height > seed.graph.viewportH * 10, 'the layout is much taller than the viewport');
+  const rows = rowAccessSpy(buffers.graph);
+  const reused = renderApp(tall, variant, { ...frame, graphLayout: layout });
+  const fresh = renderApp(tall, variant, {
+    ...frame, buffers: createFrameBuffers(), graphLayout: layout,
+  });
+  const bound = seed.graph.viewportH + 12;
+  assert.ok(rows.size <= bound,
+    `reused canvas touched ${rows.size} rows, expected <= ${bound} (viewport ${seed.graph.viewportH})`);
+  assert.ok(rows.size < layout.height / 10,
+    `row work ${rows.size} must not scale with layout height ${layout.height}`);
+  assert.equal(reused.text, fresh.text, 'ANSI text differs between reused and fresh canvases');
+  assert.deepEqual(reused.canvas.cells, fresh.canvas.cells, 'cell grid differs between reused and fresh canvases');
+  assert.deepEqual([...reused.hitboxes.nodes], [...fresh.hitboxes.nodes], 'node hitboxes differ');
+});
+
+test('scrolled reuse repaints the whole graph viewport identically', () => {
+  const tall = tallChainSnapshot(100);
+  const variant = { ...ui, selectedNodeId: 'n0000' };
+  const buffers = createFrameBuffers();
+  const frame = { width: 120, height: 40, time: 0, now, palette, theme, buffers };
+  const seed = renderApp(tall, variant, frame);
+  const layout = seed.graph.layout;
+  assert.ok(seed.graph.maxScroll > 100, 'the tall graph scrolls');
+  for (const graphScroll of [0, 37, 400, 0]) {
+    const reused = renderApp(tall, { ...variant, graphScroll }, { ...frame, graphLayout: layout });
+    const fresh = renderApp(tall, { ...variant, graphScroll }, {
+      ...frame, buffers: createFrameBuffers(), graphLayout: layout,
+    });
+    assert.equal(reused.text, fresh.text, `scroll ${graphScroll}: ANSI text differs`);
+    assert.deepEqual(reused.canvas.cells, fresh.canvas.cells, `scroll ${graphScroll}: cell grid differs`);
+    assert.deepEqual([...reused.hitboxes.nodes], [...fresh.hitboxes.nodes],
+      `scroll ${graphScroll}: node hitboxes differ`);
   }
 });
 

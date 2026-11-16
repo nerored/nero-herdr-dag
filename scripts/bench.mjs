@@ -10,7 +10,12 @@ import { benchFixtures, FIXED_NOW, FRAME } from './bench-fixtures.mjs';
 
 // Published budgets: a regression past any of these is a release blocker, not
 // a benchmarking curiosity. Rows without a published budget are report-only.
-const BUDGETS = Object.freeze({ demoWarmMs: 8, layout100Ms: 200, warm100Ms: 8 });
+// The 300/500 warm limits are the viewport-paint gate: a warm frame must cost
+// the visible rows, not the full layout height. They are additive to the
+// original demo/100 budgets and never relax them.
+const BUDGETS = Object.freeze({
+  demoWarmMs: 8, layout100Ms: 200, warm100Ms: 8, warm300Ms: 8, warm500Ms: 3,
+});
 const LAYOUT_WARMUP = 1;
 const LAYOUT_SAMPLES = 5;
 const WARM_WARMUP = 3;
@@ -112,6 +117,18 @@ function budgetsFor(name, layoutMs, warmMs) {
         pass: Number.isFinite(warmMs) && warmMs <= BUDGETS.warm100Ms,
       },
     ];
+  }
+  const wideWarmLimit = {
+    '300/560': BUDGETS.warm300Ms,
+    '500/990': BUDGETS.warm500Ms,
+  }[name];
+  if (wideWarmLimit !== undefined) {
+    return [{
+      metric: 'warmMs',
+      limitMs: wideWarmLimit,
+      valueMs: warmMs,
+      pass: Number.isFinite(warmMs) && warmMs <= wideWarmLimit,
+    }];
   }
   return [];
 }

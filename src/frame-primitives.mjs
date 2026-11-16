@@ -22,15 +22,21 @@ export function createFrameBuffers() {
 }
 
 // drawGraph owns a full-layout canvas. Reuse its cell objects between frames
-// of the same dimensions and repaint every cell, instead of allocating a new
-// width×height object grid on each frame.
-export function graphCanvasFor(buffers, width, height, palette) {
+// of the same dimensions instead of allocating a new width×height object grid.
+//
+// Only `clip` rows are part of the frame: the painter and the blit are both
+// restricted to that window, so repainting the rest of the layout (up to
+// MAX_LAYOUT_ROWS rows) is wasted work. A new grid is blank by construction
+// and needs no clear; a reused grid restores just the rows the blit can show.
+export function graphCanvasFor(buffers, width, height, palette, clip) {
+  const top = Math.max(0, Math.min(height, Math.floor(clip?.top ?? 0)));
+  const bottom = Math.max(top, Math.min(height, Math.ceil(clip?.bottom ?? height)));
   if (!buffers.graph || buffers.graph.width !== width || buffers.graph.height !== height) {
     buffers.graph = new Canvas(width, height, { fg: palette.text, bg: palette.panel });
-  } else {
-    buffers.graph.defaults = { fg: palette.text, bg: palette.panel };
-    buffers.graph.fill(0, 0, width, height, { fg: palette.text, bg: palette.panel });
+    return buffers.graph;
   }
+  buffers.graph.defaults = { fg: palette.text, bg: palette.panel };
+  buffers.graph.fill(0, top, width, bottom - top, { fg: palette.text, bg: palette.panel });
   return buffers.graph;
 }
 
