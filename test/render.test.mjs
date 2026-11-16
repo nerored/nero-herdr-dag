@@ -1168,3 +1168,119 @@ test('a run with only queued nodes invents no metric rows', () => {
   assert.doesNotMatch(details, /\bhit\b/);
   assert.doesNotMatch(details, /\$\d/);
 });
+
+function warningsFixture(extraDropped = []) {
+  return normalizeSnapshot({
+    version: 3, mode: 'saved', connected: false, sessionId: 'warnings',
+    generatedAt: iso(now - 10_000), updatedAt: iso(now - 10_000),
+    runs: [{
+      id: 'run_warn', name: 'warning run', status: 'running',
+      createdAt: iso(now - 20_000), updatedAt: iso(now - 10_000),
+      nodes: [
+        { id: 'kept', label: 'kept node', state: 'running', task_id: 'st_kept', percent: 40 },
+        { id: 'dropped', label: 'bad node', state: 'succeeded' },
+        ...extraDropped,
+      ],
+      edges: [],
+    }],
+    tasks: [{ id: 'st_kept', description: 'kept task', status: 'running', percent: 40 }],
+  });
+}
+
+test('dropped nodes render a bounded warning reason in node, task and run details', () => {
+  const snap = warningsFixture();
+  const nodeUi = {
+    ...ui, runIndex: 0, focus: 'graph', selectedNodeId: 'kept', selectedTaskId: 'st_kept',
+  };
+  const frame = (frameUi, width, height, language = 'en') => renderApp(snap, {
+    ...frameUi, language, runIndex: 0,
+  }, { width, height, time: 0, now, palette, theme });
+
+  const wide = frame(nodeUi, 120, 40);
+  const wideDetails = regionText(wide, wide.layout.details);
+  assert.match(wideDetails, /WARNINGS 1/, 'wide node details name the dropped count');
+  assert.match(wideDetails, /unknown state "succeeded"/, 'the reason is bounded, not raw');
+  assert.doesNotMatch(wideDetails, /bad node/, 'a dropped node is never painted as live work');
+
+  const narrow = frame(nodeUi, 70, 24);
+  const narrowDetails = regionText(narrow, narrow.layout.details);
+  assert.match(narrowDetails, /WARNINGS 1/, '70-column duty names the dropped count');
+  assert.match(narrowDetails, /unknown state "succeeded"/, '70-column duty names the reason');
+  assert.match(narrowDetails, /node dropped/, '70-column duty names the dropped node');
+
+  const taskUi = {
+    ...ui, runIndex: 0, focus: 'tasks', lastFocus: 'tasks', selectedTaskId: 'st_kept',
+  };
+  const task = frame(taskUi, 120, 40);
+  assert.match(regionText(task, task.layout.details), /WARNINGS 1/, 'task details carry the owning run warning');
+
+  const run = frame(selectRun(), 120, 40);
+  const runDetails = detailLines(run).join('\n');
+  assert.match(runDetails, /WARNINGS 1/, 'run details name the dropped count');
+  assert.match(runDetails, /unknown state "succeeded"/, 'run details name the reason');
+
+  const zh = frame(nodeUi, 120, 40, 'zh');
+  const zhDetails = regionText(zh, zh.layout.details);
+  assert.match(zhDetails, /警告 1/, 'Chinese details localize the warning heading');
+  assert.match(zhDetails, /未知状态“succeeded”/, 'Chinese details localize the reason');
+});
+
+test('a clean snapshot paints no warning block or badge', () => {
+  const clean = renderApp(snapshot, ui, {
+    width: 120, height: 40, time: 0, now, palette, theme,
+  });
+  assert.doesNotMatch(clean.text, /WARNINGS/);
+  assert.doesNotMatch(clean.text, /⚠ \d+ dropped/);
+  const zh = renderApp(snapshot, { ...ui, language: 'zh' }, {
+    width: 120, height: 40, time: 0, now, palette, theme,
+  });
+  assert.doesNotMatch(zh.text, /警告/);
+});
+
+test('the graph badge counts dropped records and never paints the raw warnings', () => {
+  const snap = warningsFixture();
+  const result = renderApp(snap, {
+    ...ui, runIndex: 0, focus: 'graph', selectedNodeId: 'kept', selectedTaskId: 'st_kept',
+  }, { width: 140, height: 42, time: 0, now, palette, theme });
+  const graph = regionText(result, result.layout.graph);
+  assert.match(graph, /⚠ 1 dropped/, 'the graph badge carries the dropped count');
+  assert.doesNotMatch(graph, /unknown state|invalid record|succeeded|self edge/,
+    'raw warning reasons stay off the graph canvas');
+});
+
+test('a long warning list stays bounded while naming the remainder', () => {
+  const extraDropped = [1, 2, 3, 4, 5].map(index => ({
+    id: `bad${index}`, label: `bad ${index}`, state: `s${index}`,
+  }));
+  const snap = warningsFixture(extraDropped);
+  const result = renderApp(snap, {
+    ...ui, runIndex: 0, focus: 'graph', selectedNodeId: 'kept', selectedTaskId: 'st_kept',
+  }, { width: 120, height: 40, time: 0, now, palette, theme });
+  const details = regionText(result, result.layout.details);
+  assert.match(details, /WARNINGS 6/, 'the heading counts every dropped record');
+  assert.match(details, /unknown state "s1"/);
+  assert.match(details, /unknown state "s2"/);
+  assert.doesNotMatch(details, /unknown state "s3"/, 'only the bounded rows are painted');
+  assert.match(details, /\+3 more/, 'the hidden remainder stays named');
+});
+
+test('dropped edges render their endpoints and a bounded reason', () => {
+  const snap = normalizeSnapshot({
+    version: 3, mode: 'saved', connected: false, sessionId: 'edge-warnings',
+    generatedAt: iso(now - 10_000), updatedAt: iso(now - 10_000),
+    runs: [{
+      id: 'run_edge', name: 'edge warning run', status: 'running',
+      createdAt: iso(now - 20_000), updatedAt: iso(now - 10_000),
+      nodes: [{ id: 'kept', label: 'kept node', state: 'running', task_id: 'st_kept', percent: 40 }],
+      edges: [{ from: 'kept', to: 'ghost' }],
+    }],
+    tasks: [{ id: 'st_kept', description: 'kept task', status: 'running', percent: 40 }],
+  });
+  assert.equal(snap.runs[0].warningCount, 1);
+  const result = renderApp(snap, {
+    ...ui, runIndex: 0, focus: 'graph', selectedNodeId: 'kept', selectedTaskId: 'st_kept',
+  }, { width: 70, height: 24, time: 0, now, palette, theme });
+  const details = regionText(result, result.layout.details);
+  assert.match(details, /WARNINGS 1/);
+  assert.match(details, /unknown node · edge kept → ghost dropped/);
+});

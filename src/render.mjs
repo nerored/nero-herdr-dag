@@ -1028,6 +1028,10 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
 }) {
   const stats = run ? runStats(run) : null;
   const graphSummary = run ? runSummary(run, { now: viewNow }) : undefined;
+  const warningCount = runWarningCount(run);
+  const graphBadge = text => (warningCount
+    ? `${t(language, 'warningsBadge', { count: warningCount })} · ${text}`
+    : text);
   const criticalIds = criticalNodeIds(graphSummary);
   const graphRun = focusSubgraph(run, ui.graphFocus);
   const filter = ui.graphFilter ?? 'all';
@@ -1039,7 +1043,7 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
     badge: unlinked
       ? t(language, 'noNodeShort')
       : run
-        ? (stats.percentKnown
+        ? graphBadge(stats.percentKnown
           ? t(language, 'graphBadge', { nodes: stats.total, running: stats.counts.running ?? 0, percent: stats.percent })
           : t(language, 'graphBadgeCounts', {
             nodes: stats.total, running: stats.counts.running ?? 0, done: stats.done, total: stats.total,
@@ -2037,6 +2041,59 @@ function resolveSelection(snapshot, ui, { allowRunFallback = false } = {}) {
   return { runs, tasks, run, task, node, showTask, kind, subject };
 }
 
+function runWarningCount(run) {
+  return Number.isFinite(run?.warningCount) ? run.warningCount : (run?.warnings?.length ?? 0);
+}
+
+const WARNING_REASON_KEYS = {
+  'invalid-record': 'warningReasonInvalidRecord',
+  'missing-id': 'warningReasonMissingId',
+  'duplicate-id': 'warningReasonDuplicateId',
+  'unknown-state': 'warningReasonUnknownState',
+  'unknown-node': 'warningReasonUnknownNode',
+  'self-edge': 'warningReasonSelfEdge',
+};
+
+function warningReasonLabel(language, warning) {
+  const key = WARNING_REASON_KEYS[warning?.reason] ?? 'warningReasonUnknown';
+  return t(language, key, { state: warning?.state ?? '—' });
+}
+
+function warningLine(warning, language) {
+  const reason = warningReasonLabel(language, warning);
+  if (warning?.code === 'edge-dropped') {
+    return t(language, 'warningEdgeDropped', {
+      from: warning.from ?? '—', to: warning.to ?? '—', reason,
+    });
+  }
+  return warning?.nodeId
+    ? t(language, 'warningNodeDropped', { id: warning.nodeId, reason })
+    : t(language, 'warningNodeDroppedAnonymous', { reason });
+}
+
+// A dropped node or edge is proof that the snapshot is incomplete. Keep the
+// heading count exact, bound the painted reasons, and name the remainder so a
+// long warning list can never push live evidence off the pane or imply the
+// visible rows are the whole loss.
+const WARNING_ROWS = 3;
+function warningsSection(canvas, x, y, w, run, palette, language, bottom = Infinity) {
+  const warnings = Array.isArray(run?.warnings) ? run.warnings : [];
+  const count = runWarningCount(run);
+  if (!count || y >= bottom - 1) return y;
+  y = detailSection(canvas, x, y, w, `${t(language, 'warnings')} ${count}`, palette);
+  const shown = warnings.slice(0, WARNING_ROWS);
+  for (const warning of shown) {
+    if (y >= bottom) break;
+    y = detailLine(canvas, x, y, w, [[warningLine(warning, language), { fg: palette.warn }]], palette);
+  }
+  if (count > shown.length && y < bottom) {
+    y = detailLine(canvas, x, y, w, [[t(language, 'warningsMore', {
+      count: count - shown.length,
+    }), { fg: palette.faint, dim: true }]], palette);
+  }
+  return y;
+}
+
 function nodeDetails(canvas, rect, run, node, snapshot, ui, {
   now, time, motion = true, palette, language, viewportH, freshness,
 }) {
@@ -2083,6 +2140,10 @@ function nodeDetails(canvas, rect, run, node, snapshot, ui, {
       time, motion, palette, color, bg: palette.panel, bold: node.state === 'running',
     });
     y += 1;
+  }
+  if (runWarningCount(run)) {
+    y = warningsSection(canvas, x, y, w, run, palette, language, bottom);
+    y++;
   }
   if (!diagnosis && (!Number.isFinite(viewportH) || viewportH >= 34)) {
     const whyText = node.error ?? node.logs?.at(-1)
@@ -2280,6 +2341,10 @@ function taskDetails(canvas, rect, task, snapshot, ui, {
     });
     y += 1;
   }
+  if (linked?.run && runWarningCount(linked.run)) {
+    y = warningsSection(canvas, x, y, w, linked.run, palette, language, bottom);
+    y++;
+  }
   y = metricsSection(canvas, x, y, w, task, palette, language);
   if (snapshot?.sources?.length) {
     y = sourceHealthSection(canvas, x, y, w, snapshot, { palette, language, now, bottom });
@@ -2392,6 +2457,10 @@ function runSummarySection(canvas, x, y, w, run, snapshot, stats, {
   };
 
   y = detailSection(canvas, x, y, w, t(language, 'runSummary'), palette);
+  if (runWarningCount(run)) {
+    y = warningsSection(canvas, x, y, w, run, palette, language);
+    y++;
+  }
 
   const counts = filterCounts(run.nodes, summary);
   const attentionRows = [
@@ -2876,6 +2945,10 @@ function dutyBody(canvas, full, snapshot, ui, {
   // first 54-column viewport instead of scrolling below it.
   if (snapshot?.sources?.length) {
     y = sourceHealthSection(canvas, x, y, w, snapshot, { palette, language, now, bottom });
+  }
+  if (node && run && runWarningCount(run)) {
+    y = warningsSection(canvas, x, y, w, run, palette, language, bottom);
+    y++;
   }
   // The compact diagnosis card owns a recorded reason; keep the standalone
   // tier-1 error line for running/unknown subjects and unrecorded failures.
