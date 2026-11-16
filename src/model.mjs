@@ -556,23 +556,63 @@ export function isActiveRun(run) {
   return run.status === 'running' || run.nodes.some(node => node.state === 'running');
 }
 
+// One index pass counts each node's incoming edges and records the reverse
+// edges, then each layer releases only the nodes whose last dependency just
+// landed. The previous version rescanned every remaining node against every
+// edge for every layer (O(L*N*E)), which made a 500-node chain dominate the
+// layout. Nodes are grouped by id so a run that repeats an id still emits
+// every occurrence in the same row.
 export function layers(run) {
-  const remaining = new Set(run.nodes.map(node => node.id));
-  const done = new Set();
+  const byId = new Map();
+  const position = new Map();
+  for (let index = 0; index < run.nodes.length; index++) {
+    const node = run.nodes[index];
+    const group = byId.get(node.id);
+    if (group) group.push(node);
+    else {
+      byId.set(node.id, [node]);
+      position.set(node.id, index);
+    }
+  }
+  const pending = new Map();
+  for (const id of byId.keys()) pending.set(id, 0);
+  const dependents = new Map();
+  for (const edge of run.edges) {
+    // An edge into a node this run does not contain cannot gate anything. An
+    // edge out of a missing node still counts, so its target stays blocked
+    // and the run reports a cycle instead of silently dropping the edge.
+    if (!pending.has(edge.to)) continue;
+    pending.set(edge.to, pending.get(edge.to) + 1);
+    const targets = dependents.get(edge.from);
+    if (targets) targets.push(edge.to);
+    else dependents.set(edge.from, [edge.to]);
+  }
+  // Row order is the run's declared node order, not the order edges happened
+  // to release a node, so both the first row and every later row use it.
+  const byDeclaredOrder = (a, b) => position.get(a) - position.get(b);
+  let ready = [...pending.keys()].filter(id => pending.get(id) === 0).sort(byDeclaredOrder);
   const rows = [];
-  while (remaining.size) {
-    const row = run.nodes.filter(node => remaining.has(node.id) &&
-      run.edges.every(edge => edge.to !== node.id || done.has(edge.from)));
-    if (!row.length) {
-      const error = new Error('A dependency cycle was detected.');
-      error.code = 'cycle';
-      throw error;
-    }
+  let released = 0;
+  while (ready.length) {
+    const row = [];
+    for (const id of ready) row.push(...byId.get(id));
     rows.push(row);
-    for (const node of row) {
-      remaining.delete(node.id);
-      done.add(node.id);
+    released += ready.length;
+    const next = [];
+    for (const id of ready) {
+      for (const target of dependents.get(id) ?? []) {
+        const left = pending.get(target) - 1;
+        pending.set(target, left);
+        if (left === 0) next.push(target);
+      }
     }
+    next.sort(byDeclaredOrder);
+    ready = next;
+  }
+  if (released < pending.size) {
+    const error = new Error('A dependency cycle was detected.');
+    error.code = 'cycle';
+    throw error;
   }
   return rows;
 }

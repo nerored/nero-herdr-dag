@@ -99,6 +99,52 @@ test('topological layers preserve diamond order and reject cycles', () => {
   assert.throws(() => layers({ nodes: [{ id: 'a' }, { id: 'b' }], edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'a' }] }), /cycle/i);
 });
 
+test('layers keep declared node order inside a row when edges are shuffled', () => {
+  // Declaration order is b before c, but the edge list releases c before b.
+  // A queue/edge-release implementation would emit ['c', 'b']; the contract
+  // is the declared order ['b', 'c'], so removing the declared-order sort
+  // must fail this test.
+  const run = {
+    nodes: ['b', 'c', 'a'].map(id => ({ id, state: 'pending' })),
+    edges: [{ from: 'a', to: 'c' }, { from: 'a', to: 'b' }],
+  };
+  assert.deepEqual(layers(run).map(row => row.map(node => node.id)), [['a'], ['b', 'c']]);
+});
+
+test('layers throw the exact cycle error for every blocked shape', () => {
+  const cycle = { name: 'Error', message: 'A dependency cycle was detected.', code: 'cycle' };
+  const cases = {
+    twoCycle: { nodes: [{ id: 'a' }, { id: 'b' }], edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'a' }] },
+    selfEdge: { nodes: [{ id: 'a' }], edges: [{ from: 'a', to: 'a' }] },
+    unknownSource: { nodes: [{ id: 'a' }, { id: 'b' }], edges: [{ from: 'x', to: 'b' }] },
+    cycleWithTail: {
+      nodes: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }],
+      edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'b' }, { from: 'c', to: 'd' }],
+    },
+  };
+  for (const [name, run] of Object.entries(cases)) {
+    assert.throws(() => layers(run), cycle, `${name} must report the cycle error`);
+  }
+});
+
+test('layers release long chains and wide fan-out in one pass per level', () => {
+  const chain = {
+    nodes: Array.from({ length: 500 }, (_, index) => ({ id: `c${index}`, state: 'pending' })),
+    edges: Array.from({ length: 499 }, (_, index) => ({ from: `c${index}`, to: `c${index + 1}` })),
+  };
+  const rows = layers(chain);
+  assert.equal(rows.length, 500);
+  assert.deepEqual(rows.map(row => row.map(node => node.id)), chain.nodes.map(node => [node.id]));
+
+  const wide = {
+    nodes: [{ id: 'root', state: 'pending' }, ...Array.from({ length: 499 }, (_, index) => ({ id: `f${index}`, state: 'pending' }))],
+    edges: Array.from({ length: 499 }, (_, index) => ({ from: 'root', to: `f${index}` })),
+  };
+  const wideRows = layers(wide);
+  assert.equal(wideRows.length, 2);
+  assert.deepEqual(wideRows[1].map(node => node.id), wide.nodes.slice(1).map(node => node.id));
+});
+
 test('zero token-rate samples survive normalization', () => {
   assert.deepEqual(normalizeTask({ id: 'st_direct_zero', tokenRate: [0] }).tokenRate, [0]);
   const snapshot = normalizeSnapshot({
