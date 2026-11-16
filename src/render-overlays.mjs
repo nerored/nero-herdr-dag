@@ -5,11 +5,10 @@ import { modeFor } from './model.mjs';
 import { pulse, statusColor, statusIcon } from './theme.mjs';
 import { clamp, fit, width as textWidth, wrap } from './text.mjs';
 import { filterSwitcher, reconcileSwitcher, switcherItems } from './view-state.mjs';
-// The frame module owns the hoisted nav/scroll helpers and the two pure
-// formatters, and it calls these painters from renderApp. The resulting cycle
-// observes no evaluation order: every binding imported here is a hoisted
-// function declaration that is initialized during module instantiation.
-import { capturedDisplay, modeName, navTasks, scrollOffset } from './render.mjs';
+// The pure render-view leaf owns the nav/scroll helpers and the two pure
+// formatters; renderApp calls these painters. Overlays never import the render
+// entry point, so the module graph stays acyclic.
+import { capturedDisplay, modeName, navTasks, scrollOffset } from './render-view.mjs';
 
 // A modal owns the pointer while it is open: every row hitbox painted under it
 // must stop matching. `hints` is the stronger reset the full-screen switcher

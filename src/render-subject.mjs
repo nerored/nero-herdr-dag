@@ -136,8 +136,9 @@ export function taskSubject(task, {
 // One section order for nodes and tasks. A subject only supplies the data that
 // differs; the body owns the order, the compact breakpoints and the width
 // arithmetic so both details panes cannot drift apart. The shared section
-// painters stay in render.mjs and arrive through `sections`, the same way
-// runSummarySection receives its clock and age callbacks.
+// painters come from render-panels (or render.mjs for reply/thinking) and
+// arrive through `sections`, the same way runSummarySection receives its clock
+// and age callbacks.
 export function renderSubjectBody(canvas, rect, subject, {
   now, time, motion = true, palette, language, viewportH, freshness, snapshot, verbose = false, sections,
 }) {

@@ -1,16 +1,15 @@
 // Chrome paints the frame-wide context: the header brand, breadcrumb and
 // status, and the footer legend, hints and settings entry. The shared
-// selection, freshness and compact-age helpers stay in render.mjs and arrive
-// through the same deliberate module cycle the other extracted painters use;
-// every imported binding is a hoisted function declaration, so both load
-// orders initialize before the first frame is painted.
+// selection, freshness and compact-age helpers come from the pure render-view
+// leaf; chrome never imports the render entry point, so the module graph stays
+// acyclic.
 import { rich } from './frame-primitives.mjs';
 import { statusLabel, t } from './i18n.mjs';
 import { modeFor, runStats } from './model.mjs';
 import {
   capturedAgoLabel, compactAge, displayRunName, entityState, HEADER_H, isActiveSnapshot,
   modeColor, resolveSelection, snapshotFreshness,
-} from './render.mjs';
+} from './render-view.mjs';
 import { gradientCells, mix, statusColor } from './theme.mjs';
 import { clock, fit, truncateMiddle, width as textWidth } from './text.mjs';
 

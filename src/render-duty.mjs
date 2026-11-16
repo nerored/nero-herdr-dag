@@ -1,9 +1,8 @@
 // Duty paints the primary surface below 112 columns: the RUNS and CELLS
-// lists, the compact subject body, and the run overview. The shared selection,
-// progress, source-health and empty-state helpers stay in render.mjs and
-// arrive through the same module cycle the other extracted painters use
-// (render-diagnosis, render-overlays); the frame buffers and the subject
-// adapter are the ones the wide details pane already uses.
+// lists, the compact subject body, and the run overview. Selection, freshness
+// and progress helpers come from the pure render-view leaf, while the shared
+// progress/source/empty painters come from render-panels; duty never imports
+// the render entry point, so the module graph stays acyclic.
 import {
   detailLine, detailSection, drawScrollbar, panel, pill, rich, scratchCanvas,
 } from './frame-primitives.mjs';
@@ -17,10 +16,12 @@ import {
   activitySummary, elapsedLabel, incoming, isUnsuccessfulState, nodeActivity, nodeMap, outgoing, runStats,
 } from './model.mjs';
 import {
-  displayRunName, isActiveSnapshot, orphanNavTasks, percentInfo, progressBlock, progressCounts,
-  renderEmptyState, resolveSelection, scrollOffset, selectionResolution, sourceHealthSection,
-  summaryTime,
-} from './render.mjs';
+  progressBlock, renderEmptyState, sourceHealthSection,
+} from './render-panels.mjs';
+import {
+  displayRunName, isActiveSnapshot, orphanNavTasks, percentInfo, progressCounts,
+  resolveSelection, scrollOffset, selectionResolution, summaryTime,
+} from './render-view.mjs';
 import { scrollbarGeometry } from './scroll.mjs';
 import { statusColor, statusIcon } from './theme.mjs';
 import { clamp, fit, width as textWidth, wrap } from './text.mjs';

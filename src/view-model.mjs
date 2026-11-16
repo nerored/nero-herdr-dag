@@ -1,5 +1,5 @@
 import { smoothScroll } from './scroll.mjs';
-import { navTasks, taskAtPoint } from './render.mjs';
+import { navTasks, taskAtPoint } from './render-view.mjs';
 import { clamp } from './text.mjs';
 import { advanceRunSelection } from './view-state.mjs';
 import {

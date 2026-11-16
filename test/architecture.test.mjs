@@ -101,6 +101,65 @@ function assertRenderBoundary(file, text) {
   assert.deepEqual(violations, [], `render must stay a pure frame module:\n${violations.join('\n')}`);
 }
 
+// The staged render split makes the import graph a DAG: render.mjs may depend
+// on its painters and the pure leaves, never the reverse. Tarjan's SCC scan
+// turns that ownership rule into a static assertion, so a future edit cannot
+// quietly reintroduce the load-order hazard.
+function srcImportGraph() {
+  const graph = new Map();
+  for (const file of sources.keys()) {
+    if (!file.startsWith('src/')) continue;
+    const targets = parseImports(sources.get(file))
+      .map(entry => resolveTarget(file, entry.specifier))
+      .filter(target => target && target.startsWith('src/') && sources.has(target));
+    graph.set(file, [...new Set(targets)]);
+  }
+  return graph;
+}
+
+function importSccs(graph = srcImportGraph()) {
+  let next = 0;
+  const index = new Map();
+  const low = new Map();
+  const stack = [];
+  const onStack = new Set();
+  const components = [];
+  const visit = node => {
+    index.set(node, next);
+    low.set(node, next);
+    next++;
+    stack.push(node);
+    onStack.add(node);
+    for (const target of graph.get(node) ?? []) {
+      if (!index.has(target)) {
+        visit(target);
+        low.set(node, Math.min(low.get(node), low.get(target)));
+      } else if (onStack.has(target)) {
+        low.set(node, Math.min(low.get(node), index.get(target)));
+      }
+    }
+    if (low.get(node) !== index.get(node)) return;
+    const component = [];
+    let member;
+    do {
+      member = stack.pop();
+      onStack.delete(member);
+      component.push(member);
+    } while (member !== node);
+    if (component.length > 1 || (graph.get(node) ?? []).includes(node)) {
+      component.sort();
+      components.push(component);
+    }
+  };
+  for (const node of graph.keys()) if (!index.has(node)) visit(node);
+  return components.sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+function assertAcyclicImports(graph = srcImportGraph()) {
+  const cycles = importSccs(graph);
+  assert.deepEqual(cycles, [], `src must have acyclic imports:\n${cycles.map(cycle => cycle.join(' <-> ')).join('\n')}`);
+}
+
 function declaredExports(file) {
   const text = sources.get(file) ?? '';
   const names = new Set();
@@ -219,6 +278,34 @@ test('the boundary scan rejects a synthetic render -> fs import', () => {
     () => assertRenderBoundary('src/render.mjs', synthetic),
     /render\.mjs imports the filesystem/,
   );
+});
+
+test('the src import graph is acyclic and only the viewer imports render', () => {
+  assertAcyclicImports();
+
+  const importers = [...sources.keys()]
+    .filter(file => file.startsWith('src/') && file !== 'src/render.mjs')
+    .filter(file => parseImports(sources.get(file))
+      .some(entry => resolveTarget(file, entry.specifier) === 'src/render.mjs'))
+    .sort();
+  assert.deepEqual(importers, ['src/viewer.mjs'], 'only the viewer may import render.mjs');
+
+  const renderTargets = [...new Set(parseImports(sources.get('src/render.mjs'))
+    .map(entry => resolveTarget('src/render.mjs', entry.specifier))
+    .filter(target => target && target.startsWith('src/')))].sort();
+  for (const target of renderTargets) {
+    const backEdge = parseImports(sources.get(target) ?? '')
+      .some(entry => resolveTarget(target, entry.specifier) === 'src/render.mjs');
+    assert.equal(backEdge, false, `${target} must not import render.mjs upward`);
+  }
+});
+
+test('the acyclicity scan rejects a synthetic back-edge', () => {
+  const graph = new Map([
+    ['src/render.mjs', ['src/render-view.mjs']],
+    ['src/render-view.mjs', ['src/render.mjs']],
+  ]);
+  assert.throws(() => assertAcyclicImports(graph), /src must have acyclic imports/);
 });
 
 test('viewer imports render only through the public frame API', () => {

@@ -1,6 +1,6 @@
 import { nodeScrollTarget } from './graph.mjs';
 import { nodeForTask } from './model.mjs';
-import { navTasks, taskAtPoint } from './render.mjs';
+import { navTasks, taskAtPoint } from './render-view.mjs';
 import { clamp } from './text.mjs';
 import { reconcileRunSelection, syncFoldedRun } from './view-state.mjs';
 

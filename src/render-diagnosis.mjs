@@ -5,11 +5,10 @@ import { statusIcon } from './theme.mjs';
 import {
   charWidth as textCharWidth, compactDuration, fit, segments as textSegments, width as textWidth, wrap,
 } from './text.mjs';
-// The frame module keeps the shared status predicates and the mode label. The
-// render <-> diagnosis cycle is deliberate: every binding imported here is a
-// hoisted function declaration, so both load orders initialize before any
-// painter runs.
-import { entityState, modeName } from './render.mjs';
+// The pure render-view leaf owns the shared entity-state and mode-label
+// helpers. Diagnosis never imports the render entry point, so the module graph
+// stays acyclic.
+import { entityState, modeName } from './render-view.mjs';
 import { isUnsuccessfulState } from './model.mjs';
 
 function errorSourceLine(canvas, x, y, w, entity, palette, language) {
