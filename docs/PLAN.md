@@ -12,14 +12,14 @@
   模型思考/回复摘录、最近日志（详细模式）、依赖、子任务、错误、运行级统计。
 - 自适应布局：宽屏三栏；窄屏或紧凑 pane 使用 duty 单面布局，只显示 RUNS、CELLS 和当前对象/详情，不渲染图谱；`S` 只在 112 列以上的宽屏生效。
 - 演示模式：无需 OmO/Herdr，直接在当前终端用确定性假数据渲染并持续演化。
-- 中英文界面：导航栏下方有设置菜单，语言选择持久化到
+- 中英文界面：footer 右侧的 `⚙ 设置` 打开设置菜单，语言选择持久化到
   `~/.config/nero-herdr-dag/config.json`。
 - 兼容参考插件的 v1 和 v2 快照；自己的扩展写出 v3 快照。
 
 产品名：**Herdr DAG Studio**  
 包名：`herdr-dag-studio`  
 命令：`dag-studio`  
-OmO 扩展入口：`extensions/omo-herdr-dag-studio.js`
+OmO 扩展入口：源码为 `extension.mjs`，安装后为 `<agent-dir>/extensions/omo-herdr-dag-studio.js`
 
 ## 2. 设计原则
 
@@ -48,11 +48,11 @@ OmO 扩展入口：`extensions/omo-herdr-dag-studio.js`
 │ ● refresh index    │ │          ▼                      ▼               │ │ ▁▂▃▅▆▇▆▅▃▂ 24 tok/s        │
 │   ████░░░░░ 35%    │ │  ╭──────────────────╮   ╭──────────────────╮    │ │ ← intake, scaffold         │
 │ ✓ cleanup branches │ │  │ ◌ verify-evidence│   │ ✓ security       │    │ │ → verify-evidence          │
-│                    │ │  ╰──────────────────╯   ╰──────────────────╯    │ │ subtasks: lint ✓  tests ⠹  │
-│ LEGEND             │ │  dependencies: build-api → build-ui → ...        │ │                            │
+│ ○ probe GPU runner │ │  ╰──────────────────╯   ╰──────────────────╯    │ │ subtasks: lint ✓  tests ⠹  │
+│                    │ │  dependencies: build-api → build-ui → ...        │ │                            │
 ╰────────────────────╯ ╰──────────────────────────────────────────────────╯ ╰────────────────────────────╯
- ?  ●run ✓done ×fail ◌wait                                      ● LIVE  follow:ON
- session demo-7f3a · 60 fps · theme system
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ●run ✓done ×fail ◌wait  ? Help  m select  x clear  z focus · n/N nodes · 1-5 filter · / find   ● FOLLOW ON  60fps  ⚙ SETTINGS
 ```
 
 ### 布局断点
@@ -64,15 +64,15 @@ OmO 扩展入口：`extensions/omo-herdr-dag-studio.js`
 ### 面板
 
 1. **Header**：渐变标题、当前 run、状态徽章、LIVE 脉搏点、时钟、会话短 ID。
-2. **Sidebar**：RUNS 列表（状态、迷你进度条、计数）、TASKS 列表、
-   SETTINGS 设置入口；图例移到 footer。
+2. **Sidebar**：RUNS 列表（状态、迷你进度条、计数）和 TASKS 列表；
+   全局控件不放侧栏，图例和设置入口都在 footer。
 3. **Graph**：拓扑分层节点卡片；运行中 spinner/呼吸边框；边流动点；
    选中发光；折叠节点仅保留标题行；底部显示依赖边列表。
 4. **Details**：状态、耗时、agent/model、进度条、token 输入输出、
    轮次、工具调用、重试、活动阶段、模型思考/回复摘录、token 速率 sparkline、
    前驱/后继、子任务、错误；选中 run 时显示运行汇总（token、成本、缓存命中、
    墙钟/忙碌时长、关键路径、并行度与证据覆盖度）；详细模式追加最近日志。
-5. **Footer**：图例、可点击的 `? 帮助` 入口、跟随开关、session、fps、palette。
+5. **Footer**：左侧图例、可点击的 `? 帮助`、`m` 选区、`x` 清除、随焦点变化的提示（含 `z` 聚焦、`n/N` 节点、`1-5` 过滤、`/` 查找），右侧跟随状态与 fps，最右侧 `⚙ 设置` 入口；session 显示在 header，不在 footer。
 6. **Footer 状态提示**：状态变化显示在 footer 右侧 5 秒；`?` 帮助仍为覆盖层。
 
 ## 4. 动画系统
@@ -148,11 +148,10 @@ kernel 检查、反例搜索、解析例外集估计、归纳步骤、评审、�
 ```json
 {
   "version": 3,
-  "sessionId": "demo-7f3a",
+  "sessionId": "0123456789abcdef01234567",
   "mode": "live",
   "connected": true,
-  "language": "en",
-  "generatedAt": "2026-11-09T…",
+  "updatedAt": "2026-11-09T…",
   "provenance": {
     "origin": "controller",
     "statePath": "/home/me/.omo/agent/herdr-dag-studio/0123456789abcdef01234567.json",
@@ -215,31 +214,51 @@ kernel 检查、反例搜索、解析例外集估计、归纳步骤、评审、�
 
 viewer 同时接受参考插件的 v1 和 v2：缺省字段由 `model.normalizeSnapshot()` 补齐。
 
-`mode` 为 `live`（连接的 controller 快照）、`saved`（断开连接的捕获）或 `demo`（内置演示）。`provenance` 记录来源（`controller`、`demo-engine`、`legacy-snapshot` 或 `viewer-placeholder`）、状态文件、任务存储根目录、采集时间和查看方式（`watch` 或 `once`）。`sources` 列出 controller 扫描的任务和 checkpoint 存储，以及各存储的计数、扫描时间和错误。viewer 会根据记录推导每个字段的来源（`recorded`、`derived`、`simulated`、`unavailable` 或 `unknown`）。
+`mode` 为 `live`（连接的 controller 快照）、`saved`（断开连接的捕获）或 `demo`（内置演示）。`provenance` 记录来源（`controller`、`demo-engine`、`legacy-snapshot` 或 `viewer-placeholder`）、状态文件、任务存储根目录、采集时间和查看方式（`watch` 或 `once`）。`sources` 列出 controller 扫描的任务和 checkpoint 存储，以及各存储的计数、扫描时间和错误。
+
+两个内置生产者写入的字段不同，viewer 必须容忍缺省：
+
+| 字段 | controller (`src/controller.mjs`) | demo (`src/demo.mjs`) |
+| --- | --- | --- |
+| `updatedAt` | 每次保存写入的 ISO 时间 | 不写 |
+| `language` | 不写，viewer 按 `en` 处理 | 固定写 `en` |
+| `generatedAt` | 不写，viewer 回退到 `updatedAt`（与 `provenance.capturedAt` 是同一个保存时钟） | 与 `provenance.capturedAt` 同源的引擎时钟 |
+| `sources` | 写扫描计数 | 不写 |
+| `demo` / `provenance.demo` | 不写 | 写 `cycle`、`phase`、`cycleMs` |
+| `provenance.statePath` / `provenance.taskStateDir` | 写 | 不写 |
+
+viewer 解析 `generatedAt` 的顺序是：`generatedAt`、`updatedAt`、`generated_at`、`provenance.capturedAt`，最后只在已连接的 live 快照上取当前时间。viewer 会根据记录推导每个字段的来源（`recorded`、`derived`、`simulated`、`unavailable` 或 `unknown`）。
 
 ## 7. 模块地图
 
 ```text
-bin/dag-studio.mjs        CLI: install / uninstall / demo / view / version
+bin/dag-studio.mjs        CLI: demo / view / install / uninstall / --help / --version（-h、-v 为别名）
 extension.mjs             OmO 生命周期、事件订阅、/dag-studio
 src/text.mjs              grapheme、宽字符、fit/fitTail/wrap
-src/theme.mjs             调色板、truecolor/256 色、颜色插值
+src/theme.mjs             调色板、truecolor/256 色、颜色插值、明暗外观探测
 src/canvas.mjs            单元格画布、边框、裁剪、ANSI 输出
-src/model.mjs             快照 v1/v2/v3 规范化、模式与字段来源、拓扑分层
+src/model.mjs             快照 v1/v2/v3 规范化、模式与字段来源、运行排序、拓扑分层
+src/evidence.mjs          任务/运行证据字段的统一规范化（回复、错误、重试、turn、run_stats）
 src/demo.mjs              周期性假数据引擎
 src/graph.mjs             DAG 布局、线网、流动点
-src/render.mjs            仪表盘布局、侧栏、详情、header/footer/toast/设置菜单/help
+src/render.mjs            仪表盘布局、侧栏、图谱、详情、header/footer/toast、命令面板、过滤、tour、设置菜单与 help
 src/i18n.mjs              英文/中文文案表与插值
-src/config.mjs            语言/主题配置读取与原子保存（~/.config/nero-herdr-dag）、STALE 阈值
+src/config.mjs            语言/主题配置读取与串行原子保存（~/.config/nero-herdr-dag/config.json）、STALE 阈值
+src/env.mjs               所有环境变量的单一解析入口（配置、状态、任务存储、runtime、herdr）
+src/commands.mjs          命令面板条目、标签与查询过滤
 src/scroll.mjs            滚动意图、区域命中、滚动条几何与指数缓动
-src/run-summary.mjs      运行级聚合（token/成本/缓存/时长/关键路径/并行度）
+src/cockpit.mjs           图谱过滤、过滤计数、聚焦子图与节点步进
+src/run-summary.mjs       运行级聚合（token/成本/缓存/时长/关键路径/并行度）
 src/viewer.mjs            主循环、输入、跟随、平滑滚动、鼠标点击与滚轮、文件监听
 src/view-state.mjs        视图偏好 sidecar、112 列布局断点、切换器选择
 src/storage.mjs           原子 JSON 读写
 src/controller.mjs        事件串行队列、快照写入、pane 生命周期
 src/task-data.mjs         任务存储读取、合并、父子关系
 src/stream-tap.mjs        子任务流式活动捕获
-src/clipboard.mjs         失败诊断卡、记录路径校验、OSC52/pager 证据复制
+src/records.mjs           记录文件的有界读取、条目元数据与相对显示路径
+src/safe-path.mjs         绝对路径校验、根目录内 JSON 记录的安全打开
+src/diagnosis.mjs         失败/阻塞诊断卡与可复制证据包
+src/clipboard.mjs         OSC52/pager 证据复制，诊断与路径函数的兼容再导出
 src/mouse.mjs             SGR/X10 鼠标事件解析
 src/omo.mjs               OmO agent 目录、project key、主题与明暗外观
 src/todo-title.mjs        OmO TODO 事件到 run 标题的匹配
@@ -247,6 +266,7 @@ src/herdr.mjs             herdr pane CLI 封装
 src/runtime.mjs           Bun 1.4+ / Node 24+ 探测
 src/retention.mjs         过期快照清理
 scripts/install.mjs       分代安装
+scripts/install-lib.mjs   安装/卸载共享参数解析、布局检查与文件系统守卫
 scripts/uninstall.mjs     安全卸载（保留配置与状态）
 Makefile                    install / update / uninstall 生命周期
 scripts/build.mjs         语法检查 + dist
