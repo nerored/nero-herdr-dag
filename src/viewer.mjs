@@ -13,6 +13,7 @@ import {
 } from './config.mjs';
 import { DemoEngine } from './demo.mjs';
 import { computeLayout, nodeScrollTarget } from './graph.mjs';
+import { createFrameBuffers } from './frame-primitives.mjs';
 import { nextNodeId } from './cockpit.mjs';
 import { commandItems, filterCommands } from './commands.mjs';
 import { languageLabel, normalizeLanguage, t } from './i18n.mjs';
@@ -906,6 +907,9 @@ export async function createViewer(options = {}, deps = {}) {
   let lastDemoAccept = 0;
   let helpFrameDrawn = false;
   let graphLayoutCache = { key: '', layout: null };
+  // One buffer handle for the viewer's lifetime: the scratch grids survive
+  // frames and are repainted per use. Closing the viewer drops them with it.
+  const frameBuffers = createFrameBuffers();
   let lastDrawAt = 0;
   let ignoreKeysUntil = 0;
   // stdin is consumed as raw bytes: X10 mouse payloads are single bytes, so a
@@ -1881,7 +1885,7 @@ export async function createViewer(options = {}, deps = {}) {
       const renderStart = Date.now();
       const result = renderApp(snapshot, ui, {
         width, height, time: now - startAt, now, palette, theme,
-        graphLayout: layoutInfo?.layout, sidebar: sidebarEnabled(),
+        graphLayout: layoutInfo?.layout, sidebar: sidebarEnabled(), buffers: frameBuffers,
       });
       ui.frameCostMs = Date.now() - renderStart;
       lastRender = result;

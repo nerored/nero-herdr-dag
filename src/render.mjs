@@ -1,4 +1,9 @@
 import { Canvas } from './canvas.mjs';
+import {
+  createFrameBuffers, detailLine, detailSection, drawScrollbar, fixedBodyLines, formatCost,
+  formatNumber, formatRate, graphCanvasFor, labelWidthFor, metricLabelWidth, metricRow,
+  metricValue, metricValueWidth, metricValueX, panel, pill, rich, scratchCanvas,
+} from './frame-primitives.mjs';
 import { runSummary } from './run-summary.mjs';
 import { criticalNodeIds, filterCounts, focusSubgraph, nodeMatchesFilter } from './cockpit.mjs';
 import { commandItems, filterCommands } from './commands.mjs';
@@ -259,110 +264,6 @@ function bindGraphLayout(layout, run) {
   return rebound ? { ...layout, boxes } : layout;
 }
 
-// drawGraph owns a full-layout canvas. Reuse its cell objects between frames
-// of the same dimensions and repaint every cell, instead of allocating a new
-// width×height object grid on each frame.
-let sharedGraphCanvas;
-function graphCanvasFor(width, height, palette) {
-  if (!sharedGraphCanvas || sharedGraphCanvas.width !== width || sharedGraphCanvas.height !== height) {
-    sharedGraphCanvas = new Canvas(width, height, { fg: palette.text, bg: palette.panel });
-  } else {
-    sharedGraphCanvas.defaults = { fg: palette.text, bg: palette.panel };
-    sharedGraphCanvas.fill(0, 0, width, height, { fg: palette.text, bg: palette.panel });
-  }
-  return sharedGraphCanvas;
-}
-
-// renderDetails/renderDuty measure by painting the whole body on a tall scratch
-// canvas, then blit the visible window. Reuse the two cell grids across frames
-// of the same dimensions and repaint every cell instead of allocating a new
-// width×2048 object grid (and its cell objects) on every frame.
-const scratchCanvases = { body: undefined, inner: undefined };
-function scratchCanvas(slot, width, height, palette) {
-  const current = scratchCanvases[slot];
-  if (!current || current.width !== width || current.height !== height) {
-    scratchCanvases[slot] = new Canvas(width, height, { fg: palette.text, bg: palette.panel });
-    return scratchCanvases[slot];
-  }
-  current.defaults = { fg: palette.text, bg: palette.panel };
-  current.fill(0, 0, width, height, { fg: palette.text, bg: palette.panel });
-  return current;
-}
-
-function rich(canvas, x, y, width, parts, palette, bg) {
-  let cursor = x;
-  let left = width;
-  for (const item of parts) {
-    if (left <= 0) break;
-    const part = Array.isArray(item) ? { text: item[0], ...(item[1] ?? {}) } : item;
-    const source = String(part.text ?? '');
-    const shown = textWidth(source) > left ? fit(source, left) : source;
-    canvas.put(cursor, y, shown, {
-      fg: part.fg ?? palette.text,
-      bg: part.bg ?? bg,
-      bold: part.bold,
-      dim: part.dim,
-      italic: part.italic,
-    });
-    const used = textWidth(shown);
-    cursor += used;
-    left -= used;
-    if (textWidth(source) > used) break;
-  }
-}
-
-function panel(canvas, rect, title, { palette, focused = false, badge } = {}) {
-  const badgeText = badge ? ` ${fit(badge, Math.max(1, Math.floor(rect.w * 0.45)))} ` : '';
-  canvas.fill(rect.x, rect.y, rect.w, rect.h, { bg: palette.panel, fg: palette.text });
-  canvas.box(rect.x, rect.y, rect.w, rect.h, {
-    border: focused ? palette.borderHot : palette.border,
-    bg: palette.panel,
-    title: fit(title, Math.max(1, rect.w - 6 - textWidth(badgeText))),
-    titleColor: focused ? palette.accent : palette.dim,
-  });
-  if (badgeText) {
-    canvas.put(rect.x + rect.w - 1 - textWidth(badgeText), rect.y, badgeText, {
-      fg: palette.dim, bg: palette.panel,
-    });
-  }
-}
-
-// Every status color has one of pure black or pure white above 4.5:1, so the
-// pill foreground is chosen per background instead of assuming a dark theme.
-// The WCAG math lives in theme.mjs; an unparseable/transparent surface has no
-// ratio (theme returns null), and white is the established fallback there.
-export function pillForeground(background) {
-  const white = contrastRatio('#ffffff', background);
-  const black = contrastRatio('#000000', background);
-  if (white === null || black === null) return '#ffffff';
-  return white >= black ? '#ffffff' : '#000000';
-}
-
-// Glyph + word + color stay redundant: the pill owns the word, the glyph is
-// repeated beside it, and the background keeps carrying the color signal.
-function pill(canvas, x, y, label, color, glyph) {
-  const text = ` ${glyph ? `${glyph} ` : ''}${label} `;
-  canvas.put(x, y, text, { fg: pillForeground(color), bg: color, bold: true });
-  return x + textWidth(text);
-}
-
-function drawScrollbar(canvas, bar, palette) {
-  if (!bar) return;
-  for (let row = 0; row < bar.h; row++) {
-    const y = bar.y + row;
-    // A wide glyph's continuation cell owns this column; skip the decoration
-    // rather than corrupt the frame width.
-    if (canvas.cell(bar.x, y)?.cont) continue;
-    const thumb = y >= bar.thumbTop && y < bar.thumbTop + bar.thumbH;
-    canvas.put(bar.x, y, thumb ? '█' : '░', {
-      fg: thumb ? palette.accent2 : palette.border,
-      bg: palette.panel,
-      dim: !thumb,
-      bold: thumb,
-    });
-  }
-}
-
 // THINKING and ACTIVITY are atomic fixed blocks: a heading plus exactly five
 // body rows, or nothing. Their headings are located in the measured body so a
 // scroll window never exposes a heading with a clipped body.
@@ -384,36 +285,6 @@ function fixedSectionRows(body, language) {
     }
   }
   return rows;
-}
-
-function formatNumber(value) {
-  if (!Number.isFinite(value)) return '—';
-  const magnitude = Math.abs(value);
-  // 999,950 already rounds to 1.0m; the k branch must not print "1000.0k".
-  if (magnitude >= 999_950) return `${(value / 1_000_000).toFixed(1)}m`;
-  if (magnitude >= 1000) return `${(value / 1000).toFixed(1)}k`;
-  return String(Math.round(value));
-}
-
-// Rates are telemetry, not counts: a 0.4 tokens/s reading is not zero. Keep
-// one decimal from 1 upward and two below it, trimming only trailing zeros.
-function formatRate(value) {
-  if (!Number.isFinite(value)) return '—';
-  const magnitude = Math.abs(value);
-  if (magnitude >= 1000) return formatNumber(value);
-  if (magnitude >= 10) return String(Math.round(value));
-  const text = value.toFixed(magnitude >= 1 ? 1 : 2);
-  return text.includes('.') ? text.replace(/0+$/, '').replace(/\.$/, '') : text;
-}
-
-// Unknown telemetry is an em dash, never a fabricated zero.
-function metricValue(value) {
-  return value === undefined ? '—' : formatNumber(value);
-}
-
-function formatCost(value) {
-  if (!Number.isFinite(value)) return undefined;
-  return value.toFixed(Math.abs(value) < 0.1 ? 4 : 2);
 }
 
 function agoLabel(ms, language) {
@@ -1024,7 +895,7 @@ function renderSidebar(canvas, rect, snapshot, ui, { time, now, palette, motion,
 }
 
 function graphPanel(canvas, rect, snapshot, run, ui, {
-  time, now, viewNow = now, palette, motion, language, graphLayout, freshness,
+  time, now, viewNow = now, palette, motion, language, graphLayout, freshness, buffers,
 }) {
   const stats = run ? runStats(run) : null;
   const graphSummary = run ? runSummary(run, { now: viewNow }) : undefined;
@@ -1102,7 +973,7 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
   // though the pane shows ~35 of them.
   const clipTop = layout.height <= viewportH ? 0 : scroll;
   const clipBottom = layout.height <= viewportH ? layout.height : scroll + viewportH;
-  const graphCanvas = graphCanvasFor(layout.width, layout.height, palette);
+  const graphCanvas = graphCanvasFor(buffers, layout.width, layout.height, palette);
   drawGraph(graphCanvas, layout, {
     time, motion, palette, selectedId: ui.selectedNodeId, folded: ui.folded,
     now: viewNow, connected: isActiveSnapshot(snapshot), language,
@@ -1169,20 +1040,6 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
   const bar = barGeometry ? { x: rect.x + rect.w - 2, w: 1, ...barGeometry } : null;
   drawScrollbar(canvas, bar, palette);
   return { layout, scroll, maxScroll, viewportH, nodeRects, contentH: layout.height, bar };
-}
-
-function detailSection(canvas, x, y, w, label, palette) {
-  rich(canvas, x, y, w, [
-    [label.toUpperCase(), { fg: palette.accent2, bold: true }],
-    [' ', { fg: palette.faint }],
-    ['─'.repeat(Math.max(0, w - textWidth(label) - 1)), { fg: palette.border }],
-  ], palette, palette.panel);
-  return y + 1;
-}
-
-function detailLine(canvas, x, y, w, parts, palette) {
-  rich(canvas, x, y, w, parts, palette, palette.panel);
-  return y + 1;
 }
 
 // The axis slot is a time axis: only samples with real timestamps define a
@@ -1344,37 +1201,6 @@ function retryInfo(entity, language) {
   };
 }
 
-// The metrics block is a small definition list: one shared label column keeps
-// every value on the same cell column.
-function labelWidthFor(labels) {
-  return Math.max(0, ...labels.map(textWidth)) + 1;
-}
-
-function metricLabelWidth(language) {
-  return labelWidthFor([
-    t(language, 'tokens'),
-    t(language, 'tokenRate'),
-    t(language, 'cacheReuseShort'),
-    t(language, 'retries'),
-    t(language, 'turns'),
-    t(language, 'tools'),
-  ]);
-}
-
-function metricValueX(x, w, labelWidth) {
-  return x + Math.min(labelWidth, Math.max(1, w - 8));
-}
-
-function metricValueWidth(w, labelWidth) {
-  return Math.max(1, w - Math.min(labelWidth, Math.max(1, w - 8)));
-}
-
-function metricRow(canvas, x, y, w, label, parts, palette, labelWidth) {
-  const valueX = metricValueX(x, w, labelWidth);
-  if (label) canvas.put(x, y, label, { fg: palette.faint });
-  return detailLine(canvas, valueX, y, Math.max(1, x + w - valueX), parts, palette);
-}
-
 function metricsSection(canvas, x, y, w, entity, palette, language) {
   const subject = entity ?? {};
   const labelWidth = metricLabelWidth(language);
@@ -1427,24 +1253,6 @@ function errorSourceLine(canvas, x, y, w, entity, palette, language) {
   }
   y = detailLine(canvas, x, y, w, [[source, { fg: palette.faint }]], palette);
   return detailLine(canvas, x, y, w, [[kind, { fg: palette.faint }]], palette);
-}
-
-function fixedBodyLines(canvas, x, y, w, count, lines, palette, style = {}) {
-  const shown = (lines ?? []).slice(-count);
-  for (let index = 0; index < count; index++) {
-    const line = shown[index];
-    if (line) {
-      canvas.put(x, y, fit(line, w), {
-        fg: style.fg ?? palette.text,
-        bg: palette.panel,
-        dim: style.dim,
-      });
-    } else {
-      canvas.fill(x, y, w, 1, { fg: palette.text, bg: palette.panel });
-    }
-    y++;
-  }
-  return y;
 }
 
 const REPLY_PLACEHOLDERS = new Set([
@@ -2695,7 +2503,7 @@ function runOverview(canvas, rect, run, snapshot, { now, palette, language, verb
 }
 
 function renderDetails(canvas, rect, snapshot, ui, {
-  now, time, motion = true, palette, language, freshness,
+  now, time, motion = true, palette, language, freshness, buffers,
 }) {
   const { run, task, node, showTask } = resolveSelection(snapshot, ui, { allowRunFallback: true });
   const focused = ui.focus === 'details';
@@ -2713,7 +2521,7 @@ function renderDetails(canvas, rect, snapshot, ui, {
   // frame. The first content row is local row 2, matching the old layout.
   const detailsViewportH = Math.max(1, rect.h - 3);
   const measureH = Math.min(2048, Math.max(rect.h + 8, 128));
-  const body = scratchCanvas('body', rect.w, measureH, palette);
+  const body = scratchCanvas(buffers, 'body', rect.w, measureH, palette);
   const full = { x: 0, y: 0, w: rect.w, h: measureH };
   if (showTask) taskDetails(body, full, task, snapshot, ui, {
     now, time, motion, palette, language, viewportH: detailsViewportH, freshness,
@@ -2770,7 +2578,7 @@ function renderDetails(canvas, rect, snapshot, ui, {
       fg: palette.text, bg: palette.panel,
     });
   }
-  const inner = scratchCanvas('inner', rect.w, rect.h, palette);
+  const inner = scratchCanvas(buffers, 'inner', rect.w, rect.h, palette);
   const local = { x: 0, y: 0, w: rect.w, h: rect.h };
   panel(inner, local, title, { palette, focused, badge });
   inner.blit(body, 0, -offset, { x: 1, y: 2, w: rect.w - 2, h: detailsViewportH });
@@ -3107,7 +2915,7 @@ function renderNarrowDuty(canvas, rect, snapshot, ui, opts, hitboxes) {
   return { runs, cells, details, detailsRect };
 }
 
-function renderDuty(canvas, rect, snapshot, ui, { now, time, motion = true, palette, language, freshness }) {
+function renderDuty(canvas, rect, snapshot, ui, { now, time, motion = true, palette, language, freshness, buffers }) {
   const selection = resolveSelection(snapshot, ui, { allowRunFallback: true });
   const status = selection.showTask ? selection.task.status
     : selection.node ? selection.node.state : selection.run?.status;
@@ -3133,7 +2941,7 @@ function renderDuty(canvas, rect, snapshot, ui, { now, time, motion = true, pale
   const shownTitle = focused ? `▸ ${title}` : title;
   const viewportH = Math.max(1, rect.h - 3);
   const measureH = Math.min(2048, Math.max(rect.h + 8, 128));
-  const body = scratchCanvas('body', rect.w, measureH, palette);
+  const body = scratchCanvas(buffers, 'body', rect.w, measureH, palette);
   dutyBody(body, { x: 0, y: 0, w: rect.w, h: measureH }, snapshot, ui, {
     now, time, motion, palette, language, viewportH, freshness,
   });
@@ -3147,7 +2955,7 @@ function renderDuty(canvas, rect, snapshot, ui, { now, time, motion = true, pale
   const contentH = Math.max(0, lastUsed + 1 - 2);
   const maxScroll = Math.max(0, contentH - viewportH);
   const offset = scrollOffset(ui.detailsScroll, maxScroll);
-  const inner = scratchCanvas('inner', rect.w, rect.h, palette);
+  const inner = scratchCanvas(buffers, 'inner', rect.w, rect.h, palette);
   const local = { x: 0, y: 0, w: rect.w, h: rect.h };
   panel(inner, local, shownTitle, { palette, focused, badge });
   inner.blit(body, 0, -offset, { x: 1, y: 2, w: rect.w - 2, h: viewportH });
@@ -3771,10 +3579,14 @@ function renderTour(canvas, width, height, ui, { palette, language }, hitboxes) 
 
 export function renderApp(snapshot, ui, {
   width = 120, height = 40, time = 0, now = Date.now(), palette, theme, graphLayout,
-  sidebar = ui.sidebar !== false,
+  sidebar = ui.sidebar !== false, buffers,
 } = {}) {
   width = Math.max(20, Math.floor(width));
   height = Math.max(12, Math.floor(height));
+  // Frame buffers belong to the caller-supplied handle when one is passed in.
+  // Otherwise this frame owns them: the grids are dropped when renderApp
+  // returns and never survive as module state.
+  const frameBuffers = buffers ?? createFrameBuffers();
   const language = ui.language ?? 'en';
   const canvas = new Canvas(width, height, { fg: palette.text, bg: palette.bg });
   canvas.fill(0, 0, width, height, { bg: palette.bg, fg: palette.text });
@@ -3807,23 +3619,24 @@ export function renderApp(snapshot, ui, {
   const graph = layout.graph
     ? graphPanel(canvas, layout.graph, snapshot, run, ui, {
       time, now, viewNow, palette, motion: viewMotion, language, graphLayout, freshness,
+      buffers: frameBuffers,
     })
     : { layout: null, scroll: 0, maxScroll: 0, viewportH: 0, nodeRects: new Map(), contentH: 0, bar: null };
   for (const [id, rect] of graph.nodeRects ?? []) hitboxes.nodes.set(id, rect);
   const motion = ui.motion !== false;
   const narrow = layout.layout === 'duty' && layout.details.h >= 12
     ? renderNarrowDuty(canvas, layout.details, snapshot, ui, {
-      now, time, motion, palette, language, freshness,
+      now, time, motion, palette, language, freshness, buffers: frameBuffers,
     }, hitboxes)
     : null;
   const detailsScroll = narrow
     ? narrow.details
     : layout.layout === 'duty'
       ? renderDuty(canvas, layout.details, snapshot, ui, {
-        now, time, motion, palette, language, freshness,
+        now, time, motion, palette, language, freshness, buffers: frameBuffers,
       })
       : renderDetails(canvas, layout.details, snapshot, ui, {
-        now, time, motion, palette, language, freshness,
+        now, time, motion, palette, language, freshness, buffers: frameBuffers,
       });
   renderFooter(canvas, width, height, snapshot, ui, {
     palette, time, now, language, freshness,
@@ -3931,3 +3744,4 @@ export function renderApp(snapshot, ui, {
 }
 
 export { contrastRatio, nodeScrollTarget, HEADER_H, FOOTER_H };
+export { pillForeground } from './frame-primitives.mjs';
