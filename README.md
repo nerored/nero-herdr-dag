@@ -463,6 +463,72 @@ Only an explicit field whitelist is persisted for tasks. Prompts, full output,
 full final responses, and transcripts are never copied into snapshots. The
 detail panel includes only bounded, sanitized reasoning and reply excerpts.
 
+## Performance
+
+`bun run bench` runs the committed benchmark against four deterministic
+fixtures:
+
+| Fixture | Nodes / edges | Budget |
+| --- | --- | --- |
+| `demo` | committed demo snapshot | warm frame <= 8 ms |
+| `100/185` | 100 / 185 | layout <= 200 ms, warm frame <= 8 ms |
+| `300/560` | 300 / 560 | report only, no gate |
+| `500/990` | 500 / 990 | report only, no gate |
+
+Those three budgets are release gates: `scripts/bench.mjs` compares the median
+and exits non-zero when a row misses. `300/560` and `500/990` publish no budget,
+so the harness reports their rows without claiming a pass or fail. At 500/990
+the layout cannot be reused, so the `warm` column recomputes the layout inside
+the frame. Treat that row as layout-bound and report only.
+
+Timings are medians of a handful of samples, so machine load moves them. Rerun
+on an idle machine before calling a miss a regression. The memory probe is a
+gate and does not get that excuse.
+
+After the four rows the harness renders 10,000 frames with a fresh snapshot
+identity on every frame, forcing the per-snapshot caches to churn. Heap is
+sampled after a forced collection every 1,000 frames, and retained growth must
+stay within 4 MB. The probe also asserts the caps on the text, theme, subject,
+wire-raster, and task-store caches.
+
+### Frame pacing
+
+The demo engine produces a new world every frame, but the viewer accepts a demo
+snapshot at most 10 times per second. Animation still runs on the frame clock;
+full normalization does not run at 60 Hz.
+
+The viewer starts at 60 fps (`--fps` accepts 2 to 120) and only asks for full
+rate while something can change: an active run or task, a scroll in progress,
+or demo mode. A stale capture idles, and so does a quiet task list. The narrow
+duty layout idles at 1 fps. The wide investigation layout requests up to
+24 fps while idle so its ambient animation stays smooth; the pager and
+`--no-motion` keep the 1 fps idle tick. Input and state changes repaint
+immediately instead of waiting for the idle tick.
+
+The previous frame's render cost also caps the next request: 40 ms or more
+drops to 10 fps, 25 ms to 15 fps, 12 ms to 30 fps, otherwise the preferred
+rate. No frame is scheduled closer than 8 ms apart.
+
+### Graph caps and badges
+
+The graph is bounded so one oversized snapshot cannot pin the frame loop.
+
+- Layout height is capped at 4,096 rows. Nodes past the cap are not painted,
+  and each one is counted as hidden.
+- Each edge gets a corridor search of `max(5,000, 1,000,000 / edges)` states.
+  An edge that runs out of budget falls back to a deterministic stub wire.
+- Neither loss is silent. The graph panel badge names it:
+
+| Badge | Meaning |
+| --- | --- |
+| `⚠ capped · N hidden` | N nodes were left off the canvas by the layout row cap |
+| `⚠ N fallback wires` | N edges use fallback stub routing after the search budget ran out |
+| `⚠ N dropped` | N invalid, duplicate, or unknown records were dropped during snapshot normalization |
+
+Badge parts join with ` · `, so one graph can show several at once. The run
+summary still reports `seen/total`, so a capped graph never looks like the
+whole workflow.
+
 ## Development
 
 ```bash
