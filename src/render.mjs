@@ -15,14 +15,15 @@ import {
   isFailureState, nodeSubject, renderSubjectBody, shortPath, taskSubject,
 } from './render-subject.mjs';
 import { runSummary } from './run-summary.mjs';
+import { memoNavTasks, memoProgressCounts } from './derived-cache.mjs';
 import { criticalNodeIds, filterCounts, focusSubgraph, nodeMatchesFilter } from './cockpit.mjs';
 import { diagnosisFor } from './diagnosis.mjs';
 import { computeLayout, drawGraph, nodeScrollTarget, spinnerFrame } from './graph.mjs';
 import { statusLabel, t } from './i18n.mjs';
 import {
-  activitySummary, compareNavigationTasks, elapsedLabel, incoming, isActiveRun, linkedTaskIds, modeFor,
-  nodeActivity, nodeForTask, nodeMap, outgoing, percentFor, PROVENANCE_FIELDS, PROVENANCE_KINDS,
-  runStats, TERMINAL,
+  activitySummary, compareNavigationTasks, elapsedLabel, incoming, isActiveRun, linkedTaskIds,
+  linkedTaskIdsForRun, modeFor, nodeActivity, nodeForTask, nodeMap, outgoing, percentFor,
+  PROVENANCE_FIELDS, PROVENANCE_KINDS, runStats, TERMINAL,
 } from './model.mjs';
 import { recordTargetFor } from './records.mjs';
 import { scrollbarGeometry } from './scroll.mjs';
@@ -58,9 +59,9 @@ const REPLY_MAX_LINES = 256;
 // are included: in real OmO sessions every root task may belong to a DAG node,
 // so filtering linked tasks makes the navigation list permanently empty.
 export function navTasks(snapshot) {
-  return (snapshot?.tasks ?? [])
+  return memoNavTasks(snapshot, state => (state?.tasks ?? [])
     .filter(task => !task.parentTaskId)
-    .sort(compareNavigationTasks);
+    .sort(compareNavigationTasks));
 }
 
 // Navigation tasks that no loaded run links to a node. The narrow duty pane
@@ -119,7 +120,7 @@ export function taskListLayout(rect, snapshot, ui) {
   const allTasks = navTasks(snapshot);
   const run = snapshot?.runs?.[ui?.runIndex];
   const linked = run
-    ? allTasks.filter(task => run.nodes.some(node => node.taskId === task.id))
+    ? allTasks.filter(task => linkedTaskIdsForRun(run).has(task.id))
     : [];
   const scoped = ui?.taskScope === 'all' || !run || !linked.length ? allTasks : linked;
   const scope = !run || !linked.length ? 'all' : ui.taskScope;
@@ -471,24 +472,26 @@ export function percentInfo(entity, language, counts) {
 // done/total for the progress row: a task uses its child checklist when one is
 // recorded, otherwise the run that owns its node supplies the node counts.
 export function progressCounts(snapshot, task, run) {
-  const children = task?.children ?? [];
-  if (children.length) {
-    return {
-      done: children.filter(child => TERMINAL.has(child.status)).length,
-      total: children.length,
-    };
-  }
-  if (run) {
-    const stats = runStats(run);
-    return { done: stats.done, total: stats.total };
-  }
-  for (const candidate of snapshot?.runs ?? []) {
-    if (candidate.nodes.some(node => node.taskId === task?.id)) {
-      const stats = runStats(candidate);
+  return memoProgressCounts(snapshot, task, run, () => {
+    const children = task?.children ?? [];
+    if (children.length) {
+      return {
+        done: children.filter(child => TERMINAL.has(child.status)).length,
+        total: children.length,
+      };
+    }
+    if (run) {
+      const stats = runStats(run);
       return { done: stats.done, total: stats.total };
     }
-  }
-  return undefined;
+    for (const candidate of snapshot?.runs ?? []) {
+      if (candidate.nodes.some(node => node.taskId === task?.id)) {
+        const stats = runStats(candidate);
+        return { done: stats.done, total: stats.total };
+      }
+    }
+    return undefined;
+  });
 }
 
 // Percent unknown is not percent zero. A running subject gets an indeterminate

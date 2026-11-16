@@ -1,4 +1,5 @@
 import { number } from './normalize.mjs';
+import { memoRunSummary } from './derived-cache.mjs';
 
 // Pure run-level aggregation for the run overview. No I/O, no i18n reads and
 // no clock reads beyond the `now` the caller supplies: live snapshots pass the
@@ -108,9 +109,13 @@ function criticalPath(run, nodes, clock) {
 }
 
 export function runSummary(run, { now = Date.now() } = {}) {
+  const clock = Number.isFinite(now) ? now : Date.now();
+  return memoRunSummary(run, clock, () => computeRunSummary(run, clock));
+}
+
+function computeRunSummary(run, clock) {
   const nodes = Array.isArray(run?.nodes) ? run.nodes : [];
   const total = nodes.length;
-  const clock = Number.isFinite(now) ? now : Date.now();
   const result = { nodes: total };
   if (!total) return result;
 

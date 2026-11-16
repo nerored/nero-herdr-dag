@@ -2,6 +2,9 @@ import { clean, clock, compactDuration } from './text.mjs';
 import { t } from './i18n.mjs';
 import { byteLength, defined, integer, iso, number, text } from './normalize.mjs';
 import {
+  memoLinkedRunTaskIds, memoLinkedTaskIds, memoRunStats,
+} from './derived-cache.mjs';
+import {
   cacheEvidence, errorEvidence, inferredTokenRate, normalizeRateHistory, replyEvidence,
   retryEvidence, retryFields, turnEvidence,
 } from './evidence.mjs';
@@ -586,7 +589,7 @@ export function nodeMap(run) {
   return new Map(run.nodes.map(node => [node.id, node]));
 }
 
-export function runStats(run) {
+function computeRunStats(run) {
   const total = run.nodes.length;
   const counts = {
     running: 0, completed: 0, failed: 0, blocked: 0, paused: 0, pending: 0,
@@ -620,9 +623,28 @@ export function runStats(run) {
 }
 
 export function linkedTaskIds(snapshot) {
-  const ids = new Set();
-  for (const run of snapshot.runs) for (const node of run.nodes) if (node.taskId) ids.add(node.taskId);
-  return ids;
+  return memoLinkedTaskIds(snapshot, state => {
+    const ids = new Set();
+    for (const run of state.runs ?? []) {
+      for (const node of run.nodes ?? []) if (node.taskId) ids.add(node.taskId);
+    }
+    return ids;
+  });
+}
+
+// A single run's linked task ids. taskListLayout and the orphan list need the
+// set for one run, not the whole snapshot; keying it by the run object lets a
+// hidden-subject overlay (a new snapshot sharing the same runs) reuse it.
+export function linkedTaskIdsForRun(run) {
+  return memoLinkedRunTaskIds(run, target => {
+    const ids = new Set();
+    for (const node of target.nodes ?? []) if (node.taskId) ids.add(node.taskId);
+    return ids;
+  });
+}
+
+export function runStats(run) {
+  return memoRunStats(run, computeRunStats);
 }
 
 // Canonical navigation order: running first, then description, then id as the
