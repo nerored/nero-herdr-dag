@@ -400,6 +400,8 @@ Modules are grouped by role. Every module in `src/` is listed once below.
   Terminal variables such as `NO_COLOR` and `COLORTERM` stay with the modules
   that read them.
 - `src/herdr.mjs` resolves the herdr binary and wraps its pane commands.
+- `src/layout.mjs` owns the installed generation tree paths and the
+  `current.json` pointer the installer writes and the extension reads.
 - `src/runtime.mjs` probes for Bun 1.4+ or Node 24+.
 - `src/storage.mjs` reads and atomically writes JSON.
 - `src/retention.mjs` prunes only owned snapshot files past the retention

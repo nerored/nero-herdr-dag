@@ -271,6 +271,7 @@ src/omo.mjs               OmO agent 目录、project key、主题与明暗外观
 src/config.mjs            语言/主题配置读取与串行原子保存（~/.config/nero-herdr-dag/config.json）、STALE 阈值
 src/env.mjs               所有环境变量的单一解析入口（配置、状态、任务存储、runtime、herdr）
 src/herdr.mjs             herdr pane CLI 封装
+src/layout.mjs            安装代际目录与 current.json 指针路径（安装器与扩展共用）
 src/runtime.mjs           Bun 1.4+ / Node 24+ 探测
 src/storage.mjs           原子 JSON 读写
 src/retention.mjs         过期快照清理

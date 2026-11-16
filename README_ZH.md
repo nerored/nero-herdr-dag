@@ -314,6 +314,8 @@ OmO 进程                                  Herdr viewer 进程
 - `src/env.mjs`：集中解析 studio 自己的设置与路径；`NO_COLOR`、`COLORTERM`
   等终端变量仍由读取它们的模块处理。
 - `src/herdr.mjs`：解析 herdr 二进制并封装 pane 命令。
+- `src/layout.mjs`：定义安装代际目录与 `current.json` 指针路径，安装器写入、
+  已安装扩展读取。
 - `src/runtime.mjs`：探测 Bun 1.4+ 或 Node 24+。
 - `src/storage.mjs`：读取并原子写入 JSON。
 - `src/retention.mjs`：只清理超过保留期的自有快照文件。
