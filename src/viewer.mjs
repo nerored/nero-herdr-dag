@@ -3,56 +3,42 @@ import { watch } from 'node:fs';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { emitKeypressEvents } from 'node:readline';
 import { diagnosisForKey } from './diagnosis.mjs';
-import { SingleEntryCache } from './bounded-cache.mjs';
 import { osc52, pagerCommand, payloadLines } from './clipboard.mjs';
-import {
-  DEFAULT_STALE_AFTER_MS, STALE_AFTER_ENV, loadConfig, saveConfig, staleAfterMs,
-} from './config.mjs';
+import { DEFAULT_STALE_AFTER_MS, STALE_AFTER_ENV, loadConfig } from './config.mjs';
 import { DemoEngine } from './demo.mjs';
-import { computeLayout, graphLayoutKey } from './graph.mjs';
 import { createFrameBuffers } from './frame-primitives.mjs';
-import { nextNodeId } from './cockpit.mjs';
 import { commandItems, filterCommands } from './commands.mjs';
-import { languageLabel, normalizeLanguage, t } from './i18n.mjs';
+import { normalizeLanguage, t } from './i18n.mjs';
+import { isActiveRun } from './model.mjs';
 import {
-  findRunningTarget, isActiveRun, nodeForTask, normalizeSnapshot, orphanNavTasks,
-} from './model.mjs';
-import {
-  detailsSubjectKey, dashboardLayout, diagnosisForSelection, navTasks, recordForSelection,
-  renderApp, snapshotFreshness, switcherView,
+  detailsSubjectKey, diagnosisForSelection, recordForSelection, renderApp, snapshotFreshness,
 } from './render.mjs';
 import { recordForKey } from './records.mjs';
-import { paletteFor, createTheme, supportsTruecolor, themeNames, normalizeThemeName } from './theme.mjs';
-import { clamp, clean } from './text.mjs';
+import {
+  createTheme, normalizeThemeName, paletteFor, supportsTruecolor, themeNames,
+} from './theme.mjs';
+import { clean } from './text.mjs';
 import { createHerdr } from './herdr.mjs';
 import { extractMouse, mouseTrackingSequence, wheelDirectionFromButton } from './mouse.mjs';
 import {
   GLOBAL_KEYMAP, MODAL_ORDER, PALETTE_KEYMAP, SETTINGS_KEYMAP, SWITCHER_KEYMAP, TOUR_KEYMAP,
-  applyHelpScroll, dutyFocusForKey, helpKeyAction, helpScrollMetrics, isEscapeKey, keyToken,
-  matchingKeys, movementKey, resolveKey,
+  applyHelpScroll, helpKeyAction, helpScrollMetrics, isEscapeKey, keyToken, matchingKeys,
+  resolveKey,
 } from './viewer-keymap.mjs';
-import { keyboardScrollTarget, regionAt } from './scroll.mjs';
+import { regionAt } from './scroll.mjs';
 import {
-  collapseTransition, completedItems, expandTransition, foldedFromView,
-  followTargetForRun, hiddenSnapshot, holdsPendingRun, loadViewState, moveSwitcher,
-  saveViewState, setExpanded, structuralFor, switcherItems, syncFoldedRun,
+  collapseTransition, expandTransition, loadViewState, saveViewState, structuralFor,
 } from './view-state.mjs';
+import { setNodeSubject } from './viewer-selection.mjs';
 import {
-  applySwitcherSelection, selectionScrollTarget, setNodeSubject,
-} from './viewer-selection.mjs';
-import {
-  advanceScroll, applyFocus, attachFrame, buildViewModel, hitTargetAt, reconcile, selectNode,
-  selectRun, selectTask, settleScroll, toggleFold as toggleFoldInView,
+  advanceScroll, applyFocus, attachFrame, hitTargetAt, selectRun, selectTask, settleScroll,
 } from './view-model.mjs';
 import { loadOmoAppearance, loadOmoTheme } from './omo.mjs';
-import {
-  boundSnapshotInput, failedReadPlaceholder, pruneHiddenSubjects, readFailureEvidence,
-  readStateFile, transitionChanges, viewSessionKey, ViewerSnapshotError,
-} from './viewer-snapshot.mjs';
+import { readStateFile } from './viewer-snapshot.mjs';
+import { createViewerSession } from './viewer-session.mjs';
 
 // Snapshot I/O and validation live in viewer-snapshot.mjs. The re-export keeps
 // the published viewer imports working for one release.
@@ -85,6 +71,13 @@ export {
   DUTY_FOCUS_KEYS, HELP_MAX_ROWS, HELP_ROWS, applyHelpScroll, dutyFocusForKey, helpKeyAction,
   helpScrollForKey, helpScrollMetrics, helpViewportRows, settingsHotkey,
 } from './viewer-keymap.mjs';
+
+// The session state factory and its pure scroll intents moved with the session
+// module. Re-exporting them keeps existing viewer imports working.
+export {
+  createViewerState, keyboardScrollIntent, scrollRegionForFocus,
+} from './viewer-session.mjs';
+
 
 const INSTALL_GENERATION = (() => {
   const match = /(?:^|[/\\])(generation-\d+)(?:[/\\]|$)/.exec(fileURLToPath(import.meta.url));
@@ -311,106 +304,7 @@ Environment:
 // Fresh viewer UI state. createViewer() keeps its runtime (snapshot, render,
 // watcher) in that instance's closure, so two viewers never share navigation
 // state and tests can build isolated viewers instead of the process singleton.
-export function createViewerState({
-  noMotion = false, language = 'en', themeName, fps = 60,
-  staleAfter = staleAfterMs(), ...overrides
-} = {}) {
-  return {
-    runIndex: 0,
-    selectedRunId: undefined,
-    runPinned: false,
-    // The run itself is the details subject (RUN SUMMARY) instead of a node.
-    runOverview: false,
-    // Triage state: graph filter/focus, task scope, and collapsed sections.
-    graphFilter: 'all',
-    graphFocus: undefined,
-    taskScope: 'run',
-    completedCollapsed: true,
-    detailsSection: 0,
-    collapsedSections: new Set(),
-    palette: false,
-    paletteFilter: '',
-    paletteIndex: 0,
-    tour: 0,
-    undoClear: null,
-    focus: 'graph',
-    lastFocus: 'graph',
-    mouseCapture: true,
-    selectedNodeId: undefined,
-    selectedTaskId: undefined,
-    // Durable: the task subject is explicit but has no node in the loaded runs.
-    // The graph keeps its run context yet paints no node highlight.
-    selectedTaskUnlinked: false,
-    installVersion: undefined,
-    follow: true,
-    followTarget: undefined,
-    motion: !noMotion,
-    help: false,
-    helpScroll: 0,
-    staleAfterMs: staleAfter,
-    language,
-    settingsMenu: false,
-    settingsIndex: 0,
-    verbose: false,
-    folded: new Set(),
-    foldedRunId: undefined,
-    foldedByRun: new Map(),
-    graphScroll: 0,
-    graphScrollTarget: 0,
-    manualScroll: false,
-    tasksScroll: 0,
-    tasksScrollTarget: 0,
-    runsScroll: 0,
-    runsScrollTarget: 0,
-    cellsScroll: 0,
-    cellsScrollTarget: 0,
-    detailsScroll: 0,
-    detailsScrollTarget: 0,
-    detailsKey: undefined,
-    taskRevealKey: undefined,
-    expanded: false,
-    returnFocus: 'graph',
-    switcher: null,
-    hiddenRunIds: new Set(),
-    hiddenTaskIds: new Set(),
-    themeName,
-    sidebar: true,
-    fps,
-    toasts: [],
-    ...overrides,
-  };
-}
 
-// A scroll key may only move a painted region. Duty lists fall back to the duty
-// body when the terminal is too short to paint them; investigation keeps its
-// existing graph/tasks/details mapping.
-export function scrollRegionForFocus(focus, structural, scrollInfo = {}) {
-  if (structural === 'investigation') {
-    if (focus === 'details') return 'details';
-    if (focus === 'tasks') return (scrollInfo.tasks?.viewportH ?? 0) > 0 ? 'tasks' : 'graph';
-    return 'graph';
-  }
-  if (focus === 'runs' || focus === 'cells' || focus === 'tasks') {
-    return (scrollInfo[focus]?.viewportH ?? 0) > 0 ? focus : 'details';
-  }
-  return 'details';
-}
-
-// Pure key intent used by dispatchKeyboardScroll and by the regression tests.
-// Focus is translated to the existing keyboardScrollTarget vocabulary, then the
-// returned region is restored to runs/cells when those are the painted duty
-// lists.
-export function keyboardScrollIntent(key, pressed, focus, structural, scrollInfo = {}, { pageSize } = {}) {
-  const region = scrollRegionForFocus(focus, structural, scrollInfo);
-  if (!region) return null;
-  const info = scrollInfo?.[region] ?? {};
-  const mappedFocus = region === 'runs' ? 'tasks' : region === 'cells' ? 'graph' : region;
-  const size = pageSize ?? Math.max(1, Math.floor((info.viewportH ?? 2) / 2));
-  const options = { pageSize: size, maxScroll: Math.max(0, info.maxScroll ?? 0) };
-  const target = keyboardScrollTarget(key, mappedFocus, options) ??
-    keyboardScrollTarget(pressed?.name, mappedFocus, options);
-  return target ? { region, delta: target.delta, maxScroll: options.maxScroll } : null;
-}
 
 // The duty body does not paint the tier-3 verbose blocks yet, so `d` is a
 // wide/expanded-mode action there. The caller toasts that limitation instead of
@@ -429,6 +323,555 @@ export function runFooterAction(action, { toggleMouse, clear } = {}) {
     return true;
   }
   return false;
+}
+
+// Input dispatch owns the key/mouse/modal event vocabulary and only writes the
+// documented modal fields. It is declared at module scope so createViewer stays
+// wiring + draw + main + the public API; the session object carries the durable
+// state and commands it drives.
+function createViewerInput(ctx) {
+  const { session, state } = ctx;
+
+  function onMouseEvent(mouse) {
+    const { ui } = session;
+    // Readline may also emit a keypress for the same bytes; ignore that copy.
+    state.ignoreKeysUntil = Date.now() + 80;
+    // Button bit 32 marks motion (drag). A terminal that leaves a motion mode
+    // enabled must not turn dragging into repeated selection changes or modal
+    // dismissal, so motion reports are never treated as clicks.
+    if (mouse.button & 32) return;
+    if (ui.settingsMenu) {
+      if (!mouse.release && (mouse.button & 3) === 0) selectAt(mouse.x, mouse.y);
+      return;
+    }
+    if (ui.help) {
+      if (mouse.button & 64) {
+        const direction = wheelDirectionFromButton(mouse.button);
+        if (direction) session.scrollHelpPage(direction);
+        return;
+      }
+      if (!mouse.release && (mouse.button & 3) === 0) {
+        ui.help = false;
+        ui.helpScroll = 0;
+        session.helpFrameDrawn = false;
+        void ctx.draw();
+      }
+      return;
+    }
+    if (mouse.button & 64) {
+      applyWheel(mouse);
+      return;
+    }
+    if (!mouse.release && (mouse.button & 3) === 0) selectAt(mouse.x, mouse.y);
+  }
+
+  function inputBytes(chunk) {
+    if (Buffer.isBuffer(chunk)) return chunk;
+    if (chunk instanceof Uint8Array) {
+      return Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+    }
+    // Already-decoded input (tests, embedding) keeps one character per byte.
+    return Buffer.from(String(chunk), 'latin1');
+  }
+
+  function onRawInput(chunk) {
+    if (state.pagerActive) return;
+    state.rawInput = Buffer.concat([state.rawInput, inputBytes(chunk)]);
+    if (state.rawInput.length > 8192) state.rawInput = state.rawInput.subarray(state.rawInput.length - 8192);
+    const { events, rest, pending } = extractMouse(state.rawInput);
+    const remainder = Buffer.isBuffer(rest) ? rest : Buffer.from(String(rest), 'latin1');
+    state.rawInput = remainder.subarray(Math.max(0, remainder.length - 64));
+    // readline also emits the partial report bytes as individual keys (its
+    // digits are duty focus hotkeys), so key dispatch waits for the report to
+    // finish instead of acting on a fragment.
+    state.mousePendingUntil = pending ? Date.now() + 80 : 0;
+    for (const event of events) onMouseEvent(event);
+    if (events.length) ctx.requestFrame();
+  }
+
+  function applyWheel(mouse) {
+    const { ui, vm } = session;
+    const direction = wheelDirectionFromButton(mouse.button);
+    if (!direction) return;
+    // Wheel stays in the modal switcher; it never scrolls the frame underneath.
+    if (ui.switcher) {
+      session.moveSwitcherSelection(direction);
+      return;
+    }
+    if (!vm.frame) return;
+    const region = regionAt(mouse.x, mouse.y, vm.frame.hitboxes?.regions);
+    if (!region) return;
+    session.scrollRegionBy(region, direction * session.regionStep(region));
+  }
+
+  function selectAt(x, y) {
+    const { ui, vm } = session;
+    const snapshot = session.snapshot;
+    if (!snapshot) return;
+    // Read paths that install a failed-read placeholder do not redraw first;
+    // point the model at the snapshot the next pointer event must resolve.
+    vm.snapshot = snapshot;
+    const target = hitTargetAt(vm, x, y);
+    if (!target) return;
+    if (target.kind === 'palette') {
+      const items = filterCommands(commandItems(ui.language), ui.paletteFilter);
+      const index = items.findIndex(item => item.id === target.id);
+      if (index >= 0) {
+        ui.paletteIndex = index;
+        session.applyPaletteCommand(target.id);
+      }
+      return;
+    }
+    if (target.kind === 'palette-panel') return;
+    if (target.kind === 'palette-backdrop') {
+      session.closePalette();
+      return;
+    }
+    if (target.kind === 'switcher') {
+      session.confirmSwitcher(target.key);
+      return;
+    }
+    if (target.kind === 'switcher-panel') return;
+    if (target.kind === 'switcher-backdrop') {
+      ui.switcher = null;
+      return;
+    }
+    if (target.kind === 'settings') {
+      const index = ['theme', 'animation', 'language'].indexOf(target.id);
+      if (index >= 0) session.applySetting(index);
+      return;
+    }
+    if (target.kind === 'settings-backdrop') {
+      ui.settingsMenu = false;
+      return;
+    }
+    if (target.kind === 'tasks-toggle') {
+      ui.completedCollapsed = !ui.completedCollapsed;
+      ui.tasksScroll = 0;
+      ui.tasksScrollTarget = 0;
+      return;
+    }
+    if (target.kind === 'context') {
+      if (target.subject === 'run') {
+        selectRun(vm, target.id, { overview: true });
+        return;
+      }
+      if (target.subject === 'task') {
+        session.selectTaskById(target.id, { announce: true });
+        if (ui.expanded) {
+          ui.focus = 'details';
+          ui.lastFocus = 'tasks';
+        }
+        return;
+      }
+      // The breadcrumb node is painted from the previous frame. Re-resolve the
+      // run in the current snapshot and require the node to still belong to it;
+      // a stale hit must not retarget a same-id node in another run.
+      const paintedRun = vm.frame?.run;
+      const clickedNode = paintedRun?.nodes?.find(node => node.id === target.id);
+      if (!paintedRun || !clickedNode) return;
+      const index = session.runIndexById(paintedRun.id);
+      if (index >= 0) {
+        ui.runIndex = index;
+        ui.selectedRunId = paintedRun.id;
+        ui.runPinned = true;
+      }
+      ui.selectedNodeId = target.id;
+      ui.runOverview = false;
+      ui.selectedTaskId = clickedNode.taskId;
+      ui.selectedTaskUnlinked = false;
+      ui.follow = false;
+      ui.followTarget = undefined;
+      ui.manualScroll = false;
+      if (ui.expanded) {
+        ui.focus = 'details';
+        ui.lastFocus = 'graph';
+      } else {
+        ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
+      }
+      return;
+    }
+    if (target.kind === 'chrome') {
+      if (target.action === 'mouse' || target.action === 'clear') {
+        runFooterAction(target.action, {
+          toggleMouse: () => ctx.setMouseCapture(!ui.mouseCapture),
+          clear: session.clearCompleted,
+        });
+      } else if (target.action === 'help') {
+        ui.help = !ui.help;
+        ui.helpScroll = 0;
+        session.helpFrameDrawn = false;
+      } else if (target.action === 'settings') {
+        session.openSettingsMenu();
+      }
+      return;
+    }
+    if (target.kind === 'node') {
+      const paintedRun = vm.frame?.run;
+      const index = paintedRun ? session.runIndexById(paintedRun.id) : -1;
+      const run = index >= 0 ? snapshot.runs[index] : undefined;
+      const clickedNode = run?.nodes?.find(node => node.id === target.id);
+      if (!run || !clickedNode) return;
+      setNodeSubject(ui, snapshot, target.id, { runId: run.id, manualScroll: true });
+      ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
+      return;
+    }
+    if (target.kind === 'task') {
+      const clicked = selectTask(vm, target.id);
+      if (!clicked.handled) return;
+      if (!clicked.linked) {
+        session.addToast(t(ui.language, 'toastTaskUnlinked', { id: target.id }), 'warning');
+      }
+      if (ui.expanded) {
+        ui.focus = 'details';
+        ui.lastFocus = 'tasks';
+      }
+      return;
+    }
+    if (target.kind === 'run') {
+      // A run row selects the run subject so the details pane paints RUN SUMMARY.
+      selectRun(vm, target.id, { overview: true });
+    }
+  }
+
+  function handleDiagnosisKey(key) {
+    const { ui } = session;
+    const snapshot = session.snapshot;
+    if (!['c', 'p', 'o'].includes(key)) return false;
+    if (key === 'o') {
+      // Opening a raw record is status-independent: a completed task has no
+      // diagnosis card, but its record is still the only place the full
+      // final_response survives. The same safe-file gates apply to every status.
+      const record = recordForSelection(snapshot, ui);
+      if (!record) {
+        session.addToast(t(ui.language, 'diagnosisNothing'), 'warning');
+        return true;
+      }
+      const action = recordForKey('o', record);
+      if (action.kind === 'open') void ctx.openRecordInPager(action.path);
+      else session.addToast(t(ui.language, 'diagnosisOpenUnavailable'), 'warning');
+      return true;
+    }
+    const diagnosis = diagnosisForSelection(snapshot, ui);
+    if (!diagnosis) {
+      session.addToast(t(ui.language, 'diagnosisNothing'), 'warning');
+      return true;
+    }
+    // The copied bundle is the artifact the user keeps, so it must use the
+    // same UI language as the diagnosis panel.
+    const action = ctx.diagnosisForKey(key, diagnosis, undefined, ui.language);
+    if (!action) return false;
+    if (action.kind === 'copy-diagnosis' || action.kind === 'copy-paths') {
+      if (!ctx.interactive || !process.stdout.isTTY) {
+        session.addToast(t(ui.language, 'diagnosisCopyUnavailable'), 'warning');
+        return true;
+      }
+      process.stdout.write(osc52(action.text));
+      session.addToast(t(ui.language, 'diagnosisCopied', { lines: payloadLines(action.text) }), 'info');
+    } else {
+      session.addToast(t(ui.language, action.reason === 'no-paths' ? 'diagnosisNoPaths' : 'diagnosisOpenUnavailable'), 'warning');
+    }
+    return true;
+  }
+
+  function handlePaletteKey(key, pressed) {
+    const { ui } = session;
+    const action = resolveKey(PALETTE_KEYMAP, key, pressed);
+    if (!action) return;
+    if (action.id === 'close') { session.closePalette(); return; }
+    if (action.id === 'move') { session.movePalette(action.value); return; }
+    if (action.id === 'confirm') {
+      const { active } = session.paletteView();
+      if (active) session.applyPaletteCommand(active.id);
+      return;
+    }
+    if (action.id === 'backspace') {
+      ui.paletteFilter = ui.paletteFilter.slice(0, -1);
+      ui.paletteIndex = 0;
+      return;
+    }
+    if (action.id === 'type') {
+      ui.paletteFilter += action.value;
+      ui.paletteIndex = 0;
+    }
+  }
+
+  function handleSwitcherKey(key, pressed) {
+    const { ui } = session;
+    const action = resolveKey(SWITCHER_KEYMAP, key, pressed);
+    if (!action) return;
+    switch (action.id) {
+      case 'quit':
+        void ctx.close({ closePane: true });
+        return;
+      case 'close':
+        ui.switcher = null;
+        return;
+      case 'move':
+        session.moveSwitcherSelection(action.value);
+        return;
+      case 'confirm':
+        session.confirmSwitcher(undefined);
+        return;
+      case 'backspace': {
+        const query = ui.switcher.query.slice(0, -1);
+        ui.switcher = { ...ui.switcher, query };
+        return;
+      }
+      case 'clearQuery':
+        ui.switcher = { ...ui.switcher, query: '' };
+        return;
+      case 'type':
+        ui.switcher = { ...ui.switcher, query: `${ui.switcher.query}${action.value}` };
+        return;
+      default:
+        // '/' and every unconsumed key are modal no-ops: the switcher owns the
+        // keyboard while it is open.
+        return;
+    }
+  }
+
+  function handleTourKey(key, pressed) {
+    const { ui } = session;
+    const action = resolveKey(TOUR_KEYMAP, key, pressed);
+    if (action?.id === 'close') { ui.tour = 0; return; }
+    if (action?.id === 'advance') { ui.tour = ui.tour >= 5 ? 0 : ui.tour + 1; }
+  }
+
+  function handleHelpKey(key, pressed) {
+    const { ui } = session;
+    const metrics = helpScrollMetrics(ctx.terminalHeight());
+    const action = helpKeyAction(key, pressed, metrics);
+    if (action === 'close') {
+      ui.help = false;
+      ui.helpScroll = 0;
+      session.helpFrameDrawn = false;
+      void ctx.draw();
+    } else if (action === 'scroll' && applyHelpScroll(ui, key, pressed, metrics)) {
+      session.helpFrameDrawn = false;
+      void ctx.draw();
+    }
+  }
+
+  function handleSettingsKey(key, pressed) {
+    const { ui } = session;
+    const action = resolveKey(SETTINGS_KEYMAP, key, pressed);
+    if (!action) return;
+    if (action.id === 'close') { ui.settingsMenu = false; return; }
+    if (action.id === 'cycle') {
+      ui.settingsIndex = (ui.settingsIndex + action.value + 3) % 3;
+      return;
+    }
+    if (action.id === 'apply') session.applySetting(ui.settingsIndex);
+  }
+
+  const MODAL_HANDLERS = {
+    switcher: handleSwitcherKey,
+    palette: handlePaletteKey,
+    tour: handleTourKey,
+    help: handleHelpKey,
+    settings: handleSettingsKey,
+  };
+
+  // Ordered modal dispatch: an open modal owns every key, and the first active
+  // row in MODAL_ORDER wins. Global keys never fire underneath an overlay
+  // unless the row explicitly yields that key (Settings yields the quit keys).
+  function dispatchModal(key, pressed) {
+    for (const modal of MODAL_ORDER) {
+      if (!modal.active(session.ui)) continue;
+      if (modal.preemptedBy?.(key, pressed)) continue;
+      MODAL_HANDLERS[modal.id](key, pressed);
+      return true;
+    }
+    return false;
+  }
+
+  function runGlobalAction({ id, value }, key, pressed) {
+    const { ui, vm } = session;
+    const snapshot = session.snapshot;
+    switch (id) {
+      case 'quit':
+        void ctx.close({ closePane: true });
+        return true;
+      case 'escape': {
+        if (ui.graphFilter !== 'all' || ui.graphFocus) {
+          ui.graphFilter = 'all';
+          ui.graphFocus = undefined;
+          return true;
+        }
+        const collapsed = collapseTransition(ui);
+        if (collapsed) Object.assign(ui, collapsed);
+        return true;
+      }
+      case 'runOverviewBack': {
+        const run = snapshot?.runs?.[ui.runIndex];
+        if (!run) return false;
+        selectRun(vm, run.id, { overview: true });
+        return true;
+      }
+      case 'graphFilter':
+        ui.graphFilter = ['all', 'failed', 'blocked', 'running', 'critical'][value];
+        ui.graphFocus = undefined;
+        return true;
+      case 'focusNode': {
+        const run = snapshot?.runs[ui.runIndex];
+        if (!run?.nodes?.length) return true;
+        if (ui.graphFocus) {
+          ui.graphFocus = undefined;
+          return true;
+        }
+        const nodeId = ui.selectedNodeId ?? run.nodes[0].id;
+        ui.selectedNodeId = nodeId;
+        ui.runOverview = false;
+        ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
+        ui.selectedTaskUnlinked = false;
+        ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
+        ui.graphFocus = nodeId;
+        ui.follow = false;
+        ui.followTarget = undefined;
+        return true;
+      }
+      case 'stepNode':
+        session.stepGraphNode(value);
+        return true;
+      case 'undo':
+        session.undoCleared();
+        return true;
+      case 'palette':
+        session.openPalette();
+        return true;
+      case 'help':
+        ui.help = !ui.help;
+        ui.helpScroll = 0;
+        session.helpFrameDrawn = false;
+        return true;
+      case 'settings':
+        session.openSettingsMenu();
+        return true;
+      case 'mouseCapture':
+        ctx.setMouseCapture(!ui.mouseCapture);
+        return true;
+      case 'clearCompleted':
+        session.clearCompleted();
+        return true;
+      case 'restoreHidden':
+        session.restoreHidden();
+        return true;
+      case 'sidebar':
+        if (ctx.terminalWidth() >= 112) {
+          ui.sidebar = !ui.sidebar;
+          session.addToast(t(ui.language, ui.sidebar ? 'toastSidebarOn' : 'toastSidebarOff'), 'info');
+        } else session.addToast(t(ui.language, 'toastSidebarHidden'), 'warning');
+        return true;
+      case 'follow':
+        ui.follow = !ui.follow;
+        if (ui.follow) {
+          ui.runPinned = false;
+          session.follow();
+        }
+        session.addToast(t(ui.language, ui.follow ? 'toastFollowOn' : 'toastFollowOff'), 'info');
+        return true;
+      case 'demoReset':
+        ctx.engine.reset();
+        ui.hiddenRunIds.clear();
+        ui.hiddenTaskIds.clear();
+        ui.toasts = [];
+        session.addToast(t(ui.language, 'toastDemoReset'), 'warning');
+        return true;
+      case 'verbose': {
+        const structural = vm.frame?.layout?.layout ?? structuralFor(ctx.terminalWidth(), {
+          expanded: ui.expanded, sidebar: session.sidebarEnabled(),
+        });
+        if (!detailsVerboseAvailable(structural)) {
+          session.addToast(t(ui.language, 'toastDetailsWideOnly'), 'warning');
+          return true;
+        }
+        ui.verbose = !ui.verbose;
+        session.addToast(t(ui.language, ui.verbose ? 'toastDetailsVerbose' : 'toastDetailsCompact'), 'info');
+        return true;
+      }
+      case 'dutyFocus': {
+        const structural = vm.frame?.layout?.layout ?? structuralFor(ctx.terminalWidth(), {
+          expanded: ui.expanded, sidebar: session.sidebarEnabled(),
+        });
+        applyFocus(vm, value.focus, structural, vm.frame?.scroll);
+        session.helpFrameDrawn = false;
+        return true;
+      }
+      case 'diagnosis':
+        return handleDiagnosisKey(key);
+      case 'expand':
+        if (!ui.expanded) Object.assign(ui, expandTransition(ui));
+        return true;
+      case 'switcher':
+        session.openSwitcher();
+        return true;
+      case 'completed':
+        ui.completedCollapsed = !ui.completedCollapsed;
+        ui.tasksScroll = 0;
+        ui.tasksScrollTarget = 0;
+        return true;
+      case 'taskScope': {
+        const structural = structuralFor(ctx.terminalWidth(), {
+          expanded: ui.expanded, sidebar: session.sidebarEnabled(),
+        });
+        if (structural !== 'investigation' || !session.sidebarEnabled() || ui.expanded) {
+          session.openSwitcher();
+          return true;
+        }
+        ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
+        ui.tasksScroll = 0;
+        ui.tasksScrollTarget = 0;
+        return true;
+      }
+      case 'cycle':
+        session.cycle(value);
+        return true;
+      case 'switchRun':
+        session.switchRun(value);
+        return true;
+      case 'keyboardScroll':
+        return session.dispatchKeyboardScroll(key, pressed);
+      case 'detailsSection':
+        session.jumpDetailsSection(value);
+        return true;
+      case 'detailsToggle':
+        session.toggleDetailsSection();
+        return true;
+      case 'fold':
+        session.foldSelectedNode();
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  function handleGlobalKey(key, pressed) {
+    const { ui } = session;
+    for (const hit of matchingKeys(GLOBAL_KEYMAP, key, pressed, { ui, context: { demoMode: ctx.demoMode } })) {
+      if (runGlobalAction(hit, key, pressed) !== false) return;
+    }
+  }
+
+  function handleKey(text, pressed) {
+    const { ui } = session;
+    if (state.pagerActive) return;
+    const key = keyToken(text, pressed);
+    // Dismissal is exempt from the close/pointer debounce: Esc must always
+    // close Help or Settings, even while a mouse report is still settling.
+    if (isEscapeKey(key, pressed) && (ui.settingsMenu || ui.help)) {
+      ui.settingsMenu = false;
+      ui.help = false;
+      ui.helpScroll = 0;
+      session.helpFrameDrawn = false;
+      return;
+    }
+    if (state.closing || Date.now() < state.ignoreKeysUntil || Date.now() < state.mousePendingUntil) return;
+    if (dispatchModal(key, pressed)) return;
+    handleGlobalKey(key, pressed);
+  }
+
+  return { onMouseEvent, onRawInput, selectAt, handleKey };
 }
 
 // Each viewer owns its snapshot, watcher, render cache, and UI state. The
@@ -485,9 +928,6 @@ export async function createViewer(options = {}, deps = {}) {
     startOffset: scenario === 'early' ? 0 : scenario === 'late' ? 96_000 : 32_000,
   }) : null;
 
-  let snapshot = null;
-  let fullSnapshot = null;
-  let previousStates = null;
   let watcher;
   let watchTimer;
   let watchRetryTimer;
@@ -500,15 +940,7 @@ export async function createViewer(options = {}, deps = {}) {
   let closing = false;
   let started = false;
   let fatalHandler;
-  let toastId = 0;
-  let lastCycle;
   let lastDemoAccept = 0;
-  let helpFrameDrawn = false;
-  // Exactly one graph layout is retained (cap = 1): changing the run, graph
-  // width, folded set or node/edge structure replaces the entry, so a viewer
-  // that watches many runs cannot retain their layouts. The wire raster inside
-  // computeLayout/drawGraph has its own single-entry cache (task 33).
-  const graphLayoutCache = new SingleEntryCache('graph-layout');
   // One buffer handle for the viewer's lifetime: the scratch grids survive
   // frames and are repainted per use. Closing the viewer drops them with it.
   const frameBuffers = createFrameBuffers();
@@ -518,30 +950,9 @@ export async function createViewer(options = {}, deps = {}) {
   // UTF-8 decoded string cannot represent coordinates above 0x7f faithfully.
   let rawInput = Buffer.alloc(0);
   let mousePendingUntil = 0;
-  // readline decodes a partial mouse report as stand-alone keys in the same
-  // tick as the data event; this window only has to cover that dispatch burst
-  // (and readline's 30ms escape timeout), not the lifetime of a stale prefix.
-  const MOUSE_PENDING_KEY_MS = 80;
-  let viewState;
-  let viewStateSessionId;
-  let lastReadError;
-  let loadGeneration = 0;
-  const pendingWrites = new Set();
 
-  const ui = createViewerState({
-    noMotion, language: initialLanguage, themeName: initialThemeName, fps,
-  });
-  const vm = buildViewModel(null, ui);
-  ui.installVersion = INSTALL_GENERATION;
-
-  const initialPalette = paletteFor(ui.themeName, { appearance });
-  let palette = initialPalette;
-  const theme = createTheme({
-    palette,
-    color: !noColor,
-    truecolor: supportsTruecolor(),
-  });
-
+  let palette;
+  let theme;
   function applyPalette() {
     palette = paletteFor(ui.themeName, { appearance });
     theme.palette = palette;
@@ -553,793 +964,53 @@ export async function createViewer(options = {}, deps = {}) {
     if (started && !drawing) requestFrame();
   }
 
-  function addToast(text, kind = 'info', at = Date.now()) {
-    ui.toasts.push({ id: ++toastId, text, kind, at });
-    if (ui.toasts.length > 4) ui.toasts = ui.toasts.slice(-4);
-    requestRepaint();
-  }
+  const session = createViewerSession({
+    noMotion, language: initialLanguage, themeName: initialThemeName, fps,
+    once, statePath, interactive, paneMode,
+    readStateFileFn, loadViewStateFn, saveViewStateFn,
+    requestRepaint, requestFrame, draw, close, applyPalette,
+    terminalWidth, terminalHeight,
+  });
+  const ui = session.ui;
+  const vm = session.vm;
+  ui.installVersion = INSTALL_GENERATION;
 
-  // Preference writes are fire-and-forget from the UI's perspective, but close()
-  // must not exit before the last toggle reaches disk. Tracking keeps quit
-  // honest without making every key wait for the filesystem.
-  function trackWrite(promise) {
-    const tracked = Promise.resolve(promise);
-    pendingWrites.add(tracked);
-    tracked.finally(() => pendingWrites.delete(tracked)).catch(() => {});
-    return tracked;
-  }
-
-  async function flushPendingWrites(timeoutMs = 250) {
-    if (!pendingWrites.size) return;
-    await Promise.race([
-      Promise.allSettled([...pendingWrites]),
-      delay(timeoutMs),
-    ]);
-  }
+  palette = paletteFor(ui.themeName, { appearance });
+  theme = createTheme({
+    palette,
+    color: !noColor,
+    truecolor: supportsTruecolor(),
+  });
 
   if (configError) {
-    addToast(t(initialLanguage, 'toastConfigError', { error: configError.message }), 'failed');
+    session.addToast(t(initialLanguage, 'toastConfigError', { error: configError.message }), 'failed');
   }
 
-  function runIndexById(id) {
-    return snapshot?.runs.findIndex(run => run.id === id) ?? -1;
-  }
-
-  function ensureSelection() {
-    reconcile(vm, { snapshot });
-  }
-
-  function stateSignature(current) {
-    const map = new Map();
-    for (const run of current.runs) {
-      for (const node of run.nodes) map.set(`${run.id}:${node.id}`, node.state);
-    }
-    for (const task of current.tasks) {
-      if (!task.parentTaskId) map.set(`task:${task.id}`, task.status);
-    }
-    return map;
-  }
-
-  function detectTransitions(previous, current, now) {
-    const toasts = transitionChanges(previous, current).map(change => {
-      if (change.kind === 'node') {
-        if (change.state === 'completed') return { text: t(ui.language, 'toastNodeCompleted', { label: change.label }), kind: 'completed' };
-        if (change.state === 'failed') return { text: t(ui.language, 'toastNodeFailed', { label: change.label }), kind: 'failed' };
-        return { text: t(ui.language, 'toastNodeStarted', { label: change.label }), kind: 'info' };
-      }
-      if (change.state === 'completed') return { text: t(ui.language, 'toastTaskCompleted', { label: change.label }), kind: 'completed' };
-      if (change.state === 'failed') return { text: t(ui.language, 'toastTaskFailed', { label: change.label }), kind: 'failed' };
-      return { text: t(ui.language, 'toastTaskStarted', { label: change.label }), kind: 'info' };
-    });
-    for (const toast of toasts.slice(0, 3)) addToast(toast.text, toast.kind, now);
-    if (toasts.length > 3) addToast(t(ui.language, 'toastMoreChanges', { count: toasts.length - 3 }), 'info', now);
-  }
-
-  function acceptSnapshot(raw, { silent = false, view = once ? 'once' : 'watch' } = {}) {
-    const normalized = normalizeSnapshot(raw);
-    if (!normalized) {
-      if (!silent) addToast(t(ui.language, 'toastInvalidSnapshot'), 'failed');
-      return false;
-    }
-    normalized.provenance = {
-      ...normalized.provenance,
-      origin: normalized.mode !== 'demo' && normalized.provenance.origin === 'legacy-snapshot'
-        ? 'controller' : normalized.provenance.origin,
-      view,
-      ...(statePath ? { statePath } : {}),
-    };
-    const now = Date.now();
-    const previousRunIds = new Set(snapshot?.runs.map(run => run.id) ?? []);
-    const hadRuns = Boolean(snapshot?.runs?.length);
-    const nextStates = stateSignature(normalized);
-    if (!silent) detectTransitions(previousStates, normalized, now);
-    previousStates = nextStates;
-    if (raw?.demo && lastCycle !== raw.demo.cycle) {
-      if (lastCycle !== undefined) addToast(t(ui.language, 'toastCycleStarted', { cycle: raw.demo.cycle + 1 }), 'warning', now);
-      lastCycle = raw.demo.cycle;
-      ui.followTarget = undefined;
-    }
-    fullSnapshot = normalized;
-    pruneHiddenSubjects(ui, normalized);
-    snapshot = hiddenSnapshot(normalized, {
-      runIds: ui.hiddenRunIds, taskIds: ui.hiddenTaskIds,
-    });
-    reconcile(vm, { snapshot, previousRunIds, hadRuns });
-    if (ui.follow && snapshot.connected) follow(now);
-    requestRepaint();
-    return true;
-  }
-
-  function follow(now = Date.now()) {
-    if (!snapshot?.connected) return;
-    const current = snapshot.runs[ui.runIndex];
-    // A freshly selected run with no running node yet must stay visible instead
-    // of being dragged back to an older running run by the exact-match target.
-    if (holdsPendingRun(ui.followTarget, current)) return;
-    if (ui.followTarget?.kind === 'run' && ui.followTarget.runId === current?.id) {
-      const upgraded = followTargetForRun(current);
-      if (upgraded?.kind === 'node') ui.followTarget = upgraded;
-    }
-    const target = findRunningTarget(snapshot, ui.followTarget);
-    if (!target) return;
-    ui.followTarget = target;
-    const structural = structuralFor(terminalWidth(), {
-      expanded: ui.expanded, sidebar: sidebarEnabled(),
-    });
-    // An explicit RUNS/CELLS focus is a user choice; follow still moves the
-    // subject underneath it instead of dragging focus back to a hidden pane.
-    const keepDutyList = structural === 'duty' && (ui.focus === 'runs' || ui.focus === 'cells')
-      ? ui.focus : undefined;
-    if (target.kind === 'node') {
-      const index = runIndexById(target.runId);
-      if (index >= 0) ui.runIndex = index;
-      ui.selectedRunId = target.runId;
-      applyFocus(vm, 'graph', structural, vm.frame?.scroll);
-      if (keepDutyList) ui.focus = keepDutyList;
-      ui.selectedNodeId = target.nodeId;
-      ui.selectedTaskUnlinked = false;
-    } else {
-      applyFocus(vm, 'tasks', structural, vm.frame?.scroll);
-      if (keepDutyList) ui.focus = keepDutyList;
-      ui.selectedTaskId = target.taskId;
-      ui.selectedTaskUnlinked = !nodeForTask(snapshot, target.taskId);
-      if (ui.selectedTaskUnlinked) {
-        ui.selectedNodeId = undefined;
-        ui.graphScroll = 0;
-        ui.graphScrollTarget = 0;
-      }
-    }
-    ui.manualScroll = false;
-  }
-
-  function selectTaskById(taskId, { announce = false } = {}) {
-    const { handled, linked } = selectTask(vm, taskId);
-    if (!handled) return;
-    if (!linked && announce) {
-      addToast(t(ui.language, 'toastTaskUnlinked', { id: taskId }), 'warning');
-    }
-  }
-
-  function cycleTaskSelection(direction) {
-    const tasks = navTasks(snapshot ?? { runs: [], tasks: [] });
-    if (!tasks.length) return;
-    const current = Math.max(0, tasks.findIndex(task => task.id === ui.selectedTaskId));
-    const index = (current + direction + tasks.length) % tasks.length;
-    selectTaskById(tasks[index].id);
-  }
-
-  // Up/down in the duty TASKS list selects the orphan row under the cursor
-  // instead of scrolling an invisible list; the painted list is the source of
-  // row order, so a linked task can never become the selection here.
-  function stepDutyTask(direction) {
-    const tasks = orphanNavTasks(snapshot);
-    if (!tasks.length) return false;
-    const current = tasks.findIndex(task => task.id === ui.selectedTaskId);
-    const index = current < 0
-      ? (direction < 0 ? tasks.length - 1 : 0)
-      : (current + direction + tasks.length) % tasks.length;
-    selectTaskById(tasks[index].id);
-    return true;
-  }
-
-  function stepGraphNode(direction) {
-    const run = snapshot?.runs[ui.runIndex];
-    if (!run?.nodes?.length) return;
-    const layout = vm.frame?.graph?.layout;
-    const next = layout ? nextNodeId(layout, ui.selectedNodeId, direction) : undefined;
-    const fallback = run.nodes[
-      (Math.max(0, run.nodes.findIndex(node => node.id === ui.selectedNodeId)) + direction + run.nodes.length)
-        % run.nodes.length
-    ].id;
-    const nodeId = next ?? fallback;
-    setNodeSubject(ui, snapshot, nodeId, { runId: run.id });
-    ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
-    if (ui.graphFocus) ui.graphFocus = nodeId;
-    scrollSelectedIntoView();
-  }
-
-  function jumpDetailsSection(direction) {
-    const info = vm.frame?.scroll?.details;
-    const headings = info?.headings ?? [];
-    if (!headings.length) return;
-    const offset = info.offset ?? 0;
-    const target = direction > 0
-      ? headings.find(item => item.row > offset + 1)
-      : [...headings].reverse().find(item => item.row < offset - 1);
-    if (!target) return;
-    ui.detailsScroll = target.row;
-    ui.detailsScrollTarget = target.row;
-  }
-
-  function toggleDetailsSection() {
-    const info = vm.frame?.scroll?.details;
-    const headings = info?.headings ?? [];
-    if (!headings.length) return;
-    const offset = info.offset ?? 0;
-    const heading = [...headings].reverse().find(item => item.row <= offset + 2) ?? headings[0];
-    if (!heading) return;
-    if (ui.collapsedSections.has(heading.label)) ui.collapsedSections.delete(heading.label);
-    else ui.collapsedSections.add(heading.label);
-  }
-
-  function switchRun(direction) {
-    if (!snapshot?.runs.length) return;
-    const index = (ui.runIndex + direction + snapshot.runs.length) % snapshot.runs.length;
-    selectRun(vm, snapshot.runs[index].id, { overview: ui.runOverview });
-  }
-
-  function openSwitcher() {
-    if (ui.switcher || !snapshot) return;
-    const run = snapshot.runs[ui.runIndex];
-    const node = run?.nodes?.find(candidate => candidate.id === ui.selectedNodeId);
-    const taskOwner = ui.focus === 'tasks' || (ui.focus === 'details' && ui.lastFocus === 'tasks');
-    const preferredTaskId = taskOwner ? ui.selectedTaskId : node?.taskId;
-    const preferredNodeKey = run?.id && ui.selectedNodeId ? `node:${run.id}:${ui.selectedNodeId}` : undefined;
-    const items = switcherItems(snapshot, null, {
-      preferRunId: run?.id,
-      tasks: navTasks(snapshot),
-    });
-    const active = (preferredNodeKey
-      ? items.find(item => item.key === preferredNodeKey)
-      : undefined)
-      ?? items.find(item => item.kind === 'task' && item.id === preferredTaskId)
-      ?? items.find(item => item.kind === 'run' && item.id === run?.id)
-      ?? items[0];
-    ui.switcher = { query: '', frozenKeys: items.map(item => item.key), activeKey: active?.key };
-  }
-
-  function moveSwitcherSelection(delta) {
-    if (!ui.switcher) return;
-    const view = switcherView(snapshot, ui);
-    if (!view.items.length) return;
-    ui.switcher = {
-      ...ui.switcher,
-      activeKey: moveSwitcher(view.items, view.activeKey, delta),
-    };
-  }
-
-  function confirmSwitcher(key) {
-    if (!ui.switcher) return;
-    const view = switcherView(snapshot, ui);
-    // Pointer hits carry the key painted in the previous frame. Only keyboard
-    // Enter (undefined) may fall back to the active row: a key that was removed,
-    // reordered, or filtered out is stale and must not select another subject.
-    const item = key === undefined
-      ? view.items.find(candidate => candidate.key === view.activeKey)
-      : view.items.find(candidate => candidate.key === key);
-    if (!item) {
-      if (key !== undefined) {
-        addToast(t(ui.language, 'toastSwitcherStale', {
-          id: key.slice(key.indexOf(':') + 1),
-        }), 'warning');
-        return;
-      }
-      ui.switcher = null;
-      addToast(t(ui.language, 'switcherEmpty'), 'warning');
-      return;
-    }
-    const applied = applySwitcherSelection(ui, snapshot, item, vm.frame?.scroll);
-    if (!applied.handled) {
-      addToast(t(ui.language, applied.stale ? 'toastSwitcherStale' : 'toastTaskUnlinked', {
-        id: item.id,
-      }), 'warning');
-      return;
-    }
-    if (item.kind === 'task' && !applied.linked) {
-      addToast(t(ui.language, 'toastTaskUnlinked', { id: item.id }), 'warning');
-    }
-    ui.switcher = null;
-  }
-
-  function paletteView() {
-    const items = filterCommands(commandItems(ui.language), ui.paletteFilter);
-    const index = items.length ? clamp(ui.paletteIndex ?? 0, 0, items.length - 1) : 0;
-    return { items, index, active: items[index] };
-  }
-
-  function openPalette() {
-    ui.palette = true;
-    ui.paletteFilter = '';
-    ui.paletteIndex = 0;
-  }
-
-  function closePalette() {
-    ui.palette = false;
-    ui.paletteFilter = '';
-    ui.paletteIndex = 0;
-  }
-
-  function movePalette(delta) {
-    const { items, index } = paletteView();
-    if (!items.length) return;
-    ui.paletteIndex = (index + delta + items.length) % items.length;
-  }
-
-  function applyPaletteCommand(id) {
-    const run = snapshot?.runs?.[ui.runIndex];
-    switch (id) {
-      case 'overview':
-        if (run) selectRun(vm, run.id, { overview: true });
-        break;
-      case 'find':
-        closePalette();
-        openSwitcher();
-        return;
-      case 'filter-failed':
-      case 'filter-blocked':
-      case 'filter-running':
-      case 'filter-critical':
-        ui.graphFilter = id.slice('filter-'.length);
-        ui.graphFocus = undefined;
-        break;
-      case 'filter-clear':
-        ui.graphFilter = 'all';
-        ui.graphFocus = undefined;
-        break;
-      case 'focus': {
-        if (!run?.nodes?.length) break;
-        const nodeId = ui.selectedNodeId ?? run.nodes[0].id;
-        ui.selectedNodeId = nodeId;
-        ui.runOverview = false;
-        ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
-        ui.selectedTaskUnlinked = false;
-        ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
-        ui.graphFocus = nodeId;
-        ui.follow = false;
-        break;
-      }
-      case 'scope':
-        ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
-        ui.tasksScroll = 0;
-        ui.tasksScrollTarget = 0;
-        break;
-      case 'completed':
-        ui.completedCollapsed = !ui.completedCollapsed;
-        ui.tasksScroll = 0;
-        ui.tasksScrollTarget = 0;
-        break;
-      case 'verbose':
-        ui.verbose = !ui.verbose;
-        break;
-      case 'tour':
-        ui.tour = 1;
-        break;
-      case 'undo':
-        undoCleared();
-        break;
-      case 'help':
-        ui.help = true;
-        ui.helpScroll = 0;
-        helpFrameDrawn = false;
-        break;
-      case 'settings':
-        openSettingsMenu();
-        break;
-      case 'quit':
-        void close({ closePane: true });
-        return;
-      default:
-        break;
-    }
-    closePalette();
-  }
-
-  function handlePaletteKey(key, pressed) {
-    const action = resolveKey(PALETTE_KEYMAP, key, pressed);
-    if (!action) return;
-    if (action.id === 'close') { closePalette(); return; }
-    if (action.id === 'move') { movePalette(action.value); return; }
-    if (action.id === 'confirm') {
-      const { active } = paletteView();
-      if (active) applyPaletteCommand(active.id);
-      return;
-    }
-    if (action.id === 'backspace') {
-      ui.paletteFilter = ui.paletteFilter.slice(0, -1);
-      ui.paletteIndex = 0;
-      return;
-    }
-    if (action.id === 'type') {
-      ui.paletteFilter += action.value;
-      ui.paletteIndex = 0;
-    }
-  }
-
-  function foldSelectedNode() {
-    toggleFoldInView(vm, {
-      persist: (runId, nodeId, expanded) => {
-        const sessionKey = viewSessionKey(snapshot);
-        if (statePath && viewState && sessionKey && viewState.sessionId === sessionKey) {
-          setExpanded(viewState, runId, nodeId, expanded);
-          trackWrite(saveViewStateFn(statePath, viewState))
-            .catch(error => addToast(t(ui.language, 'toastViewPreferences', { error: error.message }), 'failed'));
-        }
-      },
-    });
-  }
-
-  function sidebarEnabled() {
-    return ui.sidebar && (!paneMode || terminalWidth() >= 112);
-  }
-
-  function graphMetrics() {
-    const layout = dashboardLayout(terminalWidth(), terminalHeight(), {
-      sidebar: sidebarEnabled(), expanded: ui.expanded,
-    });
-    if (!layout.graph) return null;
-    return { width: Math.max(8, layout.graph.w - 4), height: Math.max(3, layout.graph.h - 4) };
-  }
-
-  function graphLayoutInfo() {
-    const run = snapshot?.runs[ui.runIndex];
-    if (!run) return null;
-    syncFoldedRun(ui, run.id);
-    const metrics = graphMetrics();
-    if (!metrics) return null;
-    const key = graphLayoutKey(run, metrics.width, { folded: ui.folded });
-    const layout = graphLayoutCache.get(key, () => {
-      try {
-        return computeLayout(run, metrics.width, { folded: ui.folded });
-      } catch {
-        // Let renderApp handle and report a cyclic layout.
-        return null;
-      }
-    });
-    return { ...metrics, layout };
-  }
-
-  function maxGraphScroll(info = graphLayoutInfo()) {
-    if (!info?.layout) return 0;
-    return Math.max(0, info.layout.height - info.height);
-  }
-
-  function pageScrollStep() {
-    return Math.max(2, (graphMetrics()?.height ?? 4) - 4);
-  }
-
-  function scrollRegionBy(region, delta) {
-    if (region === 'graph') {
-      ui.follow = false;
-      ui.manualScroll = true;
-      ui.graphScrollTarget = clamp(
-        ui.graphScrollTarget + delta,
-        0,
-        vm.frame?.scroll?.graph?.maxScroll ?? maxGraphScroll(),
-      );
-      return;
-    }
-    if (region === 'tasks') {
-      ui.follow = false;
-      ui.tasksScrollTarget = clamp(
-        (ui.tasksScrollTarget ?? 0) + delta,
-        0,
-        vm.frame?.scroll?.tasks?.maxScroll ?? 0,
-      );
-      return;
-    }
-    if (region === 'runs' || region === 'cells') {
-      const targetKey = region === 'runs' ? 'runsScrollTarget' : 'cellsScrollTarget';
-      ui[targetKey] = clamp((ui[targetKey] ?? 0) + delta, 0, vm.frame?.scroll?.[region]?.maxScroll ?? 0);
-      return;
-    }
-    if (region === 'details') {
-      ui.follow = false;
-      ui.detailsScrollTarget = clamp(
-        (ui.detailsScrollTarget ?? 0) + delta,
-        0,
-        vm.frame?.scroll?.details?.maxScroll ?? 0,
-      );
-    }
-  }
-
-  function dispatchKeyboardScroll(key, pressed) {
-    const structural = vm.frame?.layout?.layout ?? structuralFor(terminalWidth(), {
-      expanded: ui.expanded, sidebar: sidebarEnabled(),
-    });
-    const scrollInfo = vm.frame?.scroll ?? {};
-    // The duty TASKS list is a selection list, not a scroll window. Move the
-    // orphan-task subject on up/down before the generic scroll fallback; when
-    // the region is not painted, focusForStructural has already sent the key
-    // to the duty body.
-    const movement = movementKey(key, pressed);
-    if (structural === 'duty' && ui.focus === 'tasks' && (movement === 'up' || movement === 'down') &&
-      (scrollInfo.tasks?.viewportH ?? 0) > 0) {
-      stepDutyTask(movement === 'down' ? 1 : -1);
-      return true;
-    }
-    // Page size only needs the graph's larger step; every other painted region
-    // uses half its viewport inside keyboardScrollIntent.
-    const pageSize = scrollRegionForFocus(ui.focus, structural, scrollInfo) === 'graph'
-      ? pageScrollStep()
-      : undefined;
-    const intent = keyboardScrollIntent(key, pressed, ui.focus, structural, scrollInfo, { pageSize });
-    if (!intent) return false;
-    scrollRegionBy(intent.region, intent.delta);
-    return true;
-  }
-
-  function regionStep(region) {
-    const info = vm.frame?.scroll?.[region];
-    if (!info) return 1;
-    return region === 'graph'
-      ? Math.max(2, info.viewportH - 4)
-      : Math.max(1, Math.floor(info.viewportH / 2));
-  }
-
-  function applyWheel(mouse) {
-    const direction = wheelDirectionFromButton(mouse.button);
-    if (!direction) return;
-    // Wheel stays in the modal switcher; it never scrolls the frame underneath.
-    if (ui.switcher) {
-      moveSwitcherSelection(direction);
-      return;
-    }
-    if (!vm.frame) return;
-    const region = regionAt(mouse.x, mouse.y, vm.frame.hitboxes?.regions);
-    if (!region) return;
-    scrollRegionBy(region, direction * regionStep(region));
-  }
-
-  function revealTaskSelection() {
-    if (ui.focus !== 'tasks' || !snapshot) return;
-    const tasks = vm.frame?.layout?.layout === 'duty'
-      ? orphanNavTasks(snapshot)
-      : navTasks(snapshot);
-    const index = tasks.findIndex(task => task.id === ui.selectedTaskId);
-    if (index < 0) return;
-    const viewportRows = vm.frame?.scroll?.tasks?.viewportH ?? 0;
-    const max = vm.frame?.scroll?.tasks?.maxScroll ?? 0;
-    if (!viewportRows) {
-      // The task list is not painted (duty or expanded). Keep its last offset so
-      // returning to investigation does not rewind the selection into view.
-      ui.taskRevealKey = undefined;
-      return;
-    }
-    let offset = clamp(ui.tasksScrollTarget ?? 0, 0, max);
-    if (index < offset) offset = index;
-    else if (index >= offset + viewportRows) offset = index - viewportRows + 1;
-    ui.tasksScrollTarget = clamp(offset, 0, max);
-    ui.tasksScroll = ui.tasksScrollTarget;
-  }
-
-  // The Help overlay is modal, but its list is taller than a short terminal.
-  // A wheel event scrolls one clamped page instead of falling through to the
-  // frame underneath.
-  function scrollHelpPage(direction) {
-    const metrics = helpScrollMetrics(terminalHeight());
-    ui.helpScroll = clamp(
-      (ui.helpScroll ?? 0) + direction * Math.max(1, metrics.viewport - 1),
-      0,
-      metrics.maxScroll,
-    );
-    helpFrameDrawn = false;
-    void draw();
-  }
-
-  function onMouseEvent(mouse) {
-    // Readline may also emit a keypress for the same bytes; ignore that copy.
-    ignoreKeysUntil = Date.now() + 80;
-    // Button bit 32 marks motion (drag). A terminal that leaves a motion mode
-    // enabled must not turn dragging into repeated selection changes or modal
-    // dismissal, so motion reports are never treated as clicks.
-    if (mouse.button & 32) return;
-    if (ui.settingsMenu) {
-      if (!mouse.release && (mouse.button & 3) === 0) selectAt(mouse.x, mouse.y);
-      return;
-    }
-    if (ui.help) {
-      if (mouse.button & 64) {
-        const direction = wheelDirectionFromButton(mouse.button);
-        if (direction) scrollHelpPage(direction);
-        return;
-      }
-      if (!mouse.release && (mouse.button & 3) === 0) {
-        ui.help = false;
-        ui.helpScroll = 0;
-        helpFrameDrawn = false;
-        void draw();
-      }
-      return;
-    }
-    if (mouse.button & 64) {
-      applyWheel(mouse);
-      return;
-    }
-    if (!mouse.release && (mouse.button & 3) === 0) selectAt(mouse.x, mouse.y);
-  }
-
-  function inputBytes(chunk) {
-    if (Buffer.isBuffer(chunk)) return chunk;
-    if (chunk instanceof Uint8Array) {
-      return Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-    }
-    // Already-decoded input (tests, embedding) keeps one character per byte.
-    return Buffer.from(String(chunk), 'latin1');
-  }
-
-  function onRawInput(chunk) {
-    if (pagerActive) return;
-    rawInput = Buffer.concat([rawInput, inputBytes(chunk)]);
-    if (rawInput.length > 8192) rawInput = rawInput.subarray(rawInput.length - 8192);
-    const { events, rest, pending } = extractMouse(rawInput);
-    const remainder = Buffer.isBuffer(rest) ? rest : Buffer.from(String(rest), 'latin1');
-    rawInput = remainder.subarray(Math.max(0, remainder.length - 64));
-    // readline also emits the partial report bytes as individual keys (its
-    // digits are duty focus hotkeys), so key dispatch waits for the report to
-    // finish instead of acting on a fragment.
-    mousePendingUntil = pending ? Date.now() + MOUSE_PENDING_KEY_MS : 0;
-    for (const event of events) onMouseEvent(event);
-    if (events.length) requestFrame();
-  }
-
-  function openSettingsMenu() {
-    ui.help = false;
-    ui.helpScroll = 0;
-    helpFrameDrawn = false;
-    ui.settingsMenu = true;
-    ui.settingsIndex = 0;
-  }
-
-  function applyLanguage(id) {
-    const language = normalizeLanguage(id);
-    ui.language = language;
-    trackWrite(saveConfig({ language })).then(() => {
-      addToast(t(language, 'languageChanged', { language: languageLabel(language) }), 'info');
-    }).catch(error => {
-      addToast(t(language, 'languageSaveError', { error: error.message }), 'failed');
-    });
-  }
-
-  function applySetting(index) {
-    if (index === 0) {
-      const current = themeNames.indexOf(ui.themeName);
-      ui.themeName = themeNames[(current + 1) % themeNames.length];
-      applyPalette();
-      addToast(t(ui.language, 'toastTheme', { name: ui.themeName }), 'info');
-      trackWrite(saveConfig({ theme: ui.themeName })).catch(error => {
-        addToast(t(ui.language, 'themeSaveError', { error: error.message }), 'failed');
-      });
-      return;
-    }
-    if (index === 1) {
-      // The render settings row says "(this session)" in both languages, so the
-      // honest implementation is session-only. It must not write config behind a
-      // copy that promises nothing survives relaunch.
-      ui.motion = !ui.motion;
-      if (interactive) requestFrame();
-      addToast(t(ui.language, ui.motion ? 'toastMotionOn' : 'toastMotionOff'), 'info');
-      return;
-    }
-    applyLanguage(ui.language === 'en' ? 'zh' : 'en');
-  }
-
-  function selectAt(x, y) {
-    if (!snapshot) return;
-    // Read paths that install a failed-read placeholder do not redraw first;
-    // point the model at the snapshot the next pointer event must resolve.
-    vm.snapshot = snapshot;
-    const target = hitTargetAt(vm, x, y);
-    if (!target) return;
-    if (target.kind === 'palette') {
-      const items = filterCommands(commandItems(ui.language), ui.paletteFilter);
-      const index = items.findIndex(item => item.id === target.id);
-      if (index >= 0) {
-        ui.paletteIndex = index;
-        applyPaletteCommand(target.id);
-      }
-      return;
-    }
-    if (target.kind === 'palette-panel') return;
-    if (target.kind === 'palette-backdrop') {
-      closePalette();
-      return;
-    }
-    if (target.kind === 'switcher') {
-      confirmSwitcher(target.key);
-      return;
-    }
-    if (target.kind === 'switcher-panel') return;
-    if (target.kind === 'switcher-backdrop') {
-      ui.switcher = null;
-      return;
-    }
-    if (target.kind === 'settings') {
-      const index = ['theme', 'animation', 'language'].indexOf(target.id);
-      if (index >= 0) applySetting(index);
-      return;
-    }
-    if (target.kind === 'settings-backdrop') {
-      ui.settingsMenu = false;
-      return;
-    }
-    if (target.kind === 'tasks-toggle') {
-      ui.completedCollapsed = !ui.completedCollapsed;
-      ui.tasksScroll = 0;
-      ui.tasksScrollTarget = 0;
-      return;
-    }
-    if (target.kind === 'context') {
-      if (target.subject === 'run') {
-        selectRun(vm, target.id, { overview: true });
-        return;
-      }
-      if (target.subject === 'task') {
-        selectTaskById(target.id, { announce: true });
-        if (ui.expanded) {
-          ui.focus = 'details';
-          ui.lastFocus = 'tasks';
-        }
-        return;
-      }
-      // The breadcrumb node is painted from the previous frame. Re-resolve the
-      // run in the current snapshot and require the node to still belong to it;
-      // a stale hit must not retarget a same-id node in another run.
-      const paintedRun = vm.frame?.run;
-      const clickedNode = paintedRun?.nodes?.find(node => node.id === target.id);
-      if (!paintedRun || !clickedNode) return;
-      const index = runIndexById(paintedRun.id);
-      if (index >= 0) {
-        ui.runIndex = index;
-        ui.selectedRunId = paintedRun.id;
-        ui.runPinned = true;
-      }
-      ui.selectedNodeId = target.id;
-      ui.runOverview = false;
-      ui.selectedTaskId = clickedNode.taskId;
-      ui.selectedTaskUnlinked = false;
-      ui.follow = false;
-      ui.followTarget = undefined;
-      ui.manualScroll = false;
-      if (ui.expanded) {
-        ui.focus = 'details';
-        ui.lastFocus = 'graph';
-      } else {
-        ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
-      }
-      return;
-    }
-    if (target.kind === 'chrome') {
-      if (target.action === 'mouse' || target.action === 'clear') {
-        runFooterAction(target.action, {
-          toggleMouse: () => setMouseCapture(!ui.mouseCapture),
-          clear: clearCompleted,
-        });
-      } else if (target.action === 'help') {
-        ui.help = !ui.help;
-        ui.helpScroll = 0;
-        helpFrameDrawn = false;
-      } else if (target.action === 'settings') {
-        openSettingsMenu();
-      }
-      return;
-    }
-    if (target.kind === 'node') {
-      const paintedRun = vm.frame?.run;
-      const index = paintedRun ? runIndexById(paintedRun.id) : -1;
-      const run = index >= 0 ? snapshot.runs[index] : undefined;
-      const clickedNode = run?.nodes?.find(node => node.id === target.id);
-      if (!run || !clickedNode) return;
-      setNodeSubject(ui, snapshot, target.id, { runId: run.id, manualScroll: true });
-      ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
-      return;
-    }
-    if (target.kind === 'task') {
-      const clicked = selectTask(vm, target.id);
-      if (!clicked.handled) return;
-      if (!clicked.linked) {
-        addToast(t(ui.language, 'toastTaskUnlinked', { id: target.id }), 'warning');
-      }
-      if (ui.expanded) {
-        ui.focus = 'details';
-        ui.lastFocus = 'tasks';
-      }
-      return;
-    }
-    if (target.kind === 'run') {
-      // A run row selects the run subject so the details pane paints RUN SUMMARY.
-      selectRun(vm, target.id, { overview: true });
-    }
-  }
+  const inputState = {
+    get pagerActive() { return pagerActive; },
+    get ignoreKeysUntil() { return ignoreKeysUntil; },
+    set ignoreKeysUntil(value) { ignoreKeysUntil = value; },
+    get mousePendingUntil() { return mousePendingUntil; },
+    set mousePendingUntil(value) { mousePendingUntil = value; },
+    get rawInput() { return rawInput; },
+    set rawInput(value) { rawInput = value; },
+    get closing() { return closing; },
+  };
+  const input = createViewerInput({
+    session,
+    state: inputState,
+    requestFrame: () => requestFrame(),
+    draw: () => draw(),
+    close: (...args) => close(...args),
+    openRecordInPager,
+    setMouseCapture,
+    engine,
+    interactive,
+    demoMode,
+    diagnosisForKey: diagnosisForKeyFn,
+    terminalWidth,
+    terminalHeight,
+  });
 
   // --width/--height describe the --once frame (the help used to promise
   // 120x40 while the flags also widened interactive watch mode). Watch mode
@@ -1354,18 +1025,11 @@ export async function createViewer(options = {}, deps = {}) {
     return Math.max(12, Math.floor(deps.rows ?? process.stdout.rows ?? 40));
   }
 
-  function scrollSelectedIntoView(info = graphLayoutInfo()) {
-    if (!info?.layout) return;
-    const target = selectionScrollTarget(ui, snapshot, info.layout, info.height);
-    if (target === undefined) return;
-    ui.graphScrollTarget = target;
-  }
-
   function draw() {
     if (closing) return;
     // A modal help overlay is static. Skipping the full-frame repaint here
     // avoids visible tearing/flicker in terminals that repaint partial frames.
-    if (ui.help && helpFrameDrawn) return;
+    if (ui.help && session.helpFrameDrawn) return;
     if (drawing) { again = true; return; }
     drawing = true;
     try {
@@ -1375,22 +1039,22 @@ export async function createViewer(options = {}, deps = {}) {
       if (demoMode && engine) {
         if (demoSnapshotDue(now, lastDemoAccept)) {
           lastDemoAccept = now;
-          acceptSnapshot(engine.snapshot(now));
+          session.acceptSnapshot(engine.snapshot(now));
         }
       }
       const width = terminalWidth();
       const height = terminalHeight();
       const structural = structuralFor(width, {
-        expanded: ui.expanded, sidebar: sidebarEnabled(),
+        expanded: ui.expanded, sidebar: session.sidebarEnabled(),
       });
       // N3: duty has no graph/task pane, so a graph/tasks focus inherited from a
       // wide frame lands on the duty body. Explicit runs/cells focus survives.
       applyFocus(vm, ui.focus, structural, vm.frame?.scroll);
-      ensureSelection();
-      if (ui.follow && snapshot?.connected) follow(now);
+      session.ensureSelection();
+      if (ui.follow && session.snapshot?.connected) session.follow(now);
       // Follow may repoint the subject; the overlay still owns focus until Esc.
       applyFocus(vm, ui.focus, structural, vm.frame?.scroll);
-      const nextDetailsKey = detailsSubjectKey(snapshot, ui);
+      const nextDetailsKey = detailsSubjectKey(session.snapshot, ui);
       if (ui.detailsKey !== nextDetailsKey) {
         ui.detailsKey = nextDetailsKey;
         ui.detailsScroll = 0;
@@ -1400,23 +1064,23 @@ export async function createViewer(options = {}, deps = {}) {
       const nextTaskRevealKey = `${ui.selectedTaskId ?? ''}|${ui.focus}`;
       if (ui.taskRevealKey !== nextTaskRevealKey) {
         ui.taskRevealKey = nextTaskRevealKey;
-        revealTaskSelection();
+        session.revealTaskSelection();
       }
-      const layoutInfo = graphLayoutInfo();
+      const layoutInfo = session.graphLayoutInfo();
       const graphVisible = structural === 'investigation';
-      scrollSelectedIntoView(layoutInfo);
+      session.scrollSelectedIntoView(layoutInfo);
       if (graphVisible) {
-        advanceScroll(ui, 'graph', maxGraphScroll(layoutInfo), elapsed, interactive);
+        advanceScroll(ui, 'graph', session.maxGraphScroll(layoutInfo), elapsed, interactive);
       }
       ui.toasts = ui.toasts.filter(toast => now - toast.at < 6500);
       applyPalette();
-      ui.fps = framePacingFps(snapshot, ui, {
+      ui.fps = framePacingFps(session.snapshot, ui, {
         demoMode, pagerActive, width, preferredFps: fps, now, frameCostMs: ui.frameCostMs,
       });
       const renderStart = Date.now();
       const result = renderApp(vm, {
         width, height, time: now - startAt, now, palette, theme,
-        graphLayout: layoutInfo?.layout, sidebar: sidebarEnabled(), buffers: frameBuffers,
+        graphLayout: layoutInfo?.layout, sidebar: session.sidebarEnabled(), buffers: frameBuffers,
       });
       ui.frameCostMs = Date.now() - renderStart;
       attachFrame(vm, result);
@@ -1427,96 +1091,11 @@ export async function createViewer(options = {}, deps = {}) {
       } else {
         write(result.text + '\n');
       }
-      helpFrameDrawn = ui.help;
+      session.helpFrameDrawn = ui.help;
     } finally {
       drawing = false;
       if (again) { again = false; void draw(); }
     }
-  }
-
-  async function syncViewState(generation) {
-    const sessionKey = viewSessionKey(snapshot);
-    if (!statePath || !sessionKey) {
-      viewState = undefined;
-      viewStateSessionId = undefined;
-      return;
-    }
-    if (viewStateSessionId === sessionKey) return;
-    try {
-      const loaded = await loadViewStateFn(statePath, sessionKey);
-      if (generation !== undefined && generation !== loadGeneration) return;
-      viewState = loaded;
-      viewStateSessionId = sessionKey;
-      // Saved fold keys are per (run,node). Load a set for every visible run so
-      // switching runs never borrows another run's same-id folds.
-      const runs = snapshot?.runs ?? [];
-      ui.foldedByRun = new Map(runs.map(run => [run.id, foldedFromView(viewState, run.id)]));
-      const runId = runs[ui.runIndex]?.id;
-      ui.foldedRunId = runId;
-      ui.folded = new Set(runId === undefined ? [] : ui.foldedByRun.get(runId) ?? []);
-      requestRepaint();
-    } catch (error) {
-      if (generation !== undefined && generation !== loadGeneration) return;
-      viewState = undefined;
-      viewStateSessionId = undefined;
-      addToast(t(ui.language, 'toastViewPreferences', { error: error.message }), 'failed');
-    }
-  }
-
-  async function loadState(silent = false) {
-    const generation = ++loadGeneration;
-    let raw;
-    try {
-      raw = await readStateFileFn(statePath);
-    } catch (error) {
-      if (generation !== loadGeneration) return { kind: 'stale', loaded: false };
-      const failure = readFailureEvidence(snapshot, error);
-      lastReadError = failure.lastReadError;
-      if (failure.placeholder) snapshot = fullSnapshot = failure.placeholder;
-      viewState = undefined;
-      viewStateSessionId = undefined;
-      if (!silent) addToast(t(ui.language, 'toastSnapshotError', { error: error.message }), 'failed');
-      requestRepaint();
-      return { kind: 'unreadable', loaded: false, error };
-    }
-    if (generation !== loadGeneration) return { kind: 'stale', loaded: false };
-
-    let bounded;
-    try {
-      bounded = boundSnapshotInput(raw);
-    } catch (error) {
-      if (!(error instanceof ViewerSnapshotError)) throw error;
-      if (generation !== loadGeneration) return { kind: 'stale', loaded: false };
-      const invalid = new ViewerSnapshotError(`invalid snapshot: ${error.message}`);
-      const failure = readFailureEvidence(snapshot, invalid);
-      lastReadError = failure.lastReadError;
-      if (failure.placeholder) snapshot = fullSnapshot = failure.placeholder;
-      viewState = undefined;
-      viewStateSessionId = undefined;
-      if (!silent) addToast(t(ui.language, 'toastInvalidSnapshot'), 'failed');
-      requestRepaint();
-      return { kind: 'invalid', loaded: false, error: invalid };
-    }
-    if (generation !== loadGeneration) return { kind: 'stale', loaded: false };
-
-    // Programming errors from normalization are not read failures; they reach
-    // the fatal handlers instead of being disguised as an unreadable file.
-    const loaded = acceptSnapshot(bounded, { silent, view: once ? 'once' : 'watch' });
-    if (generation !== loadGeneration) return { kind: 'stale', loaded: false };
-    if (!loaded) {
-      const invalid = new ViewerSnapshotError('snapshot failed schema validation');
-      const failure = readFailureEvidence(snapshot, invalid);
-      lastReadError = failure.lastReadError;
-      if (failure.placeholder) snapshot = fullSnapshot = failure.placeholder;
-      viewState = undefined;
-      viewStateSessionId = undefined;
-      requestRepaint();
-      return { kind: 'invalid', loaded: false, error: invalid };
-    }
-    lastReadError = undefined;
-    await syncViewState(generation);
-    if (generation !== loadGeneration) return { kind: 'stale', loaded: false };
-    return { kind: 'ok', loaded: true };
   }
 
   function restoreTerminal() {
@@ -1550,7 +1129,7 @@ export async function createViewer(options = {}, deps = {}) {
       await withDeadline(childExit(child), 100, { timeout: true });
       try { child.kill('SIGKILL'); } catch { /* already gone */ }
     }
-    await flushPendingWrites();
+    await session.flushPendingWrites();
     restoreTerminal();
     if (closePane && closePaneId) {
       try {
@@ -1566,77 +1145,9 @@ export async function createViewer(options = {}, deps = {}) {
     if (ui.mouseCapture === enabled) return;
     ui.mouseCapture = enabled;
     if (interactive || process.stdout.isTTY) process.stdout.write(mouseTrackingSequence(enabled));
-    addToast(t(ui.language, enabled ? 'toastMouseControls' : 'toastMouseSelection'), enabled ? 'info' : 'warning');
-    helpFrameDrawn = false;
+    session.addToast(t(ui.language, enabled ? 'toastMouseControls' : 'toastMouseSelection'), enabled ? 'info' : 'warning');
+    session.helpFrameDrawn = false;
     void draw();
-  }
-
-  function refreshHiddenSnapshot() {
-    snapshot = hiddenSnapshot(fullSnapshot, {
-      runIds: ui.hiddenRunIds, taskIds: ui.hiddenTaskIds,
-    });
-    ensureSelection();
-    helpFrameDrawn = false;
-    void draw();
-  }
-
-  function clearCompleted() {
-    const source = fullSnapshot ?? snapshot;
-    const items = completedItems(source, { now: Date.now() });
-    const runs = items.runs.filter(run => !ui.hiddenRunIds.has(run.id));
-    const tasks = items.tasks.filter(task => !ui.hiddenTaskIds.has(task.id));
-    if (!runs.length && !tasks.length) {
-      addToast(t(ui.language, 'toastNoCompleted'), 'info');
-      return;
-    }
-    ui.undoClear = {
-      runs: runs.map(run => run.id),
-      tasks: tasks.map(task => task.id),
-    };
-    for (const run of runs) ui.hiddenRunIds.add(run.id);
-    for (const task of tasks) ui.hiddenTaskIds.add(task.id);
-    addToast(`${t(ui.language, 'toastClearedCompleted', { runs: runs.length, tasks: tasks.length })} · ${t(ui.language, 'undoClear')}`, 'info');
-    refreshHiddenSnapshot();
-  }
-
-  function undoCleared() {
-    const last = ui.undoClear;
-    if (!last) {
-      addToast(t(ui.language, 'toastNoHidden'), 'info');
-      return;
-    }
-    for (const id of last.runs) ui.hiddenRunIds.delete(id);
-    for (const id of last.tasks) ui.hiddenTaskIds.delete(id);
-    ui.undoClear = null;
-    addToast(t(ui.language, 'undoRestored'), 'info');
-    refreshHiddenSnapshot();
-  }
-
-  function restoreHidden() {
-    const runs = ui.hiddenRunIds.size;
-    const tasks = ui.hiddenTaskIds.size;
-    if (!runs && !tasks) {
-      addToast(t(ui.language, 'toastNoHidden'), 'info');
-      return;
-    }
-    ui.hiddenRunIds.clear();
-    ui.hiddenTaskIds.clear();
-    addToast(t(ui.language, 'toastRestoredCompleted', { runs, tasks }), 'info');
-    refreshHiddenSnapshot();
-  }
-
-  function cycle(direction) {
-    const owner = ui.expanded
-      ? (ui.lastFocus === 'tasks' ? 'tasks' : 'graph')
-      : (ui.focus === 'tasks' ? 'tasks' : 'graph');
-    if (owner === 'tasks') cycleTaskSelection(direction);
-    else selectNode(vm, direction);
-    // Expansion is an overlay, not a focus destination: cycling keeps details
-    // in front and only moves the subject underneath it.
-    if (ui.expanded) {
-      ui.focus = 'details';
-      ui.lastFocus = owner;
-    }
   }
 
   function childExit(child) {
@@ -1669,7 +1180,7 @@ export async function createViewer(options = {}, deps = {}) {
   async function openRecordInPager(path) {
     const pager = pagerCommandFn(process.env);
     if (!pager) {
-      addToast(t(ui.language, 'diagnosisNoPager'), 'warning');
+      session.addToast(t(ui.language, 'diagnosisNoPager'), 'warning');
       return;
     }
     let prepared;
@@ -1678,7 +1189,7 @@ export async function createViewer(options = {}, deps = {}) {
     try {
       prepared = await preparePagerRecord(path);
       if (!prepared) {
-        addToast(t(ui.language, 'diagnosisOpenUnavailable'), 'warning');
+        session.addToast(t(ui.language, 'diagnosisOpenUnavailable'), 'warning');
         return;
       }
       restoreTerminal();
@@ -1693,12 +1204,12 @@ export async function createViewer(options = {}, deps = {}) {
         child.kill('SIGTERM');
         await withDeadline(exit, 250, { timeout: true });
         child.kill('SIGKILL');
-        addToast(t(ui.language, 'diagnosisOpenFailed'), 'warning');
+        session.addToast(t(ui.language, 'diagnosisOpenFailed'), 'warning');
       } else if (result.error || result.status !== 0) {
-        addToast(t(ui.language, 'diagnosisOpenFailed'), 'warning');
+        session.addToast(t(ui.language, 'diagnosisOpenFailed'), 'warning');
       }
     } catch {
-      addToast(t(ui.language, 'diagnosisOpenFailed'), 'warning');
+      session.addToast(t(ui.language, 'diagnosisOpenFailed'), 'warning');
     } finally {
       pagerChild = undefined;
       if (prepared) await rm(prepared.dir, { recursive: true, force: true }).catch(() => {});
@@ -1706,315 +1217,10 @@ export async function createViewer(options = {}, deps = {}) {
       if (!closing && interactive) {
         enterTerminal();
         ignoreKeysUntil = Date.now() + 300;
-        helpFrameDrawn = false;
+        session.helpFrameDrawn = false;
         requestFrame();
       }
     }
-  }
-
-  function handleDiagnosisKey(key) {
-    if (!['c', 'p', 'o'].includes(key)) return false;
-    if (key === 'o') {
-      // Opening a raw record is status-independent: a completed task has no
-      // diagnosis card, but its record is still the only place the full
-      // final_response survives. The same safe-file gates apply to every status.
-      const record = recordForSelection(snapshot, ui);
-      if (!record) {
-        addToast(t(ui.language, 'diagnosisNothing'), 'warning');
-        return true;
-      }
-      const action = recordForKey('o', record);
-      if (action.kind === 'open') void openRecordInPager(action.path);
-      else addToast(t(ui.language, 'diagnosisOpenUnavailable'), 'warning');
-      return true;
-    }
-    const diagnosis = diagnosisForSelection(snapshot, ui);
-    if (!diagnosis) {
-      addToast(t(ui.language, 'diagnosisNothing'), 'warning');
-      return true;
-    }
-    // The copied bundle is the artifact the user keeps, so it must use the
-    // same UI language as the diagnosis panel.
-    const action = diagnosisForKeyFn(key, diagnosis, undefined, ui.language);
-    if (!action) return false;
-    if (action.kind === 'copy-diagnosis' || action.kind === 'copy-paths') {
-      if (!interactive || !process.stdout.isTTY) {
-        addToast(t(ui.language, 'diagnosisCopyUnavailable'), 'warning');
-        return true;
-      }
-      process.stdout.write(osc52(action.text));
-      addToast(t(ui.language, 'diagnosisCopied', { lines: payloadLines(action.text) }), 'info');
-    } else {
-      addToast(t(ui.language, action.reason === 'no-paths' ? 'diagnosisNoPaths' : 'diagnosisOpenUnavailable'), 'warning');
-    }
-    return true;
-  }
-
-  function handleSwitcherKey(key, pressed) {
-    const action = resolveKey(SWITCHER_KEYMAP, key, pressed);
-    if (!action) return;
-    switch (action.id) {
-      case 'quit':
-        void close({ closePane: true });
-        return;
-      case 'close':
-        ui.switcher = null;
-        return;
-      case 'move':
-        moveSwitcherSelection(action.value);
-        return;
-      case 'confirm':
-        confirmSwitcher(undefined);
-        return;
-      case 'backspace': {
-        const query = ui.switcher.query.slice(0, -1);
-        ui.switcher = { ...ui.switcher, query };
-        return;
-      }
-      case 'clearQuery':
-        ui.switcher = { ...ui.switcher, query: '' };
-        return;
-      case 'type':
-        ui.switcher = { ...ui.switcher, query: `${ui.switcher.query}${action.value}` };
-        return;
-      default:
-        // '/' and every unconsumed key are modal no-ops: the switcher owns the
-        // keyboard while it is open.
-        return;
-    }
-  }
-
-  function handleTourKey(key, pressed) {
-    const action = resolveKey(TOUR_KEYMAP, key, pressed);
-    if (action?.id === 'close') { ui.tour = 0; return; }
-    if (action?.id === 'advance') { ui.tour = ui.tour >= 5 ? 0 : ui.tour + 1; }
-  }
-
-  function handleHelpKey(key, pressed) {
-    const metrics = helpScrollMetrics(terminalHeight());
-    const action = helpKeyAction(key, pressed, metrics);
-    if (action === 'close') {
-      ui.help = false;
-      ui.helpScroll = 0;
-      helpFrameDrawn = false;
-      void draw();
-    } else if (action === 'scroll' && applyHelpScroll(ui, key, pressed, metrics)) {
-      helpFrameDrawn = false;
-      void draw();
-    }
-  }
-
-  function handleSettingsKey(key, pressed) {
-    const action = resolveKey(SETTINGS_KEYMAP, key, pressed);
-    if (!action) return;
-    if (action.id === 'close') { ui.settingsMenu = false; return; }
-    if (action.id === 'cycle') {
-      ui.settingsIndex = (ui.settingsIndex + action.value + 3) % 3;
-      return;
-    }
-    if (action.id === 'apply') applySetting(ui.settingsIndex);
-  }
-
-  const MODAL_HANDLERS = {
-    switcher: handleSwitcherKey,
-    palette: handlePaletteKey,
-    tour: handleTourKey,
-    help: handleHelpKey,
-    settings: handleSettingsKey,
-  };
-
-  // Ordered modal dispatch: an open modal owns every key, and the first active
-  // row in MODAL_ORDER wins. Global keys never fire underneath an overlay
-  // unless the row explicitly yields that key (Settings yields the quit keys).
-  function dispatchModal(key, pressed) {
-    for (const modal of MODAL_ORDER) {
-      if (!modal.active(ui)) continue;
-      if (modal.preemptedBy?.(key, pressed)) continue;
-      MODAL_HANDLERS[modal.id](key, pressed);
-      return true;
-    }
-    return false;
-  }
-
-  function runGlobalAction({ id, value }, key, pressed) {
-    switch (id) {
-      case 'quit':
-        void close({ closePane: true });
-        return true;
-      case 'escape': {
-        if (ui.graphFilter !== 'all' || ui.graphFocus) {
-          ui.graphFilter = 'all';
-          ui.graphFocus = undefined;
-          return true;
-        }
-        const collapsed = collapseTransition(ui);
-        if (collapsed) Object.assign(ui, collapsed);
-        return true;
-      }
-      case 'runOverviewBack': {
-        const run = snapshot?.runs?.[ui.runIndex];
-        if (!run) return false;
-        selectRun(vm, run.id, { overview: true });
-        return true;
-      }
-      case 'graphFilter':
-        ui.graphFilter = ['all', 'failed', 'blocked', 'running', 'critical'][value];
-        ui.graphFocus = undefined;
-        return true;
-      case 'focusNode': {
-        const run = snapshot?.runs[ui.runIndex];
-        if (!run?.nodes?.length) return true;
-        if (ui.graphFocus) {
-          ui.graphFocus = undefined;
-          return true;
-        }
-        const nodeId = ui.selectedNodeId ?? run.nodes[0].id;
-        ui.selectedNodeId = nodeId;
-        ui.runOverview = false;
-        ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
-        ui.selectedTaskUnlinked = false;
-        ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
-        ui.graphFocus = nodeId;
-        ui.follow = false;
-        ui.followTarget = undefined;
-        return true;
-      }
-      case 'stepNode':
-        stepGraphNode(value);
-        return true;
-      case 'undo':
-        undoCleared();
-        return true;
-      case 'palette':
-        openPalette();
-        return true;
-      case 'help':
-        ui.help = !ui.help;
-        ui.helpScroll = 0;
-        helpFrameDrawn = false;
-        return true;
-      case 'settings':
-        openSettingsMenu();
-        return true;
-      case 'mouseCapture':
-        setMouseCapture(!ui.mouseCapture);
-        return true;
-      case 'clearCompleted':
-        clearCompleted();
-        return true;
-      case 'restoreHidden':
-        restoreHidden();
-        return true;
-      case 'sidebar':
-        if (terminalWidth() >= 112) {
-          ui.sidebar = !ui.sidebar;
-          addToast(t(ui.language, ui.sidebar ? 'toastSidebarOn' : 'toastSidebarOff'), 'info');
-        } else addToast(t(ui.language, 'toastSidebarHidden'), 'warning');
-        return true;
-      case 'follow':
-        ui.follow = !ui.follow;
-        if (ui.follow) {
-          ui.runPinned = false;
-          follow();
-        }
-        addToast(t(ui.language, ui.follow ? 'toastFollowOn' : 'toastFollowOff'), 'info');
-        return true;
-      case 'demoReset':
-        engine.reset();
-        ui.hiddenRunIds.clear();
-        ui.hiddenTaskIds.clear();
-        ui.toasts = [];
-        addToast(t(ui.language, 'toastDemoReset'), 'warning');
-        return true;
-      case 'verbose': {
-        const structural = vm.frame?.layout?.layout ?? structuralFor(terminalWidth(), {
-          expanded: ui.expanded, sidebar: sidebarEnabled(),
-        });
-        if (!detailsVerboseAvailable(structural)) {
-          addToast(t(ui.language, 'toastDetailsWideOnly'), 'warning');
-          return true;
-        }
-        ui.verbose = !ui.verbose;
-        addToast(t(ui.language, ui.verbose ? 'toastDetailsVerbose' : 'toastDetailsCompact'), 'info');
-        return true;
-      }
-      case 'dutyFocus': {
-        const structural = vm.frame?.layout?.layout ?? structuralFor(terminalWidth(), {
-          expanded: ui.expanded, sidebar: sidebarEnabled(),
-        });
-        applyFocus(vm, value.focus, structural, vm.frame?.scroll);
-        helpFrameDrawn = false;
-        return true;
-      }
-      case 'diagnosis':
-        return handleDiagnosisKey(key);
-      case 'expand':
-        if (!ui.expanded) Object.assign(ui, expandTransition(ui));
-        return true;
-      case 'switcher':
-        openSwitcher();
-        return true;
-      case 'completed':
-        ui.completedCollapsed = !ui.completedCollapsed;
-        ui.tasksScroll = 0;
-        ui.tasksScrollTarget = 0;
-        return true;
-      case 'taskScope': {
-        const structural = structuralFor(terminalWidth(), {
-          expanded: ui.expanded, sidebar: sidebarEnabled(),
-        });
-        if (structural !== 'investigation' || !sidebarEnabled() || ui.expanded) {
-          openSwitcher();
-          return true;
-        }
-        ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
-        ui.tasksScroll = 0;
-        ui.tasksScrollTarget = 0;
-        return true;
-      }
-      case 'cycle':
-        cycle(value);
-        return true;
-      case 'switchRun':
-        switchRun(value);
-        return true;
-      case 'keyboardScroll':
-        return dispatchKeyboardScroll(key, pressed);
-      case 'detailsSection':
-        jumpDetailsSection(value);
-        return true;
-      case 'detailsToggle':
-        toggleDetailsSection();
-        return true;
-      case 'fold':
-        foldSelectedNode();
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  function handleGlobalKey(key, pressed) {
-    for (const hit of matchingKeys(GLOBAL_KEYMAP, key, pressed, { ui, context: { demoMode } })) {
-      if (runGlobalAction(hit, key, pressed) !== false) return;
-    }
-  }
-
-  function handleKey(text, pressed) {
-    if (pagerActive) return;
-    const key = keyToken(text, pressed);
-    // Dismissal is exempt from the close/pointer debounce: Esc must always
-    // close Help or Settings, even while a mouse report is still settling.
-    if (isEscapeKey(key, pressed) && (ui.settingsMenu || ui.help)) {
-      ui.settingsMenu = false;
-      ui.help = false;
-      ui.helpScroll = 0;
-      helpFrameDrawn = false;
-      return;
-    }
-    if (closing || Date.now() < ignoreKeysUntil || Date.now() < mousePendingUntil) return;
-    if (dispatchModal(key, pressed)) return;
-    handleGlobalKey(key, pressed);
   }
 
   function scheduleWatchRetry() {
@@ -2028,7 +1234,7 @@ export async function createViewer(options = {}, deps = {}) {
       setupFileWatch();
       // Re-read after re-establishing: the file may have changed while the
       // watch was dead. loadState's generation guard drops any stale overlap.
-      void loadState(true);
+      void session.loadState(true);
     }, watchRetryDelay(attempt, { base: watchRetryBaseMs }));
   }
 
@@ -2039,15 +1245,15 @@ export async function createViewer(options = {}, deps = {}) {
       watcher = watchFn(dirname(statePath), (_event, name) => {
         if (name && String(name) !== basename(statePath)) return;
         clearTimeout(watchTimer);
-        watchTimer = setTimeout(() => { void loadState(); }, 50);
+        watchTimer = setTimeout(() => { void session.loadState(); }, 50);
       });
       watcher.on('error', error => {
-        addToast(t(ui.language, 'toastWatchError', { error: error.message }), 'failed');
+        session.addToast(t(ui.language, 'toastWatchError', { error: error.message }), 'failed');
         scheduleWatchRetry();
       });
       watchAttempt = 0;
     } catch (error) {
-      addToast(t(ui.language, 'toastWatchUnavailable', { error: error.message }), 'warning');
+      session.addToast(t(ui.language, 'toastWatchUnavailable', { error: error.message }), 'warning');
       scheduleWatchRetry();
     }
   }
@@ -2055,7 +1261,7 @@ export async function createViewer(options = {}, deps = {}) {
   let frameDeadline = 0;
 
   function frameDelay() {
-    return frameIntervalMs(framePacingFps(snapshot, ui, {
+    return frameIntervalMs(framePacingFps(session.snapshot, ui, {
       demoMode, pagerActive, width: terminalWidth(), preferredFps: fps,
     }), ui.motion);
   }
@@ -2094,14 +1300,14 @@ export async function createViewer(options = {}, deps = {}) {
 
   async function main() {
     if (demoMode) {
-      acceptSnapshot(engine.snapshot(Date.now()), { silent: true });
-      ensureSelection();
-      if (ui.follow) follow();
+      session.acceptSnapshot(engine.snapshot(Date.now()), { silent: true });
+      session.ensureSelection();
+      if (ui.follow) session.follow();
     } else if (statePath) {
       // Watch first: a one-shot producer may replace the snapshot while the
       // initial read or view-state load is still in flight.
       const result = await loadInitialSnapshot({
-        statePath, interactive, setupWatch: setupFileWatch, load: () => loadState(true),
+        statePath, interactive, setupWatch: setupFileWatch, load: () => session.loadState(true),
       });
       if (result.kind === 'unreadable' && once) {
         console.error(`dag-studio: cannot read snapshot: ${statePath}: ${result.error?.message ?? 'unknown error'}`);
@@ -2114,14 +1320,11 @@ export async function createViewer(options = {}, deps = {}) {
         return;
       }
       if (result.kind !== 'ok') {
-        snapshot = fullSnapshot = failedReadPlaceholder(statePath, lastReadError, {
-          view: once ? 'once' : 'watch',
-        });
-        ensureSelection();
-        if (result.kind === 'invalid') addToast(t(ui.language, 'toastInvalidSnapshot'), 'failed');
-        else addToast(t(ui.language, 'toastWaitingSnapshot'), 'warning');
-      } else if (snapshot.mode === 'saved' && !snapshot.runs.length) {
-        addToast(t(ui.language, 'toastSavedSnapshotEmpty'), 'warning');
+        session.showPlaceholder(once ? 'once' : 'watch');
+        if (result.kind === 'invalid') session.addToast(t(ui.language, 'toastInvalidSnapshot'), 'failed');
+        else session.addToast(t(ui.language, 'toastWaitingSnapshot'), 'warning');
+      } else if (session.snapshot.mode === 'saved' && !session.snapshot.runs.length) {
+        session.addToast(t(ui.language, 'toastSavedSnapshotEmpty'), 'warning');
       }
     } else {
       console.error('dag-studio: use --demo or --state PATH. See --help.');
@@ -2146,16 +1349,16 @@ export async function createViewer(options = {}, deps = {}) {
       // Keep stdin in Buffer mode: raw X10 mouse payload bytes must reach
       // onRawInput unchanged. emitKeypressEvents decodes its own UTF-8 copy
       // for the key handler.
-      process.stdin.on('data', onRawInput);
+      process.stdin.on('data', input.onRawInput);
       // readline otherwise waits 500ms for a possible escape sequence before
       // emitting a lone Esc, which makes modal dismissal feel unresponsive.
       emitKeypressEvents(process.stdin, { escapeCodeTimeout: 30 });
       process.stdin.on('keypress', (text, pressed) => {
-        handleKey(text, pressed);
+        input.handleKey(text, pressed);
         requestFrame();
       });
       process.stdout.on('resize', () => {
-        helpFrameDrawn = false;
+        session.helpFrameDrawn = false;
         requestFrame();
       });
       process.on('SIGTERM', () => { void close(); });
@@ -2173,22 +1376,22 @@ export async function createViewer(options = {}, deps = {}) {
   return {
     ui,
     options: { demoMode, statePath, once, interactive, paneMode, closePaneId },
-    get snapshot() { return snapshot; },
-    get fullSnapshot() { return fullSnapshot; },
+    get snapshot() { return session.snapshot; },
+    get fullSnapshot() { return session.fullSnapshot; },
     get lastRender() { return vm.frame; },
-    get graphLayoutCacheStats() { return graphLayoutCache.stats(); },
-    acceptSnapshot,
+    get graphLayoutCacheStats() { return session.graphLayoutCacheStats; },
+    acceptSnapshot: session.acceptSnapshot,
     draw,
-    handleKey,
-    onMouseEvent,
-    onRawInput,
-    selectAt,
-    confirmSwitcher,
-    openSwitcher,
-    ensureSelection,
-    loadState,
+    handleKey: input.handleKey,
+    onMouseEvent: input.onMouseEvent,
+    onRawInput: input.onRawInput,
+    selectAt: input.selectAt,
+    confirmSwitcher: session.confirmSwitcher,
+    openSwitcher: session.openSwitcher,
+    ensureSelection: session.ensureSelection,
+    loadState: session.loadState,
     setupFileWatch,
-    flushPendingWrites,
+    flushPendingWrites: session.flushPendingWrites,
     restoreTerminal,
     openRecordInPager,
     start: main,
