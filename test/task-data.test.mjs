@@ -741,6 +741,68 @@ test('with no readable root the cached snapshot survives and never looks live', 
   assert.equal(data.sources[0].status, 'missing');
 });
 
+test('a store root that cannot be canonicalized is reported once and stays visible', async t => {
+  const base = await tempStore(t, 'dag-store-loop-');
+  const loop = join(base, 'loop');
+  await symlink(loop, loop);
+
+  const problems = [];
+  const roots = resolveTaskStateDirs({
+    cwd: base,
+    env: { OMO_HERDR_DAG_STUDIO_TASK_STATE_DIR: loop },
+    onProblem: problem => problems.push(problem),
+  });
+  assert.equal(problems.length, 1);
+  assert.equal(problems[0].phase, 'canonical-path');
+  assert.equal(problems[0].error.code, 'ELOOP');
+  assert.match(roots[0].error, /ELOOP/);
+
+  const messages = [];
+  const data = new TaskData({
+    sessionId, stateDirs: [descriptor(loop, 'explicit', 'explicit store')],
+    notify: message => messages.push(message),
+  });
+  assert.equal(messages.length, 1, 'canonicalization failure warns at construction');
+  assert.match(messages[0], /ELOOP/);
+  assert.ok(messages[0].length <= 2048, 'warning is bounded');
+
+  assert.deepEqual(await data.refresh(), []);
+  assert.equal(data.sources[0].status, 'unreadable');
+  assert.match(data.sources[0].error, /ELOOP/);
+  assert.equal(messages.length, 1, 'refresh does not repeat the same store warning');
+});
+
+test('an unreadable legacy store probe warns once instead of silently dropping the store', async t => {
+  const agentDir = await tempStore(t, 'dag-agent-probe-');
+  const cwd = await tempStore(t, 'dag-agent-cwd-');
+  await mkdir(join(agentDir, 'senpi-task'), { recursive: true });
+  // A file where the tasks directory belongs makes the probe fail with ENOTDIR
+  // deterministically, including on root-owned CI where chmod cannot deny read.
+  await writeFile(join(agentDir, 'senpi-task', 'tasks'), 'not a directory');
+
+  const messages = [];
+  const data = new TaskData({
+    cwd, sessionId: 'session-probe-warn', env: { OMO_CODING_AGENT_DIR: agentDir },
+    notify: message => messages.push(message),
+  });
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /ENOTDIR/);
+  assert.ok(messages[0].length <= 2048, 'warning is bounded');
+  assert.equal(data.directories.some(directory => directory.origin === 'agent'), false);
+
+  const problems = [];
+  const roots = resolveTaskStateDirs({
+    cwd, sessionId: 'session-probe-report',
+    env: { OMO_CODING_AGENT_DIR: agentDir },
+    onProblem: problem => problems.push(problem),
+  });
+  assert.equal(problems.length, 1);
+  assert.equal(problems[0].phase, 'probe');
+  assert.equal(problems[0].error.code, 'ENOTDIR');
+  assert.equal(roots.some(root => root.origin === 'agent'), false);
+  assert.equal(roots.some(root => root.origin === 'agent-project'), true);
+});
+
 test('invalid and unreadable task files are counted without aborting the store', async t => {
   const repo = await tempStore(t, 'dag-repo-');
   await seed(repo, {

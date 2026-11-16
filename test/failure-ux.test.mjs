@@ -440,6 +440,59 @@ test('artifact paths that escape the record root are never displayed or copied',
   }
 });
 
+test('a rejected artifact keeps its reason and never becomes openable', t => {
+  const root = makeStore();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const snapshot = fixture({
+    root,
+    node: {
+      resultArtifact: {
+        relativePath: '../../etc/passwd',
+        bytes: 12,
+        sha256: 'deadbeef',
+        stats: { relativePath: '../../etc/shadow', bytes: 4 },
+      },
+    },
+  });
+  const node = snapshot.runs[0].nodes.find(candidate => candidate.id === 'ship');
+  const task = snapshot.tasks.find(candidate => candidate.id === 'st_fail');
+  const diagnosis = diagnosisFor({ snapshot, run: snapshot.runs[0], node, task, subject: 'node' });
+
+  assert.equal(diagnosis.artifact.rejected, 'unsafe-path');
+  assert.equal(diagnosis.artifact.absolute, undefined);
+  const copy = diagnosisCopyText(diagnosis);
+  assert.match(copy, /artifact: not recorded \(unsafe-path\)/);
+  assert.doesNotMatch(copy, /etc\/passwd|etc\/shadow/);
+  const text = detailsText(render(snapshot, {}, { width: 120, height: 40 }));
+  // Compact evidence row: the reason token is painted even when the row has no
+  // room for the full "artifact" label; the copy bundle keeps both.
+  assert.match(text, /unsafe-path/);
+
+  // The open action still resolves a raw task record, never the artifact.
+  const action = diagnosisForKey('o', diagnosis);
+  assert.equal(action.kind, 'open');
+  assert.match(action.path, /tasks\/st_fail\.json$/);
+  // The safe-open gate is unchanged: non-JSON and escaping targets stay closed.
+  writeFileSync(join(root, 'tasks', 'st_fail.txt'), '{}');
+  assert.equal(safeFileWithin(root, join(root, 'tasks', 'st_fail.txt')), undefined);
+  assert.equal(safeFileWithin(root, join(root, '../../etc/passwd')), undefined);
+});
+
+test('an artifact without a recorded path says not-recorded instead of demoting silently', t => {
+  const root = makeStore();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const snapshot = fixture({ root, node: { resultArtifact: { bytes: 12, sha256: 'deadbeef' } } });
+  const node = snapshot.runs[0].nodes.find(candidate => candidate.id === 'ship');
+  const task = snapshot.tasks.find(candidate => candidate.id === 'st_fail');
+  const diagnosis = diagnosisFor({ snapshot, run: snapshot.runs[0], node, task, subject: 'node' });
+
+  assert.equal(diagnosis.artifact.rejected, 'not-recorded');
+  assert.equal(diagnosis.artifact.absolute, undefined);
+  assert.match(diagnosisCopyText(diagnosis), /artifact: not recorded \(not-recorded\)/);
+  const text = detailsText(render(snapshot, {}, { width: 120, height: 40 }));
+  assert.match(text, /not-recorded/);
+});
+
 test('diagnosis copy and path bundles strip terminal control characters', t => {
   const root = makeStore();
   t.after(() => rmSync(root, { recursive: true, force: true }));

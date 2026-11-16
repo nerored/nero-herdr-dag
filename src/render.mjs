@@ -1705,7 +1705,15 @@ function diagnosisRecordText(diagnosis, language, record) {
 
 function diagnosisEvidenceText(diagnosis, width, language) {
   const artifact = diagnosis.artifact;
-  if (!artifact?.display) return { text: t(language, 'diagnosisArtifactMissing'), missing: true };
+  if (!artifact?.display) {
+    // A rejected path keeps its reason in the frame. The reason token is short
+    // enough for the narrow evidence row; the copy bundle spells out the full
+    // "not recorded (reason)" line.
+    return {
+      text: artifact?.rejected ?? t(language, 'diagnosisArtifactMissing'),
+      missing: true,
+    };
+  }
   const path = width < 40 ? artifact.name : artifact.display;
   const size = formatBytes(artifact.bytes);
   let text = size ? t(language, 'diagnosisArtifact', { path, size }) : path;

@@ -51,16 +51,21 @@ function artifactEntry(root, artifact) {
   // statsPath crosses the same Windows/POSIX boundary as relativePath, so the
   // separator normalization must happen before the relative-path gate.
   const rawStats = typeof artifact.statsPath === 'string' ? artifact.statsPath.replaceAll('\\', '/') : undefined;
-  if (!raw || !SAFE_RELATIVE.test(raw)) {
-    return defined({
-      bytes: artifact.bytes,
-      sha256: artifact.sha256,
-      statsBytes: artifact.statsBytes,
-    });
-  }
+  // A rejected path keeps its reason instead of collapsing to the same shape
+  // as an artifact the producer never recorded. The reason is rendered next to
+  // the existing not-recorded line; it never becomes displayable or openable.
+  const rejection = reason => defined({
+    rejected: reason,
+    bytes: artifact.bytes,
+    sha256: artifact.sha256,
+    statsBytes: artifact.statsBytes,
+  });
+  if (!raw) return rejection('not-recorded');
+  if (!SAFE_RELATIVE.test(raw)) return rejection('unsafe-path');
   const absolute = root ? resolve(root, raw) : undefined;
   const inside = !absolute || !root ? undefined
     : (absolute === resolve(root) || absolute.startsWith(`${resolve(root)}${sep}`));
+  if (root && !inside) return rejection('unsafe-path');
   const safeAbsolute = inside ? absolute : undefined;
   return defined({
     relativePath: raw,
@@ -318,7 +323,7 @@ export function diagnosisCopyText(diagnosis, language = 'en') {
     ...(diagnosis.reasonKind ? [`${messages.reasonKind}: ${diagnosis.reasonKind}`] : []),
     ...(artifact?.absolute
       ? [`${messages.artifact}: ${artifact.absolute} (${artifact.bytes ?? messages.sizeNotRecorded} ${messages.bytes}${artifact.sha256 ? `, sha256 ${artifact.sha256}` : ''})`]
-      : [`${messages.artifact}: ${messages.notRecorded}`]),
+      : [`${messages.artifact}: ${messages.notRecorded}${artifact?.rejected ? ` (${artifact.rejected})` : ''}`]),
     ...(artifact?.statsAbsolute ? [`${messages.artifactStats}: ${artifact.statsAbsolute}`] : []),
     ...recordRows(diagnosis).map(([key, absolute]) => pathLine(messages, recordLabel(key, messages), absolute)),
     `${messages.owner}: ${diagnosis.owner} (${messages.unavailableActions})`,

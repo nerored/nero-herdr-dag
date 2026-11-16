@@ -49,19 +49,29 @@ function pathValue(value) {
   return cleaned || expanded;
 }
 
+// A root that cannot be canonicalized still contributes a descriptor (the
+// absolute path is a safe fallback), but the failure is not discarded: the
+// descriptor carries a bounded reason and the caller reports it once. ENOENT
+// is the normal not-yet-created store, so it stays silent.
 function canonicalPath(value) {
   const absolute = resolve(pathValue(value) ?? value);
-  try { return realpathSync.native(absolute); }
-  catch { return absolute; }
+  try { return { root: realpathSync.native(absolute) }; }
+  catch (error) { return { root: absolute, error }; }
 }
 
-function rootDescriptor(root, origin = 'explicit', label = 'explicit store') {
+const ignorableRootError = error => error?.code === 'ENOENT';
+
+function rootDescriptor(root, origin = 'explicit', label = 'explicit store', report) {
   const canonical = canonicalPath(root);
+  const id = `${origin}-${createHash('sha256').update(canonical.root).digest('hex').slice(0, 8)}`;
+  const failed = canonical.error && !ignorableRootError(canonical.error);
+  if (failed) report?.({ id, root: canonical.root, phase: 'canonical-path', error: canonical.error });
   return {
-    id: `${origin}-${createHash('sha256').update(canonical).digest('hex').slice(0, 8)}`,
+    id,
     label,
     origin,
-    root: canonical,
+    root: canonical.root,
+    ...(failed ? { error: notifyText(canonical.error.message, 512) } : {}),
   };
 }
 
@@ -76,20 +86,18 @@ function dedupeRoots(descriptors) {
   return roots;
 }
 
-function normalizeDescriptors(list) {
+function normalizeDescriptors(list, report) {
   return dedupeRoots(list.map(entry => {
-    if (typeof entry === 'string') return rootDescriptor(entry, 'explicit', 'explicit store');
-    const descriptor = rootDescriptor(entry?.root ?? entry, entry?.origin ?? 'explicit', entry?.label ?? 'explicit store');
+    if (typeof entry === 'string') return rootDescriptor(entry, 'explicit', 'explicit store', report);
+    const descriptor = rootDescriptor(entry?.root ?? entry, entry?.origin ?? 'explicit', entry?.label ?? 'explicit store', report);
     return typeof entry?.id === 'string' && entry.id ? { ...descriptor, id: entry.id } : descriptor;
   }));
 }
 
 function explicitRoots(env) {
   const { taskStateDirs, taskStateDir } = readEnv(env);
-  if (taskStateDirs.length) {
-    return taskStateDirs.map(root => rootDescriptor(root, 'explicit', 'explicit store'));
-  }
-  return taskStateDir ? [rootDescriptor(taskStateDir, 'explicit', 'explicit store')] : [];
+  if (taskStateDirs.length) return taskStateDirs;
+  return taskStateDir ? [taskStateDir] : [];
 }
 
 function sessionRoot(sessionFile) {
@@ -108,12 +116,15 @@ function sessionRoot(sessionFile) {
 // itself is bounded so a large legacy store cannot stall session_start.
 const legacyProbes = new Map();
 
-function storeHasSessionTasks(root, sessionId) {
+function storeHasSessionTasks(root, sessionId, report) {
   if (!sessionId) return false;
   const directory = join(root, 'tasks');
   let mtimeMs;
   try { mtimeMs = statSync(directory).mtimeMs; }
-  catch { mtimeMs = undefined; }
+  catch (error) {
+    if (!ignorableRootError(error)) report?.({ root, phase: 'probe', error });
+    mtimeMs = undefined;
+  }
   const key = `${root}\u0000${sessionId}`;
   const cached = legacyProbes.get(key);
   if (cached && cached.mtimeMs === mtimeMs) return cached.found;
@@ -122,7 +133,10 @@ function storeHasSessionTasks(root, sessionId) {
   if (mtimeMs === undefined) return false;
   let files;
   try { files = readdirSync(directory); }
-  catch { return false; }
+  catch (error) {
+    if (!ignorableRootError(error)) report?.({ root, phase: 'probe', error });
+    return false;
+  }
   let examined = 0;
   for (const file of files) {
     if (!file.endsWith('.json')) continue;
@@ -190,7 +204,7 @@ async function readTaskRecord(directory, name) {
 // host project store. The project store is accepted only when `.omo/senpi-task`
 // carries the `.in-project` marker AND already holds a record for this session;
 // a cloned repository's arbitrary store still cannot feed DAG Studio data.
-function projectLocalRoot(cwd, sessionId) {
+function projectLocalRoot(cwd, sessionId, report) {
   if (!sessionId) return undefined;
   const working = pathValue(cwd);
   if (!working) return undefined;
@@ -201,25 +215,31 @@ function projectLocalRoot(cwd, sessionId) {
   } catch {
     return undefined;
   }
-  return storeHasSessionTasks(root, sessionId) ? root : undefined;
+  return storeHasSessionTasks(root, sessionId, report) ? root : undefined;
 }
 
-export function resolveTaskStateDirs({ sessionFile, env = process.env, cwd = process.cwd(), stateDirs, sessionId } = {}) {
-  if (Array.isArray(stateDirs) && stateDirs.length) return normalizeDescriptors(stateDirs);
+export function resolveTaskStateDirs({
+  sessionFile, env = process.env, cwd = process.cwd(), stateDirs, sessionId, onProblem,
+} = {}) {
+  if (Array.isArray(stateDirs) && stateDirs.length) return normalizeDescriptors(stateDirs, onProblem);
   const explicit = explicitRoots(env);
-  if (explicit.length) return normalizeDescriptors(explicit);
+  if (explicit.length) return normalizeDescriptors(explicit, onProblem);
 
   const candidates = [];
   const working = pathValue(cwd) ?? process.cwd();
-  const inProject = projectLocalRoot(working, sessionId);
-  if (inProject) candidates.push(rootDescriptor(inProject, 'session', 'project store'));
+  const inProject = projectLocalRoot(working, sessionId, onProblem);
+  if (inProject) candidates.push(rootDescriptor(inProject, 'session', 'project store', onProblem));
   const derived = sessionRoot(sessionFile);
-  if (derived) candidates.push(rootDescriptor(derived, 'session', 'session store'));
+  if (derived) candidates.push(rootDescriptor(derived, 'session', 'session store', onProblem));
   const { agentDir } = readEnv(env);
-  candidates.push(rootDescriptor(join(agentDir, 'projects', projectKey(working), 'senpi-task'), 'agent-project', 'host store'));
+  candidates.push(rootDescriptor(join(agentDir, 'projects', projectKey(working), 'senpi-task'), 'agent-project', 'host store', onProblem));
   const legacy = join(agentDir, 'senpi-task');
-  if (storeHasSessionTasks(legacy, sessionId)) candidates.push(rootDescriptor(legacy, 'agent', 'agent store'));
-  return normalizeDescriptors(candidates);
+  if (storeHasSessionTasks(legacy, sessionId, onProblem)) {
+    candidates.push(rootDescriptor(legacy, 'agent', 'agent store', onProblem));
+  }
+  // Every candidate was canonicalized once above; dedupe instead of rebuilding
+  // descriptors so a root failure is reported only once.
+  return dedupeRoots(candidates);
 }
 
 // Compatibility wrapper: the first candidate is the store the viewer used
@@ -383,16 +403,18 @@ function mergeChildMatches(left = [], right = []) {
 }
 
 export class TaskData {
-  constructor({ cwd = process.cwd(), sessionId, stateDir, stateDirs,
+  constructor({ cwd = process.cwd(), sessionId, stateDir, stateDirs, env = process.env,
     notify = message => console.warn(message), onChange = () => {} } = {}) {
     Object.assign(this, { sessionId, notify, onChange });
-    this.directories = normalizeDescriptors(
-      Array.isArray(stateDirs) && stateDirs.length
-        ? stateDirs
-        : stateDir
-          ? [rootDescriptor(stateDir, 'explicit', 'explicit store')]
-          : resolveTaskStateDirs({ cwd, sessionId }),
-    );
+    // warnOnce() is used while resolving roots, so the dedupe set exists before
+    // the first descriptor can fail to canonicalize.
+    this.warnings = new Set();
+    const report = problem => this.reportStoreProblem(problem);
+    this.directories = Array.isArray(stateDirs) && stateDirs.length
+      ? normalizeDescriptors(stateDirs, report)
+      : stateDir
+        ? normalizeDescriptors([stateDir], report)
+        : resolveTaskStateDirs({ cwd, sessionId, env, onProblem: report });
     this.entries = new Map();
     this.cache = new Map();
     this.live = new Map();
@@ -406,7 +428,6 @@ export class TaskData {
     this.watchedDirectories = new Map();
     this.watchRetryTimers = new Map();
     this.watchAttempts = new Map();
-    this.warnings = new Set();
   }
 
   get sources() {
@@ -494,6 +515,14 @@ export class TaskData {
     if (this.warnings.has(key)) return;
     this.warnings.add(key);
     this.notify(message);
+  }
+
+  // Root resolution happens before the first refresh, so a probe or realpath
+  // failure needs the same one-warning channel. The key matches refresh()'s
+  // store key when an id exists, so a root that fails both steps warns once.
+  reportStoreProblem({ id, root, phase, error }) {
+    const message = `DAG Studio: Cannot inspect task store ${notifyText(root, 1024)}: ${notifyText(error?.message ?? error, 512)}`;
+    this.warnOnce(id ? `tasks:${id}` : `store:${notifyText(root, 1024)}:${phase ?? 'inspect'}`, message);
   }
 
   restore(tasks = []) {
