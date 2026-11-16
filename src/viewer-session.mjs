@@ -23,8 +23,7 @@ import {
 } from './view-model.mjs';
 import { helpScrollMetrics, movementKey } from './viewer-keymap.mjs';
 import {
-  boundSnapshotInput, failedReadPlaceholder, pruneHiddenSubjects, readFailureEvidence,
-  readStateFile, transitionChanges, viewSessionKey, ViewerSnapshotError,
+  pruneHiddenSubjects, transitionChanges, viewSessionKey,
 } from './viewer-snapshot.mjs';
 
 // Fresh viewer UI state. createViewer() keeps its runtime (snapshot, render,
@@ -145,7 +144,6 @@ export function keyboardScrollIntent(key, pressed, focus, structural, scrollInfo
 export function createViewerSession({
   noMotion = false, language = 'en', themeName, fps = 60, staleAfter = staleAfterMs(),
   once = false, statePath, interactive = false, paneMode = false,
-  readStateFileFn = readStateFile,
   loadViewStateFn = loadViewState,
   saveViewStateFn = saveViewState,
   requestRepaint = () => {},
@@ -161,8 +159,6 @@ export function createViewerSession({
   let previousStates = null;
   let viewState;
   let viewStateSessionId;
-  let lastReadError;
-  let loadGeneration = 0;
   let toastId = 0;
   let lastCycle;
   let helpFrameDrawn = false;
@@ -801,7 +797,7 @@ export function createViewerSession({
     ui.graphScrollTarget = target;
   }
 
-  async function syncViewState(generation) {
+  async function syncViewState(isCurrent = () => true) {
     const sessionKey = viewSessionKey(snapshot);
     if (!statePath || !sessionKey) {
       viewState = undefined;
@@ -811,7 +807,7 @@ export function createViewerSession({
     if (viewStateSessionId === sessionKey) return;
     try {
       const loaded = await loadViewStateFn(statePath, sessionKey);
-      if (generation !== undefined && generation !== loadGeneration) return;
+      if (!isCurrent()) return;
       viewState = loaded;
       viewStateSessionId = sessionKey;
       // Saved fold keys are per (run,node). Load a set for every visible run so
@@ -823,72 +819,22 @@ export function createViewerSession({
       ui.folded = new Set(runId === undefined ? [] : ui.foldedByRun.get(runId) ?? []);
       requestRepaint();
     } catch (error) {
-      if (generation !== undefined && generation !== loadGeneration) return;
+      if (!isCurrent()) return;
       viewState = undefined;
       viewStateSessionId = undefined;
       addToast(t(ui.language, 'toastViewPreferences', { error: error.message }), 'failed');
     }
   }
 
-  async function loadState(silent = false) {
-    const generation = ++loadGeneration;
-    let raw;
-    try {
-      raw = await readStateFileFn(statePath);
-    } catch (error) {
-      if (generation !== loadGeneration) return { kind: 'stale', loaded: false };
-      const failure = readFailureEvidence(snapshot, error);
-      lastReadError = failure.lastReadError;
-      if (failure.placeholder) snapshot = fullSnapshot = failure.placeholder;
-      viewState = undefined;
-      viewStateSessionId = undefined;
-      if (!silent) addToast(t(ui.language, 'toastSnapshotError', { error: error.message }), 'failed');
-      requestRepaint();
-      return { kind: 'unreadable', loaded: false, error };
-    }
-    if (generation !== loadGeneration) return { kind: 'stale', loaded: false };
-
-    let bounded;
-    try {
-      bounded = boundSnapshotInput(raw);
-    } catch (error) {
-      if (!(error instanceof ViewerSnapshotError)) throw error;
-      if (generation !== loadGeneration) return { kind: 'stale', loaded: false };
-      const invalid = new ViewerSnapshotError(`invalid snapshot: ${error.message}`);
-      const failure = readFailureEvidence(snapshot, invalid);
-      lastReadError = failure.lastReadError;
-      if (failure.placeholder) snapshot = fullSnapshot = failure.placeholder;
-      viewState = undefined;
-      viewStateSessionId = undefined;
-      if (!silent) addToast(t(ui.language, 'toastInvalidSnapshot'), 'failed');
-      requestRepaint();
-      return { kind: 'invalid', loaded: false, error: invalid };
-    }
-    if (generation !== loadGeneration) return { kind: 'stale', loaded: false };
-
-    // Programming errors from normalization are not read failures; they reach
-    // the fatal handlers instead of being disguised as an unreadable file.
-    const loaded = acceptSnapshot(bounded, { silent, view: once ? 'once' : 'watch' });
-    if (generation !== loadGeneration) return { kind: 'stale', loaded: false };
-    if (!loaded) {
-      const invalid = new ViewerSnapshotError('snapshot failed schema validation');
-      const failure = readFailureEvidence(snapshot, invalid);
-      lastReadError = failure.lastReadError;
-      if (failure.placeholder) snapshot = fullSnapshot = failure.placeholder;
-      viewState = undefined;
-      viewStateSessionId = undefined;
-      requestRepaint();
-      return { kind: 'invalid', loaded: false, error: invalid };
-    }
-    lastReadError = undefined;
-    await syncViewState(generation);
-    if (generation !== loadGeneration) return { kind: 'stale', loaded: false };
-    return { kind: 'ok', loaded: true };
+  // The source adapter computes failure placeholders; the session remains the
+  // only owner of the visible snapshot pair and the view-state binding.
+  function installPlaceholder(placeholder) {
+    snapshot = fullSnapshot = placeholder;
   }
 
-  function showPlaceholder(view) {
-    snapshot = fullSnapshot = failedReadPlaceholder(statePath, lastReadError, { view });
-    ensureSelection();
+  function invalidateViewState() {
+    viewState = undefined;
+    viewStateSessionId = undefined;
   }
 
   function refreshHiddenSnapshot() {
@@ -1024,6 +970,17 @@ export function createViewerSession({
     } else addToast(t(ui.language, 'toastSidebarHidden'), 'warning');
   }
 
+  // Mouse capture is applied by the terminal runtime, but the visible flag and
+  // its feedback belong to the session. Returns whether the flag changed so the
+  // runtime can emit the matching terminal sequence.
+  function applyMouseCapture(enabled) {
+    if (ui.mouseCapture === enabled) return false;
+    ui.mouseCapture = enabled;
+    addToast(t(ui.language, enabled ? 'toastMouseControls' : 'toastMouseSelection'), enabled ? 'info' : 'warning');
+    helpFrameDrawn = false;
+    return true;
+  }
+
   function toggleFollow() {
     ui.follow = !ui.follow;
     if (ui.follow) {
@@ -1133,8 +1090,8 @@ export function createViewerSession({
     applySetting,
     scrollSelectedIntoView,
     syncViewState,
-    loadState,
-    showPlaceholder,
+    installPlaceholder,
+    invalidateViewState,
     refreshHiddenSnapshot,
     clearCompleted,
     undoCleared,
@@ -1148,6 +1105,7 @@ export function createViewerSession({
     focusGraphNode,
     showRunOverview,
     toggleSidebar,
+    applyMouseCapture,
     toggleFollow,
     resetDemoView,
     toggleVerbose,
