@@ -23,7 +23,8 @@ import { computeLayout, drawGraph, nodeScrollTarget, spinnerFrame } from './grap
 import { statusLabel, t } from './i18n.mjs';
 import {
   activitySummary, compareNavigationTasks, elapsedLabel, incoming, isActiveRun, linkedTaskIds,
-  linkedTaskIdsForRun, modeFor, nodeActivity, nodeForTask, nodeMap, outgoing, percentFor,
+  linkedTaskIdsForRun, modeFor, navTasks as pureNavTasks, nodeActivity, nodeForTask, nodeMap, orphanNavTasks,
+  outgoing, percentFor,
   PROVENANCE_FIELDS, PROVENANCE_KINDS, runStats, TERMINAL,
 } from './model.mjs';
 import { recordTargetFor } from './records.mjs';
@@ -60,18 +61,13 @@ const REPLY_MAX_LINES = 256;
 // are included: in real OmO sessions every root task may belong to a DAG node,
 // so filtering linked tasks makes the navigation list permanently empty.
 export function navTasks(snapshot) {
-  return memoNavTasks(snapshot, state => (state?.tasks ?? [])
-    .filter(task => !task.parentTaskId)
-    .sort(compareNavigationTasks));
+  return memoNavTasks(snapshot, pureNavTasks);
 }
 
 // Navigation tasks that no loaded run links to a node. The narrow duty pane
 // paints this list because the wide task sidebar is not available there; a
 // task-only snapshot is the whole surface, not an empty workflow.
-export function orphanNavTasks(snapshot) {
-  const linked = linkedTaskIds(snapshot ?? { runs: [] });
-  return navTasks(snapshot).filter(task => !linked.has(task.id));
-}
+export { orphanNavTasks };
 
 // Caller-supplied scroll offsets are untrusted input: NaN, numeric strings,
 // and negatives must fall back to the top instead of poisoning slicing,

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeSnapshot } from '../src/model.mjs';
+import { orphanNavTasks } from '../src/model.mjs';
 import { dutyFocusForKey } from '../src/viewer-keymap.mjs';
 import { createTestViewer } from './helpers.mjs';
 
@@ -120,6 +121,49 @@ test('orphan-only duty paints TASKS and up/down selects each orphan task', async
     press(viewer, '\x1b[A', 'up');
     assert.equal(viewer.ui.selectedTaskId, 'st_beta', 'up moves back through the painted list');
   }
+});
+
+test('mixed linked and orphan tasks keep viewer 4/down order in canonical parity', async () => {
+  const snapshot = normalizeSnapshot({
+    version: 3,
+    mode: 'live',
+    connected: true,
+    sessionId: 'mixed-orphan-parity',
+    runs: [{
+      id: 'run_mixed',
+      name: 'mixed',
+      status: 'running',
+      nodes: [
+        { id: 'root-node', state: 'running', task_id: 'linked-root' },
+        { id: 'child-node', state: 'pending', task_id: 'linked-child' },
+        { id: 'duplicate-node', state: 'running', task_id: 'linked-root' },
+      ],
+      edges: [{ from: 'root-node', to: 'child-node' }],
+    }],
+    tasks: [
+      { id: 'linked-root', description: 'linked root', status: 'running' },
+      { id: 'linked-child', parentTaskId: 'linked-root', description: 'linked child', status: 'running' },
+      { id: 'unlinked-root', description: 'unlinked root', status: 'running' },
+      { id: 'unlinked-second', description: 'unlinked second', status: 'pending' },
+    ],
+  });
+  const expected = orphanNavTasks(snapshot).map(task => task.id);
+  const viewer = await dutyViewer({ columns: 54, rows: 42 });
+  viewer.acceptSnapshot(snapshot, { silent: true });
+  viewer.draw();
+  viewer.ui.focus = 'details';
+  press(viewer, '4');
+  assert.equal(viewer.ui.focus, 'tasks');
+  const selected = [];
+  for (let index = 0; index < expected.length; index += 1) {
+    press(viewer, '\x1b[B', 'down');
+    selected.push(viewer.ui.selectedTaskId);
+  }
+  assert.deepEqual(selected, expected);
+  assert.equal(selected.includes('linked-root'), false);
+  assert.equal(selected.includes('linked-child'), false);
+  press(viewer, '\x1b[A', 'up');
+  assert.equal(viewer.ui.selectedTaskId, expected[expected.length - 2]);
 });
 
 test('a normal run keeps RUNS/CELLS/DUTY and 1/2/3 focus without a TASKS region', async () => {

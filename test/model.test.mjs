@@ -3,13 +3,31 @@ import assert from 'node:assert/strict';
 import {
   activitySummary, compareNavigationTasks, deriveRunStatus, elapsedLabel, elapsedMs, findRunningTarget, layers,
   modeFor, nodeActivity, nodeForTask, normalizeChild, normalizeRun, normalizeSnapshot, normalizeTask, orderRuns, runStats,
-  standaloneTasks,
+  navTasks, orphanNavTasks, standaloneTasks,
 } from '../src/model.mjs';
 import { messages, statusLabel } from '../src/i18n.mjs';
 import { paletteFor, statusColor, statusIcon } from '../src/theme.mjs';
 import { DemoEngine } from '../src/demo.mjs';
 
 const at = time => new DemoEngine({ now: 1_000_000, startOffset: 0 }).snapshot(1_000_000 + time);
+
+test('canonical selectors exclude linked children and preserve navigation order', () => {
+  const snapshot = {
+    runs: [{ nodes: [{ taskId: 'linked-root' }, { taskId: 'linked-child' }, { taskId: 'linked-root' }] }],
+    tasks: [
+      { id: 'linked-child', parentTaskId: 'linked-root', status: 'running', description: 'A' },
+      { id: 'linked-root', status: 'pending', description: 'Z' },
+      { id: 'unlinked-b', status: 'pending', description: 'alpha' },
+      { id: 'unlinked-a', status: 'running', description: 'omega' },
+    ],
+  };
+  assert.deepEqual(navTasks(snapshot).map(task => task.id), ['unlinked-a', 'unlinked-b', 'linked-root']);
+  assert.deepEqual(orphanNavTasks(snapshot).map(task => task.id), ['unlinked-a', 'unlinked-b']);
+  assert.deepEqual(standaloneTasks(snapshot).map(task => task.id), ['unlinked-a', 'unlinked-b']);
+  assert.ok(Object.isFrozen(navTasks(snapshot)));
+  assert.deepEqual(orphanNavTasks(null), []);
+  assert.ok(Object.isFrozen(orphanNavTasks(null)));
+});
 
 test('v1 and v2 snapshots normalize to the same viewer model', () => {
   const raw = {

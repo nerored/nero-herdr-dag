@@ -156,6 +156,21 @@ test('F-52 sidebar, switcher, and standalone tasks share one navigation order', 
   assert.deepEqual(standaloneTasks(snapshot).map(task => task.id), expected);
 });
 
+test('switcher uses canonical task order and excludes child tasks', () => {
+  const snapshot = {
+    runs: [],
+    tasks: [
+      { id: 'child', parentTaskId: 'root', status: 'running', description: 'child' },
+      { id: 'root', status: 'pending', description: 'zeta' },
+      { id: 'alpha', status: 'pending', description: 'alpha' },
+    ],
+  };
+  assert.deepEqual(
+    switcherItems(snapshot, null).filter(item => item.kind === 'task').map(item => item.id),
+    ['alpha', 'root'],
+  );
+});
+
 test('old finished runs and tasks, including cancelled, can be hidden without deleting the snapshot', () => {
   const state = {
     runs: [

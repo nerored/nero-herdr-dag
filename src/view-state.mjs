@@ -1,5 +1,5 @@
 import { readJson, writeJson } from './storage.mjs';
-import { compareNavigationTasks, nodeForTask, runStats, TERMINAL } from './model.mjs';
+import { navTasks, nodeForTask, runStats, TERMINAL } from './model.mjs';
 
 // Keep terminal work visible for five minutes after it finishes. The x clear
 // action hides only finished subjects older than this window, and never hides
@@ -218,15 +218,9 @@ export function preserveScrolls(offsets = {}, { visible = {}, limits = {} } = {}
 // row order stable while a live snapshot changes; values refresh by key and a
 // removed subject disappears. Keys not seen when the switcher opened append at
 // the end of their group instead of silently becoming unreachable.
-function navigationTasks(snapshot) {
-  return (snapshot?.tasks ?? [])
-    .filter(task => !task.parentTaskId)
-    .sort(compareNavigationTasks);
-}
-
 export function switcherItems(snapshot, frozenKeys, { preferRunId, tasks } = {}) {
   const runs = snapshot?.runs ?? [];
-  const taskList = tasks ?? navigationTasks(snapshot);
+  const taskList = tasks ?? navTasks(snapshot);
   const fresh = [];
   for (const run of runs) {
     const stats = runStats(run);

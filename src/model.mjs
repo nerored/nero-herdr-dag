@@ -698,11 +698,22 @@ export function compareNavigationTasks(a, b) {
   return byDescription || String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
 }
 
+// Pure task selectors shared by navigation, rendering, and duty input. The
+// memoized render wrapper owns caching; these selectors remain deterministic
+// and preserve the canonical running/description/id order.
+export function navTasks(snapshot) {
+  return Object.freeze((snapshot?.tasks ?? [])
+    .filter(task => !task.parentTaskId)
+    .sort(compareNavigationTasks));
+}
+
+export function orphanNavTasks(snapshot) {
+  const linked = linkedTaskIds(snapshot ?? { runs: [] });
+  return Object.freeze(navTasks(snapshot).filter(task => !linked.has(task.id)));
+}
+
 export function standaloneTasks(snapshot) {
-  const linked = linkedTaskIds(snapshot);
-  return snapshot.tasks
-    .filter(task => !task.parentTaskId && !linked.has(task.id))
-    .sort(compareNavigationTasks);
+  return orphanNavTasks(snapshot);
 }
 
 export function findRunningTarget(snapshot, previous) {

@@ -18,7 +18,9 @@ import { createFrameBuffers } from './frame-primitives.mjs';
 import { nextNodeId } from './cockpit.mjs';
 import { commandItems, filterCommands } from './commands.mjs';
 import { languageLabel, normalizeLanguage, t } from './i18n.mjs';
-import { findRunningTarget, isActiveRun, linkedTaskIds, nodeForTask, normalizeSnapshot } from './model.mjs';
+import {
+  findRunningTarget, isActiveRun, nodeForTask, normalizeSnapshot, orphanNavTasks,
+} from './model.mjs';
 import {
   detailsSubjectKey, dashboardLayout, diagnosisForSelection, navTasks, recordForSelection,
   renderApp, snapshotFreshness, switcherView,
@@ -706,19 +708,11 @@ export async function createViewer(options = {}, deps = {}) {
     selectTaskById(tasks[index].id);
   }
 
-  // The TASKS list is navTasks minus every task a node in any run owns. This
-  // mirrors the renderer's list without widening the public frame API that the
-  // architecture test pins.
-  function orphanTasks() {
-    const linked = linkedTaskIds(snapshot ?? { runs: [] });
-    return navTasks(snapshot ?? { runs: [], tasks: [] }).filter(task => !linked.has(task.id));
-  }
-
   // Up/down in the duty TASKS list selects the orphan row under the cursor
   // instead of scrolling an invisible list; the painted list is the source of
   // row order, so a linked task can never become the selection here.
   function stepDutyTask(direction) {
-    const tasks = orphanTasks();
+    const tasks = orphanNavTasks(snapshot);
     if (!tasks.length) return false;
     const current = tasks.findIndex(task => task.id === ui.selectedTaskId);
     const index = current < 0
@@ -1092,7 +1086,7 @@ export async function createViewer(options = {}, deps = {}) {
   function revealTaskSelection() {
     if (ui.focus !== 'tasks' || !snapshot) return;
     const tasks = vm.frame?.layout?.layout === 'duty'
-      ? orphanTasks()
+      ? orphanNavTasks(snapshot)
       : navTasks(snapshot);
     const index = tasks.findIndex(task => task.id === ui.selectedTaskId);
     if (index < 0) return;
