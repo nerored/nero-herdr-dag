@@ -2,28 +2,23 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
-  chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, watch, writeFileSync,
+  chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { pagerCommand } from '../src/clipboard.mjs';
 import { safeFileWithin } from '../src/safe-path.mjs';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { recordForKey } from '../src/records.mjs';
 import { detailsSubjectKey, diagnosisForSelection, recordForSelection, renderApp } from '../src/render.mjs';
-import { createTheme, paletteAt } from '../src/theme.mjs';
 import { terminalRestoreSequence } from '../src/viewer.mjs';
+import { baseUi as makeBaseUi, themeFor, waitForJsonFile, within } from './helpers.mjs';
 
 const now = 1_000_000;
-const palette = paletteAt(0);
-const theme = createTheme({ palette, color: false });
-const baseUi = {
-  runIndex: 0, focus: 'tasks', lastFocus: 'tasks',
-  selectedNodeId: 'done', selectedTaskId: 'st_done',
-  follow: false, motion: false, help: false, verbose: false, folded: new Set(),
-  graphScroll: 0, graphScrollTarget: 0, manualScroll: false, sidebar: true,
-  language: 'en', fps: 12, toasts: [],
-};
+const { palette, theme } = themeFor(0);
+const baseUi = makeBaseUi({
+  focus: 'tasks', lastFocus: 'tasks', selectedNodeId: 'done', selectedTaskId: 'st_done',
+});
 
 // The task record, not the snapshot, carries the complete 3373-character
 // response. The viewer model may only keep its 1200-character excerpt.
@@ -110,53 +105,6 @@ function fakePager(root, { capture } = {}) {
     : '#!/bin/sh\nexec /bin/cat "$@"\n');
   chmodSync(script, 0o755);
   return { ...process.env, PAGER: 'less', PATH: `${bin}:${process.env.PATH ?? ''}` };
-}
-
-// Race a promise against a bounded deadline and clear the losing timer so a
-// passing frame does not leave an 8s timer holding the test process open.
-function within(promise, ms, message) {
-  let timer;
-  const deadline = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(message)), ms);
-  });
-  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
-}
-
-// Wait for the pager's atomic rename to publish a parseable capture. The file
-// event is the signal; the timeout only bounds a broken child.
-function waitForJsonFile(path, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    let watcher;
-    let timer;
-    let settled = false;
-    const finish = (error, value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try { watcher?.close(); } catch { /* already closed */ }
-      if (error) reject(error);
-      else resolve(value);
-    };
-    const check = () => {
-      try {
-        finish(null, JSON.parse(readFileSync(path, 'utf8')));
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    timer = setTimeout(() => finish(new Error(`timed out waiting for ${basename(path)}`)), timeoutMs);
-    try {
-      watcher = watch(dirname(path), { persistent: false }, (_event, filename) => {
-        if (!filename || filename === basename(path)) check();
-      });
-      watcher.on('error', error => finish(error));
-    } catch (error) {
-      finish(error);
-      return;
-    }
-    check();
-  });
 }
 
 function writeViewerState(root) {

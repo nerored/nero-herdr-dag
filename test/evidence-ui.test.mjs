@@ -3,19 +3,13 @@ import assert from 'node:assert/strict';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { DEFAULT_STALE_AFTER_MS, contrastRatio, pillForeground, renderApp } from '../src/render.mjs';
 import { failedReadPlaceholder } from '../src/viewer.mjs';
-import { createTheme, paletteAt, paletteFor, statusColor } from '../src/theme.mjs';
+import { createTheme, paletteFor, statusColor } from '../src/theme.mjs';
 import { width as textWidth } from '../src/text.mjs';
+import { baseUi as makeBaseUi, themeFor } from './helpers.mjs';
 
 const now = 1_000_000;
-const palette = paletteAt(0);
-const theme = createTheme({ palette, color: false });
-const baseUi = {
-  runIndex: 0, focus: 'graph', lastFocus: 'graph',
-  selectedNodeId: 'evidence', selectedTaskId: 'st_ev',
-  follow: false, motion: false, help: false, verbose: false, folded: new Set(),
-  graphScroll: 0, graphScrollTarget: 0, manualScroll: false, sidebar: true,
-  language: 'en', fps: 12, toasts: [],
-};
+const { palette, theme } = themeFor(0);
+const baseUi = makeBaseUi({ selectedNodeId: 'evidence', selectedTaskId: 'st_ev' });
 
 // A host-shaped response long enough to cross the 1200-character excerpt bound
 // and to prove that middle content, not just the four-line tail, is painted.

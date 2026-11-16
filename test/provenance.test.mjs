@@ -10,21 +10,14 @@ import { normalizeSnapshot } from '../src/model.mjs';
 import { renderApp } from '../src/render.mjs';
 import { normalizeOmOTask } from '../src/task-data.mjs';
 import { readJson } from '../src/storage.mjs';
-import { createTheme, paletteAt } from '../src/theme.mjs';
 import { width as textWidth } from '../src/text.mjs';
+import { baseUi as makeBaseUi, themeFor } from './helpers.mjs';
 
 const now = 1_000_000;
-const palette = paletteAt(0);
-const theme = createTheme({ palette, color: false });
+const { palette, theme } = themeFor(0);
 const sessionId = '01a1bf8a-b241-7c95-8e04-d36830a6755a';
 
-const baseUi = {
-  runIndex: 0, focus: 'graph', lastFocus: 'graph',
-  selectedNodeId: 'api', selectedTaskId: 'st_running',
-  follow: false, motion: false, help: false, verbose: false, folded: new Set(),
-  graphScroll: 0, graphScrollTarget: 0, manualScroll: false, sidebar: true,
-  language: 'en', fps: 60, toasts: [],
-};
+const baseUi = makeBaseUi({ selectedNodeId: 'api', selectedTaskId: 'st_running', fps: 60 });
 
 function demoSnapshot() {
   return normalizeSnapshot(new DemoEngine({ now, startOffset: 32_000 }).snapshot(now));

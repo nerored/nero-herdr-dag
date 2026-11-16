@@ -3,14 +3,13 @@ import assert from 'node:assert/strict';
 import { computeLayout, nodeScrollTarget } from '../src/graph.mjs';
 import { nodeForTask, normalizeSnapshot } from '../src/model.mjs';
 import { navTasks, renderApp, taskAtPoint, taskListLayout } from '../src/render.mjs';
-import { createTheme, paletteAt } from '../src/theme.mjs';
 import {
   createViewer, ensureSelectionState, selectRunById, selectTaskAtPoint, selectTaskHit, selectionScrollTarget,
 } from '../src/viewer.mjs';
+import { baseUi as makeBaseUi, themeFor } from './helpers.mjs';
 
 const now = 1_000_000;
-const palette = paletteAt(0);
-const theme = createTheme({ palette, color: false });
+const { palette, theme } = themeFor(0);
 const renderOptions = { width: 140, height: 42, time: 0, now, palette, theme };
 
 const node = (id, state, taskId, label = id) => ({
@@ -50,34 +49,19 @@ const fixture = () => normalizeSnapshot({
   ],
 });
 
-const baseUi = (overrides = {}) => ({
-  runIndex: 0,
+const baseUi = (overrides = {}) => makeBaseUi({
   selectedRunId: 'run_a',
   runPinned: true,
-  focus: 'graph',
-  lastFocus: 'graph',
   selectedNodeId: 'a0',
   selectedTaskId: 'st_a',
   selectedTaskUnlinked: false,
-  follow: false,
   followTarget: undefined,
-  motion: false,
-  help: false,
-  verbose: false,
-  folded: new Set(),
-  graphScroll: 0,
-  graphScrollTarget: 0,
-  manualScroll: false,
   tasksScroll: 0,
   tasksScrollTarget: 0,
   detailsScroll: 0,
   detailsScrollTarget: 0,
   detailsKey: undefined,
   taskRevealKey: undefined,
-  sidebar: true,
-  fps: 12,
-  toasts: [],
-  language: 'en',
   ...overrides,
 });
 

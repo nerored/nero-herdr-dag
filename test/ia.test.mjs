@@ -4,7 +4,6 @@ import { DemoEngine } from '../src/demo.mjs';
 import { messages } from '../src/i18n.mjs';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { navTasks, renderApp } from '../src/render.mjs';
-import { createTheme, paletteAt } from '../src/theme.mjs';
 import { width as textWidth } from '../src/text.mjs';
 import {
   collapseTransition, expandTransition, filterSwitcher, moveSwitcher,
@@ -12,19 +11,15 @@ import {
   switcherItems,
 } from '../src/view-state.mjs';
 import { applySwitcherSelection, createViewer, selectRunById } from '../src/viewer.mjs';
+import { baseUi as makeBaseUi, themeFor } from './helpers.mjs';
 
 const now = 1_000_000;
 const snapshot = normalizeSnapshot(new DemoEngine({ now, startOffset: 32_000 }).snapshot(now));
-const palette = paletteAt(0);
-const theme = createTheme({ palette, color: false });
-const baseUi = {
-  runIndex: 0, focus: 'graph', lastFocus: 'graph',
+const { palette, theme } = themeFor(0);
+const baseUi = makeBaseUi({
   selectedNodeId: 'api', selectedTaskId: 'st_api',
-  follow: false, motion: false, help: false, verbose: false, folded: new Set(),
-  graphScroll: 0, graphScrollTarget: 0, manualScroll: false, sidebar: true,
-  language: 'en', fps: 12, toasts: [],
   expanded: false, returnFocus: 'graph', switcher: null,
-};
+});
 
 function render(overrides = {}, { width = 120, height = 40 } = {}) {
   return renderApp(snapshot, { ...baseUi, ...overrides }, {

@@ -2,8 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { renderApp } from '../src/render.mjs';
-import { createViewerState } from '../src/viewer.mjs';
-import { paletteFor, createTheme } from '../src/theme.mjs';
+import { themeFor, viewerUi } from './helpers.mjs';
 
 const now = Date.parse('2026-11-11T12:00:00.000Z');
 const at = ms => new Date(ms).toISOString();
@@ -41,15 +40,8 @@ const snapshot = normalizeSnapshot({
   ],
 });
 
-const palette = paletteFor('dark');
-const theme = createTheme({ palette, color: false });
-const base = () => ({
-  ...createViewerState({ language: 'en', noMotion: true }),
-  runIndex: 0,
-  selectedRunId: 'run',
-  runOverview: true,
-  focus: 'details',
-});
+const { palette, theme } = themeFor('dark');
+const base = () => viewerUi({ selectedRunId: 'run', runOverview: true, focus: 'details' });
 const render = (overrides = {}, options = {}) => renderApp(snapshot, { ...base(), ...overrides }, {
   width: 140, height: 42, time: 0, now, palette, theme, ...options,
 });

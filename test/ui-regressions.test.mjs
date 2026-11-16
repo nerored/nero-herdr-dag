@@ -10,10 +10,10 @@ import { computeLayout } from '../src/graph.mjs';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { renderApp } from '../src/render.mjs';
 import { keyboardScrollTarget } from '../src/scroll.mjs';
-import { createTheme, paletteAt } from '../src/theme.mjs';
 import { width as textWidth } from '../src/text.mjs';
+import { baseUi as makeBaseUi, createTestViewer, themeFor, withTestTimeout } from './helpers.mjs';
 import {
-  applyFocusRequest, applyHelpScroll, advanceScroll, boundSnapshotInput, chromeActionAt, createViewer,
+  applyFocusRequest, applyHelpScroll, advanceScroll, boundSnapshotInput, chromeActionAt,
   demoSnapshotDue, detailsVerboseAvailable, dutyFocusForKey, failedReadPlaceholder, focusForStructural,
   footerActionAt, frameIntervalMs, framePacingFps, helpKeyAction, helpScrollForKey, helpScrollMetrics,
   helpViewportRows, keyboardScrollIntent, loadInitialSnapshot, needsAnimationFrame, nextFrameDeadline,
@@ -23,16 +23,9 @@ import {
 } from '../src/viewer.mjs';
 
 const now = 1_000_000;
-const palette = paletteAt(0);
-const theme = createTheme({ palette, color: false });
+const { palette, theme } = themeFor(0);
 const sessionId = 'c0ffee00-1234-5678-9abc-def012345678';
-const baseUi = {
-  runIndex: 0, focus: 'graph', lastFocus: 'graph',
-  selectedNodeId: 'api', selectedTaskId: 'st_api',
-  follow: false, motion: false, help: false, verbose: false, folded: new Set(),
-  graphScroll: 0, graphScrollTarget: 0, manualScroll: false, sidebar: true,
-  language: 'en', fps: 60, toasts: [],
-};
+const baseUi = makeBaseUi({ selectedNodeId: 'api', selectedTaskId: 'st_api', fps: 60 });
 
 function oneNode(state, percent, { error } = {}) {
   return normalizeSnapshot({
@@ -58,40 +51,19 @@ function demoSnapshot() {
   )));
 }
 
-async function withTestTimeout(promise, ms, message) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(message)), ms);
+const newViewer = ({ statePath = '/tmp/dag-viewer-state.json', options = {}, deps = {} } = {}) =>
+  createTestViewer({
+    args: { statePath, once: true, interactive: false, noColor: true, ...options },
+    deps: {
+      loadConfig: async () => ({}),
+      loadOmoTheme: async () => 'system',
+      loadOmoAppearance: async () => ({}),
+      readStateFile: async () => ({ version: 3, mode: 'live', connected: true, runs: [], tasks: [] }),
+      loadViewState: async (_path, sessionId) => ({ version: 1, sessionId, expanded: {} }),
+      saveViewState: async () => {},
+      ...deps,
+    },
   });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function newViewer({ statePath = '/tmp/dag-viewer-state.json', options = {}, deps = {} } = {}) {
-  const exits = [];
-  const written = [];
-  const viewer = await createViewer({
-    statePath,
-    once: true,
-    interactive: false,
-    noColor: true,
-    ...options,
-  }, {
-    loadConfig: async () => ({}),
-    loadOmoTheme: async () => 'system',
-    loadOmoAppearance: async () => ({}),
-    readStateFile: async () => ({ version: 3, mode: 'live', connected: true, runs: [], tasks: [] }),
-    loadViewState: async (_path, sessionId) => ({ version: 1, sessionId, expanded: {} }),
-    saveViewState: async () => {},
-    write: text => written.push(text),
-    exit: code => exits.push(code),
-    ...deps,
-  });
-  return { viewer, exits, written };
-}
 
 async function stopChild(child) {
   if (typeof child.exitCode === 'number' || typeof child.signalCode === 'number') return;

@@ -13,19 +13,12 @@ import {
 } from '../src/clipboard.mjs';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { diagnosisForSelection, renderApp } from '../src/render.mjs';
-import { createTheme, paletteAt } from '../src/theme.mjs';
 import { width as textWidth } from '../src/text.mjs';
+import { baseUi as makeBaseUi, themeFor } from './helpers.mjs';
 
 const now = 1_000_000;
-const palette = paletteAt(0);
-const theme = createTheme({ palette, color: false });
-const baseUi = {
-  runIndex: 0, focus: 'graph', lastFocus: 'graph',
-  selectedNodeId: 'ship', selectedTaskId: 'st_fail',
-  follow: false, motion: false, help: false, verbose: false, folded: new Set(),
-  graphScroll: 0, graphScrollTarget: 0, manualScroll: false, sidebar: true,
-  language: 'en', fps: 12, toasts: [],
-};
+const { palette, theme } = themeFor(0);
+const baseUi = makeBaseUi({ selectedNodeId: 'ship', selectedTaskId: 'st_fail' });
 
 const taskRecord = (overrides = {}) => ({
   id: 'st_fail',

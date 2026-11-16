@@ -7,26 +7,18 @@ import { Canvas } from '../src/canvas.mjs';
 import { t } from '../src/i18n.mjs';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { meaningfulReply, recordForKey, recordForSelection, renderApp } from '../src/render.mjs';
-import { createTheme, paletteAt } from '../src/theme.mjs';
 import {
   center, fitTail, padEnd, padStart, truncateMiddle, width as textWidth, wrap,
 } from '../src/text.mjs';
+import { baseUi as makeBaseUi, snapshotBuilder, themeFor } from './helpers.mjs';
 
 const now = 1_000_000;
-const palette = paletteAt(0);
-const theme = createTheme({ palette, color: false });
-const baseUi = {
-  runIndex: 0, focus: 'graph', selectedNodeId: 'n', selectedTaskId: undefined,
-  follow: false, motion: false, help: false, verbose: false, folded: new Set(),
-  graphScroll: 0, graphScrollTarget: 0, manualScroll: false, sidebar: true,
-  fps: 12, toasts: [],
-};
+const { palette, theme } = themeFor(0);
+const baseUi = makeBaseUi({ selectedNodeId: 'n' });
+const syntheticSnapshot = snapshotBuilder({ version: 2, sessionId: 's', connected: true });
 
 function synthetic(node = {}, task = {}) {
-  return normalizeSnapshot({
-    version: 2,
-    sessionId: 's',
-    connected: true,
+  return syntheticSnapshot({
     runs: [{
       id: 'r', name: 'Run', status: 'running', createdAt: '2026-11-10T00:00:00Z',
       nodes: [{

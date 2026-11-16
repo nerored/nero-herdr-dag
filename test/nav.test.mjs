@@ -6,20 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nodeForTask, normalizeSnapshot, standaloneTasks } from '../src/model.mjs';
 import { navTasks, renderApp } from '../src/render.mjs';
-import { createTheme, paletteAt } from '../src/theme.mjs';
 import {
-  createViewer, ensureSelectionState, parseViewerArgs, selectRunById, selectRunOverview,
+  ensureSelectionState, parseViewerArgs, selectRunById, selectRunOverview,
 } from '../src/viewer.mjs';
+import { baseUi as makeBaseUi, createTestViewer, themeFor } from './helpers.mjs';
 
 const now = 1_000_000;
-const palette = paletteAt(0);
-const theme = createTheme({ palette, color: false });
-const ui = {
-  runIndex: 0, focus: 'tasks', selectedNodeId: undefined, selectedTaskId: 'st_linked',
-  follow: false, motion: false, help: false, verbose: false, folded: new Set(),
-  graphScroll: 0, graphScrollTarget: 0, manualScroll: false, sidebar: true,
-  fps: 12, toasts: [],
-};
+const { palette, theme } = themeFor(0);
+const ui = makeBaseUi({ focus: 'tasks', selectedTaskId: 'st_linked' });
 
 // Every root task is attached to a DAG node, which is what a real OmO session
 // looks like once work is dispatched through runs.
@@ -222,22 +216,20 @@ const dagSnapshot = (runs, tasks) => ({
 });
 
 const makeViewer = async ({ columns = 140, rows = 42 } = {}) => {
-  const writes = [];
-  const viewer = await createViewer(
-    { noColor: true, noMotion: true, fps: 10 },
-    {
+  const { viewer, written } = await createTestViewer({
+    args: { noColor: true, noMotion: true, fps: 10 },
+    deps: {
       loadConfig: async () => ({ language: 'en' }),
       loadOmoTheme: async () => 'system',
       loadOmoAppearance: async () => ({}),
       columns,
       rows,
-      write: text => writes.push(text),
     },
-  );
+  });
   // Follow is exercised by the fresh-run test; the navigation/click tests pin
   // the subject explicitly.
   viewer.ui.follow = false;
-  viewer.writes = writes;
+  viewer.writes = written;
   return viewer;
 };
 
