@@ -310,40 +310,112 @@ OmO process                                  Herdr viewer process
 └──────────────────────────────┘
 ```
 
+Modules are grouped by role. Every module in `src/` is listed once below.
+
+**Data and normalization**
+
+- `src/model.mjs` normalizes v1, v2, and v3 snapshots, derives mode and field
+  provenance, sanitizes text, and computes topological layers, run statistics,
+  and selection lookups.
+- `src/normalize.mjs` is the one implementation of each host-value primitive:
+  text, number, integer, ISO timestamp, byte length, and defined fields.
+- `src/evidence.mjs` normalizes host evidence once, covering reasoning and
+  reply excerpts, rate history, retries, and turns, for both snapshot and
+  task-store readers.
+- `src/task-data.mjs` reads and merges task stores and parent/child records.
+- `src/run-summary.mjs` aggregates node windows, durations, and totals for the
+  run overview without I/O or a hidden clock.
+- `src/demo.mjs` produces the deterministic fake world.
+- `src/records.mjs` resolves raw task and checkpoint records through bounded,
+  root-checked reads.
+- `src/viewer-snapshot.mjs` reads state files under a hard byte ceiling, checks
+  snapshot limits before mapping, and builds the placeholder and evidence for a
+  failed read, plus session identity and change detection.
+
+**Presentation primitives**
+
 - `src/text.mjs` measures grapheme-aware width and fits, pads, and wraps text.
 - `src/theme.mjs` maps OmO palettes onto the dashboard and emits truecolor or
   256-color output with color interpolation.
 - `src/canvas.mjs` paints a cell canvas with borders, clipping, and ANSI output.
-- `src/model.mjs` normalizes v1, v2, and v3 snapshots, derives mode and field
-  provenance, sanitizes text, and computes topological layers.
-- `src/demo.mjs` produces the deterministic fake world.
+- `src/frame-primitives.mjs` owns reusable cell grids for one frame, plus
+  panels, pills, scrollbars, detail rows, and metric formatting.
 - `src/graph.mjs` lays out wrapped frontiers and animated Manhattan edges.
-- `src/render.mjs` composes the header, navigation, duty and investigation
-  layouts, graph, details, footer, toasts, settings menu, and help overlay.
 - `src/i18n.mjs` contains the English/Chinese message tables and interpolation.
-- `src/config.mjs` loads and atomically saves the language and theme, and
-  resolves the stale threshold from `OMO_HERDR_DAG_STUDIO_STALE_MS`.
-- `src/view-state.mjs` persists fold and sidebar preferences, owns the
-  112-column layout breakpoint, and models run and task switcher selection.
-- `src/scroll.mjs` maps keys to scroll intents, hit-tests regions, sizes
-  scrollbars, and applies exponential easing.
+
+**Frame composition**
+
+- `src/render.mjs` composes the layout, sidebar, graph, and details shell, and
+  exports `renderApp`.
+- `src/render-chrome.mjs` paints the header brand, breadcrumb and status, plus
+  the footer legend, hints, and settings entry.
+- `src/render-duty.mjs` paints the wide duty pane and the narrow RUNS/CELLS/DUTY
+  surface with its own compact duty body, and reuses the subject label and
+  failure-state helpers plus summary and diagnosis sections.
+- `src/render-subject.mjs` builds node and task subjects and paints the wide
+  details-pane subject body.
+- `src/render-summary.mjs` paints metric cards, the run summary, and warnings.
+- `src/render-diagnosis.mjs` paints diagnosis cards, the error source, and the
+  full reason.
+- `src/render-overlays.mjs` paints the command palette, switcher, tour, help,
+  and settings overlays, and invalidates their hitboxes.
+
+**Interaction**
+
+- `src/view-model.mjs` is the seam between orchestration and the frame
+  renderer. It holds the snapshot, UI state, and last frame, and reconciles
+  selection, focus, folds, scrolling, and pointer targets.
+- `src/viewer-selection.mjs` holds the selection reducers shared by clicks,
+  keys, switcher rows, and follow updates.
+- `src/viewer-keymap.mjs` normalizes key spellings and movement, and defines
+  the ordered modal and global key tables.
+- `src/scroll.mjs` maps keys to scroll intents, sizes scrollbars, and applies
+  exponential easing.
 - `src/mouse.mjs` parses SGR and X10 mouse reports.
-- `src/clipboard.mjs` builds failure diagnosis cards, guards record paths, and
-  copies evidence through OSC52 or a pager.
-- `src/omo.mjs` resolves the OmO agent directory, project key, theme, and
-  light/dark appearance.
+- `src/view-state.mjs` persists fold and sidebar preferences, owns the
+  112-column breakpoint, and models run, task, and switcher selection.
+- `src/commands.mjs` lists the command palette entries.
+- `src/cockpit.mjs` holds the pure failure, blocked, and critical triage rules
+  shared by the renderer and the viewer.
+
+**Host and runtime**
+
+- `src/viewer.mjs` runs the watch loop, input dispatch, frame pacing, follow,
+  pager, and CLI.
 - `src/controller.mjs` serializes events into snapshots and manages the Herdr
   pane.
-- `src/task-data.mjs` reads and merges task stores and parent/child records.
-- `src/stream-tap.mjs` captures live activity from child agents.
-- `src/todo-title.mjs` matches run titles to OmO TODO events.
+- `src/omo.mjs` resolves the OmO agent directory, project key, theme, and
+  light/dark appearance.
+- `src/config.mjs` loads and atomically saves the language and theme, and
+  resolves the stale threshold.
+- `src/env.mjs` centralizes parsing for the studio's own settings and paths.
+  Terminal variables such as `NO_COLOR` and `COLORTERM` stay with the modules
+  that read them.
 - `src/herdr.mjs` resolves the herdr binary and wraps its pane commands.
 - `src/runtime.mjs` probes for Bun 1.4+ or Node 24+.
 - `src/storage.mjs` reads and atomically writes JSON.
 - `src/retention.mjs` prunes only owned snapshot files past the retention
   window.
-- `src/viewer.mjs` runs the watch loop, input handling, follow, smooth scroll,
-  mouse selection, and pager.
+- `src/stream-tap.mjs` captures live activity from child agents.
+- `src/todo-title.mjs` matches run titles to OmO TODO events.
+- `src/diagnosis.mjs` owns the diagnosis model, text, and copyable evidence
+  bundle.
+- `src/clipboard.mjs` copies evidence through OSC52 or a pager and re-exports
+  the diagnosis and path guards for older embedders.
+- `src/safe-path.mjs` validates absolute paths and keeps record reads inside a
+  trusted root.
+
+Frame composition stays in one owner. It builds the layout, sidebar, graph, and
+details shell, then calls the extracted painters. The subject painter turns a
+node or task into a subject and draws the wide details-pane body. The duty
+painter draws its own compact duty body and reuses the subject label and
+failure-state helpers, the summary metric and warning sections, and the compact
+diagnosis card, so the two views cannot describe a task differently.
+
+The viewer keeps only orchestration. Snapshot I/O is bounded and validated
+before mapping, the view model reconciles selection, focus, folds, and scroll,
+and the keymap resolves modal and global keys. The watch loop, frame pacing, and
+other side effects stay with the viewer.
 
 ### v3 snapshot
 
@@ -394,7 +466,7 @@ detail panel includes only bounded, sanitized reasoning and reply excerpts.
 ## Development
 
 ```bash
-bun test            # 587 behavior tests
+bun test            # run the full behavior suite
 bun run build       # syntax-check and assemble dist/
 bun run check       # test + build
 ```

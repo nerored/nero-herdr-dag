@@ -241,15 +241,88 @@ OmO 进程                                  Herdr viewer 进程
 └──────────────────────────────┘
 ```
 
-- `src/model.mjs`：兼容 v1/v2 快照，清理控制字符，计算拓扑层。
-- `src/demo.mjs`：确定性假数据世界。
+模块按职责分组，下列每个 `src/` 模块只出现一次。
+
+**数据与归一化**
+
+- `src/model.mjs`：归一化 v1/v2/v3 快照，推导 mode 与字段来源，清理文本，
+  计算拓扑层、run 统计和选择查找。
+- `src/normalize.mjs`：宿主值原语只有这一份实现，覆盖文本、数字、整数、
+  ISO 时间、字节长度和已定义字段。
+- `src/evidence.mjs`：统一归一化宿主证据，包括思考/回复摘录、速率历史、
+  重试和轮次，快照与任务存储读取共用。
+- `src/task-data.mjs`：读取并合并任务存储与父子记录。
+- `src/run-summary.mjs`：为 run 概览聚合节点时间窗、时长和总计，不读 I/O，
+  也不隐藏时钟。
+- `src/demo.mjs`：生成确定性的演示数据。
+- `src/records.mjs`：在字节上限和根目录校验下解析原始任务/checkpoint 记录。
+- `src/viewer-snapshot.mjs`：以硬性字节上限读取状态文件，映射前检查快照
+  上限，读取失败时给出占位与证据，并处理会话标识和状态变化。
+
+**呈现基础**
+
+- `src/text.mjs`：按字素测量宽度，并负责裁剪、填充和换行。
+- `src/theme.mjs`：把 OmO 调色板映射到面板，输出 truecolor/256 色并做颜色插值。
+- `src/canvas.mjs`：单元格画布，支持边框、裁剪和 ANSI 输出。
+- `src/frame-primitives.mjs`：管理单帧复用的单元格网格，并提供面板、药丸、
+  滚动条、详情行和指标格式化。
 - `src/graph.mjs`：frontier 换行、Manhattan 边、动画流动点。
-- `src/canvas.mjs`：单元格画布，支持 truecolor/256 色。
-- `src/render.mjs`：header、导航、画布、详情、footer、toast、设置菜单、帮助层。
-- `src/i18n.mjs`：英文/中文文案表；`src/config.mjs`：语言配置的读取与原子保存。
+- `src/i18n.mjs`：英文/中文文案表和插值。
+
+**画面组装**
+
+- `src/render.mjs`：组装布局、侧栏、图和详情外壳，并导出 `renderApp`。
+- `src/render-chrome.mjs`：绘制 header 的品牌、面包屑和状态，以及 footer 的
+  图例、提示和设置入口。
+- `src/render-duty.mjs`：绘制宽屏 duty 面板与窄屏 RUNS/CELLS/DUTY 界面；
+  duty 正文由本模块自己绘制，并复用对象标签与失败状态辅助函数、摘要区块
+  和紧凑诊断卡。
+- `src/render-subject.mjs`：构建节点/任务对象，并绘制宽屏详情面板的对象正文。
+- `src/render-summary.mjs`：绘制指标卡、run 摘要和警告。
+- `src/render-diagnosis.mjs`：绘制诊断卡、错误来源和完整原因。
+- `src/render-overlays.mjs`：绘制命令面板、切换器、tour、帮助和设置层，并
+  失效浮层点击区域。
+
+**交互**
+
+- `src/view-model.mjs`：编排与画面渲染器之间的接缝。持有快照、UI 状态和
+  上一帧，负责选择重建、焦点、折叠、滚动和指针目标。
+- `src/viewer-selection.mjs`：点击、按键、切换器行和 follow 更新共用的选择
+  reducer。
+- `src/viewer-keymap.mjs`：归一化按键拼写和移动，并定义有序的模态/全局按键表。
+- `src/scroll.mjs`：把按键映射为滚动意图，计算滚动条尺寸，并应用指数缓动。
+- `src/mouse.mjs`：解析 SGR 与 X10 鼠标报文。
+- `src/view-state.mjs`：持久化折叠/侧栏偏好，维护 112 列断点，并建模 run、
+  任务和切换器选择。
+- `src/commands.mjs`：列出命令面板条目。
+- `src/cockpit.mjs`：保存渲染器与 viewer 共用的失败、阻塞、关键节点分类规则。
+
+**宿主与运行时**
+
+- `src/viewer.mjs`：watch 循环、输入分发、帧节奏、follow、pager 和 CLI。
 - `src/controller.mjs`：事件串行队列、快照写入、Herdr pane 生命周期。
-- `src/task-data.mjs`：任务存储读取与父子关系。
+- `src/omo.mjs`：解析 OmO agent 目录、项目键、主题和明暗外观。
+- `src/config.mjs`：读取并原子保存语言与主题，解析过期阈值。
+- `src/env.mjs`：集中解析 studio 自己的设置与路径；`NO_COLOR`、`COLORTERM`
+  等终端变量仍由读取它们的模块处理。
+- `src/herdr.mjs`：解析 herdr 二进制并封装 pane 命令。
+- `src/runtime.mjs`：探测 Bun 1.4+ 或 Node 24+。
+- `src/storage.mjs`：读取并原子写入 JSON。
+- `src/retention.mjs`：只清理超过保留期的自有快照文件。
 - `src/stream-tap.mjs`：捕获子 agent 的流式活动。
+- `src/todo-title.mjs`：把 run 标题匹配到 OmO TODO 事件。
+- `src/diagnosis.mjs`：诊断模型、文案和可复制的证据包。
+- `src/clipboard.mjs`：通过 OSC52 或 pager 复制证据，并为旧版嵌入方重新导出
+  诊断与路径守卫。
+- `src/safe-path.mjs`：校验绝对路径，并保证记录读取不超出可信根目录。
+
+画面组装只有一个归属模块。它构建布局、侧栏、图和外壳，再调用拆分出的绘制模块。
+对象绘制模块把节点或任务包装成详情对象，并绘制宽屏详情正文。duty 绘制模块自己绘制
+紧凑的 duty 正文，复用对象标签与失败状态辅助函数、摘要指标/警告区块和紧凑诊断卡，
+所以两种视图不会对同一个任务给出不同说法。
+
+viewer 只保留编排。快照 I/O 在映射前完成上限校验，view model 负责选择、焦点、
+折叠和滚动，keymap 负责模态与全局按键。watch 循环、帧节奏和其他副作用仍归 viewer。
 
 快照只保存任务字段白名单；prompt、完整输出、完整 final response、transcript
 不会写入快照；详情面板只显示有界、清理后的思考/回复摘录。
@@ -257,7 +330,7 @@ OmO 进程                                  Herdr viewer 进程
 ## 开发与验证
 
 ```bash
-bun test            # 587 项行为测试
+bun test            # 运行完整行为测试套件
 bun run build       # 语法检查 + 组装 dist/
 bun run check       # test + build
 ```
