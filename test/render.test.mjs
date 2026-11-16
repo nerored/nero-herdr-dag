@@ -8,7 +8,7 @@ import {
   contrastRatio, dashboardLayout, detailsSubjectKey, navTasks, pillForeground, recordForSelection,
   renderApp, runListLayout, snapshotFreshness, taskListLayout,
 } from '../src/render.mjs';
-import { computeLayout } from '../src/graph.mjs';
+import { computeLayout, resetWireRaster, wireRasterStats } from '../src/graph.mjs';
 import { regionAt } from '../src/scroll.mjs';
 import {
   contrastRatio as themeContrastRatio, createTheme, paletteAt, paletteFor,
@@ -218,6 +218,32 @@ test('a precomputed graph layout is painted instead of recomputed', () => {
     assert.equal(moved.h, rect.h, `${id} keeps the cached height`);
   }
   assert.notEqual(reused.text, first.text, 'the cached geometry is what gets painted');
+});
+
+test('the cached wire raster paints the identical full frame as a cold build', () => {
+  for (const [label, options] of [
+    ['120x40 en animated', { width: 120, height: 40, language: 'en', motion: true, time: 750 }],
+    ['120x40 zh animated', { width: 120, height: 40, language: 'zh', motion: true, time: 1000 }],
+    ['140x42 en animated', { width: 140, height: 42, language: 'en', motion: true, time: 500 }],
+  ]) {
+    const variant = { ...ui, language: options.language, motion: options.motion };
+    const frame = {
+      width: options.width, height: options.height, time: options.time, now, palette, theme,
+    };
+    const seed = renderApp(snapshot, variant, frame);
+    assert.ok(seed.graph.layout, `${label}: the graph pane paints`);
+    const graphLayout = seed.graph.layout;
+
+    resetWireRaster();
+    const cold = renderApp(snapshot, variant, { ...frame, graphLayout });
+    assert.equal(wireRasterStats().builds, 1, `${label}: the cold frame builds one raster`);
+    const warm = renderApp(snapshot, variant, { ...frame, graphLayout });
+    assert.equal(wireRasterStats().builds, 1, `${label}: the warm frame reuses the static raster`);
+    assert.equal(wireRasterStats().hits, 1, `${label}: the warm frame is a cache hit`);
+    assert.equal(warm.text, cold.text, `${label}: ANSI text differs between cached and cold`);
+    assert.deepEqual(warm.canvas.cells, cold.canvas.cells, `${label}: cell grid differs`);
+    assert.deepEqual([...warm.hitboxes.nodes], [...cold.hitboxes.nodes], `${label}: node hitboxes differ`);
+  }
 });
 
 test('default-color page surfaces keep the terminal background transparent', () => {

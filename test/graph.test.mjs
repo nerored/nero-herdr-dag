@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { Canvas, BOLD, DIM } from '../src/canvas.mjs';
 import { DemoEngine } from '../src/demo.mjs';
 import {
-  assignSlots, computeLayout, drawGraph, MAX_LAYOUT_ROWS, wirePoints, wireShimmerIntensity,
-  pathHitsBox, WIRE_GLYPHS,
+  assignSlots, computeLayout, drawGraph, MAX_LAYOUT_ROWS, resetWireRaster, wirePoints,
+  wireRasterStats, wireShimmerIntensity, pathHitsBox, WIRE_GLYPHS,
 } from '../src/graph.mjs';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { paletteAt } from '../src/theme.mjs';
@@ -178,6 +178,133 @@ function renderLayout(layout, { motion = false, time = 0, folded = new Set() } =
   });
   return canvas;
 }
+
+function drawFrame(layout, { width = layout.width, height = layout.height, time = 0, motion = false, clip } = {}) {
+  const canvas = new Canvas(width, height, { fg: palette.text, bg: palette.panel });
+  drawGraph(canvas, layout, {
+    time, motion, palette, selectedId: undefined, folded: new Set(),
+    now: 1_000_000, connected: true, language: 'en', clip,
+  });
+  return canvas;
+}
+
+test('the wire raster is built once per layout and viewport', () => {
+  resetWireRaster();
+  const layout = computeLayout(tightRun(), 35);
+  const first = drawFrame(layout, { motion: true, time: 500 });
+  const built = wireRasterStats();
+  assert.equal(built.builds, 1, 'the first frame builds the static raster');
+  assert.equal(built.hits, 0);
+  assert.equal(built.retained, 1, 'exactly one raster is retained');
+  assert.equal(built.cells, layout.width * layout.height, 'the raster covers this layout and viewport');
+
+  const second = drawFrame(layout, { motion: true, time: 500 });
+  const warm = wireRasterStats();
+  assert.equal(warm.builds, 1, 'the same layout and viewport never rebuilds the raster');
+  assert.equal(warm.hits, 1);
+  assert.deepEqual(second.cells, first.cells, 'the reused raster paints the same frame');
+
+  // The viewer rebinds every box to the refreshed snapshot's node objects via
+  // bindGraphLayout, which shallow-copies each box. Fresh box objects with an
+  // identical rectangle must still reuse the raster.
+  const rebound = {
+    ...layout,
+    boxes: new Map([...layout.boxes].map(([id, box]) => [id, { ...box, node: box.node }])),
+  };
+  for (const [id, box] of layout.boxes) {
+    assert.notEqual(rebound.boxes.get(id), box, `${id} is a fresh box object`);
+  }
+  const third = drawFrame(rebound, { motion: true, time: 500 });
+  assert.equal(wireRasterStats().builds, 1, 'rebound box objects with identical geometry reuse the raster');
+  assert.equal(wireRasterStats().hits, 2);
+  assert.deepEqual(third.cells, first.cells, 'rebinding node objects does not repaint a wire');
+});
+
+test('a changed viewport or layout rebuilds the raster without retaining a second one', () => {
+  resetWireRaster();
+  const layout = computeLayout(tightRun(), 35);
+  const clip = { top: 0, bottom: 6 };
+  drawFrame(layout, { clip });
+  drawFrame(layout, { clip });
+  assert.equal(wireRasterStats().builds, 1, 'a repeated viewport reuses the raster');
+
+  // The viewport is part of the key: an identically sized layout scrolled to
+  // another window must not paint the previous window's cells.
+  drawFrame(layout, { clip: { top: 2, bottom: 8 } });
+  assert.equal(wireRasterStats().builds, 2, 'a new viewport builds a new raster');
+  assert.equal(wireRasterStats().cells, layout.width * 6, 'the raster is bounded to the viewport');
+
+  // Same width, different geometry: the wire geometry, not the object, decides reuse.
+  const folded = computeLayout(tightRun(), 35, { folded: new Set(['a', 'b', 'c']) });
+  assert.notEqual(folded.height, layout.height);
+  drawFrame(folded);
+  const rebuilt = wireRasterStats();
+  assert.equal(rebuilt.builds, 3, 'a changed layout builds a new raster');
+  assert.equal(rebuilt.retained, 1, 'the previous layout is dropped, not kept in a map');
+  assert.equal(rebuilt.cells, folded.width * folded.height);
+
+  // A copied layout whose boxes moved must rebuild even though its dimensions
+  // and owner objects look the same.
+  const shifted = {
+    ...folded,
+    boxes: new Map([...folded.boxes].map(([id, box]) => [id, { ...box, x: box.x + 1 }])),
+  };
+  drawFrame(shifted);
+  assert.equal(wireRasterStats().builds, 4, 'a moved box rebuilds the raster');
+
+  // Returning to the first layout rebuilds instead of leaking one raster per
+  // layout visited.
+  drawFrame(layout, { clip });
+  assert.equal(wireRasterStats().builds, 5);
+  assert.equal(wireRasterStats().retained, 1);
+});
+
+test('a moved wire point rebuilds a layout with identical boxes', () => {
+  resetWireRaster();
+  const layout = computeLayout(tightRun(), 35);
+  drawFrame(layout);
+  assert.equal(wireRasterStats().builds, 1);
+
+  // Clone the currently cached layout. Boxes keep the exact same values (the
+  // clone is shallow-copied at the layout level), so only the point compare in
+  // sameWireGeometry can explain a rebuild. These are fresh objects, matching
+  // how the renderer consumes a layout: computeLayout returns one and
+  // bindGraphLayout copies it; no product path mutates a published layout.
+  const moved = {
+    ...layout,
+    edges: layout.edges.map(edge => ({ ...edge, points: edge.points.map(point => ({ ...point })) })),
+  };
+  assert.deepEqual(moved.boxes, layout.boxes, 'the clone keeps byte-identical boxes');
+  moved.edges[0].points[0].y += 1;
+  drawFrame(moved);
+  assert.equal(wireRasterStats().builds, 2, 'only the moved wire point can cause this rebuild');
+  assert.equal(wireRasterStats().retained, 1);
+});
+
+test('a warm wire raster paints byte-identical cells to a cold build', () => {
+  const now = 1_000_000;
+  const snapshot = normalizeSnapshot(new DemoEngine({ now, startOffset: 32_000 }).snapshot(now));
+  const run = snapshot.runs.find(candidate => candidate.id === 'run_integration');
+  for (const [name, width, height, motion, time] of [
+    ['120x40 animated', 120, 40, true, 750],
+    ['120x40 static', 120, 40, false, 0],
+    ['140x42 animated', 140, 42, true, 1000],
+  ]) {
+    const layout = computeLayout(run, width);
+    const clip = { top: 0, bottom: height };
+    resetWireRaster();
+    const cold = drawFrame(layout, { height, motion, time, clip });
+    assert.equal(wireRasterStats().builds, 1, `${name}: the cold frame builds once`);
+
+    // Warm the cache at other instants so the per-frame flow array is
+    // rewritten before the compared frame.
+    drawFrame(layout, { height, motion: true, time: 0, clip });
+    drawFrame(layout, { height, motion: true, time: 1250, clip });
+    const warm = drawFrame(layout, { height, motion, time, clip });
+    assert.equal(wireRasterStats().builds, 1, `${name}: warm frames reuse the static raster`);
+    assert.deepEqual(warm.cells, cold.cells, `${name}: cached and cold frames differ`);
+  }
+});
 
 test('tight single-column detours leave and enter through vertical stubs', () => {
   const layout = computeLayout(tightRun(), 35);

@@ -53,11 +53,20 @@ export function nodeIcon(node, time, motion = true) {
 // and column dominated both allocation and GC on every frame. Edge ids
 // (1-based) record which edge contributed each arm, so a true junction can be
 // told apart from two independent wires crossing.
-class WireGrid {
-  constructor(width, height) {
+//
+// A raster covers one viewport window of one layout: rows [top, top + rows).
+// The static arrays (bits, arrow flags, edge ownership, box coverage) are
+// built once per layout and viewport; only flowAmounts is rewritten per frame
+// for the shimmer. The window bounds the memory to the rows the pane can
+// show, and the canvas cannot paint a cell outside the window either way,
+// so clipping the raster is byte-identical to the full-height grid.
+class WireRaster {
+  constructor(width, height, top, rows) {
     this.width = Math.max(1, width);
     this.height = Math.max(1, height);
-    const size = this.width * this.height;
+    this.top = Math.max(0, Math.min(this.height, Math.floor(top)));
+    this.rows = Math.max(0, Math.min(this.height - this.top, Math.floor(rows)));
+    const size = this.width * this.rows;
     this.bits = new Uint8Array(size);
     this.arrowFlags = new Uint8Array(size);
     this.flowAmounts = new Float32Array(size);
@@ -65,24 +74,19 @@ class WireGrid {
     this.hFirst = new Uint32Array(size);
     this.vMulti = new Uint8Array(size);
     this.hMulti = new Uint8Array(size);
+    this.covered = new Uint8Array(size);
   }
 
-  reset() {
-    this.bits.fill(0);
-    this.arrowFlags.fill(0);
+  resetFlow() {
     this.flowAmounts.fill(0);
-    this.vFirst.fill(0);
-    this.hFirst.fill(0);
-    this.vMulti.fill(0);
-    this.hMulti.fill(0);
   }
 
   index(x, y) {
-    return y * this.width + x;
+    return (y - this.top) * this.width + x;
   }
 
   inBounds(x, y) {
-    return x >= 0 && y >= 0 && x < this.width && y < this.height;
+    return x >= 0 && y >= this.top && x < this.width && y < this.top + this.rows;
   }
 
   record(index, first, multi, edge) {
@@ -147,18 +151,107 @@ class WireGrid {
     const index = this.index(x, y);
     if (amount > this.flowAmounts[index]) this.flowAmounts[index] = amount;
   }
+
+  // Mark every viewport row a node box occupies. Boxes outside the window
+  // need no coverage: the paint loop never visits their cells.
+  cover(box) {
+    const left = Math.max(0, box.x);
+    const right = Math.min(this.width, box.x + box.w);
+    const top = Math.max(this.top, box.y);
+    const bottom = Math.min(this.top + this.rows, box.y + box.h);
+    if (right <= left || bottom <= top) return;
+    for (let y = top; y < bottom; y++) {
+      const row = (y - this.top) * this.width;
+      this.covered.fill(1, row + left, row + right);
+    }
+  }
 }
 
-// drawWire runs once per frame on one layout. Reuse the backing arrays when
-// the dimensions match instead of allocating a full grid every frame.
-let sharedWireGrid;
-function wireGridFor(width, height) {
-  if (!sharedWireGrid || sharedWireGrid.width !== width || sharedWireGrid.height !== height) {
-    sharedWireGrid = new WireGrid(width, height);
-  } else {
-    sharedWireGrid.reset();
+// Build the static half of the raster. Fallback edges stay unmarked exactly as
+// before: an arrow on a stub would promise a route the router refused.
+function buildWireRaster(layout, top, bottom) {
+  const raster = new WireRaster(layout.width, layout.height, top, bottom - top);
+  layout.edges.forEach((edge, index) => {
+    raster.path(edge.points, index + 1);
+    if (edge.fallback) return;
+    const end = edge.points.at(-1);
+    raster.arrow(end.x, end.y);
+  });
+  for (const box of layout.boxes.values()) raster.cover(box);
+  return raster;
+}
+
+// The raster is a pure function of the wire geometry: the canvas size, every
+// node box rectangle, and every edge's polyline plus its fallback flag (edge
+// order is the edge id, which decides junction ownership). Node/label/palette
+// changes do not repaint a wire. A rebound layout after a snapshot refresh has
+// new objects but the same geometry, so identity alone would rebuild every
+// frame; comparing geometry keeps the cache useful without ever reusing a
+// raster for a moved box, a changed route or a different viewport.
+function sameWireGeometry(a, b) {
+  if (a.width !== b.width || a.height !== b.height) return false;
+  if (a.edges.length !== b.edges.length || a.boxes.size !== b.boxes.size) return false;
+  for (let index = 0; index < a.edges.length; index++) {
+    const left = a.edges[index];
+    const right = b.edges[index];
+    if (left.fallback !== right.fallback) return false;
+    if (left.points.length !== right.points.length) return false;
+    for (let point = 0; point < left.points.length; point++) {
+      if (left.points[point].x !== right.points[point].x) return false;
+      if (left.points[point].y !== right.points[point].y) return false;
+    }
   }
-  return sharedWireGrid;
+  for (const [id, box] of a.boxes) {
+    const other = b.boxes.get(id);
+    if (!other) return false;
+    if (other.x !== box.x || other.y !== box.y || other.w !== box.w || other.h !== box.h) return false;
+  }
+  return true;
+}
+
+// Exactly one raster is retained: the previous layout becomes garbage
+// instead of staying in a growing map.
+let sharedWireRaster = null;
+let wireRasterBuilds = 0;
+let wireRasterHits = 0;
+
+function wireRasterFor(layout, top, bottom) {
+  const cached = sharedWireRaster;
+  if (cached && cached.top === top && cached.bottom === bottom &&
+    (cached.layout === layout || sameWireGeometry(cached.layout, layout))) {
+    wireRasterHits++;
+    cached.layout = layout;
+    cached.raster.resetFlow();
+    return cached.raster;
+  }
+  wireRasterBuilds++;
+  const raster = buildWireRaster(layout, top, bottom);
+  sharedWireRaster = { layout, top, bottom, raster };
+  return raster;
+}
+
+// Instrumentation for the raster-cache tests and the memory probe: how many
+// static builds this process performed, how often a frame reused one, and how
+// much raster memory the single retained cache entry owns.
+export function wireRasterStats() {
+  const raster = sharedWireRaster?.raster;
+  return {
+    builds: wireRasterBuilds,
+    hits: wireRasterHits,
+    retained: sharedWireRaster ? 1 : 0,
+    width: raster?.width ?? 0,
+    rows: raster?.rows ?? 0,
+    top: raster?.top ?? 0,
+    cells: raster ? raster.width * raster.rows : 0,
+  };
+}
+
+// Drop the retained raster. Frame fixtures use this to compare a warm frame
+// with the cold build; the viewer never needs it.
+export function resetWireRaster() {
+  sharedWireRaster = null;
+  wireRasterBuilds = 0;
+  wireRasterHits = 0;
 }
 
 function wirePoints(source, target) {
@@ -590,14 +683,12 @@ export function computeLayout(run, width, { folded = new Set() } = {}) {
 }
 
 function drawWire(canvas, layout, { time, motion, palette, top = 0, bottom = layout.height }) {
-  const grid = wireGridFor(layout.width, layout.height);
-  layout.edges.forEach((edge, index) => {
-    grid.path(edge.points, index + 1);
-    if (edge.fallback) return;
-    const end = edge.points.at(-1);
-    grid.arrow(end.x, end.y);
-  });
+  const from = Math.max(0, Math.min(layout.height, Math.floor(top)));
+  const to = Math.max(from, Math.min(layout.height, Math.ceil(bottom)));
+  const raster = wireRasterFor(layout, from, to);
 
+  // Only the shimmer band changes between frames. The flow array is cleared
+  // when the raster is reused and refilled with this frame's intensities.
   if (motion) {
     layout.edges.forEach(edge => {
       const cells = flowCells(edge.points);
@@ -606,42 +697,27 @@ function drawWire(canvas, layout, { time, motion, palette, top = 0, bottom = lay
       for (const cell of cells) {
         const intensity = wireShimmerIntensity(cell.distance, total, time);
         if (!intensity) continue;
-        grid.flow(cell.x, cell.y, intensity);
+        raster.flow(cell.x, cell.y, intensity);
       }
     });
   }
 
-  // Cells owned by a node box never paint wire. A per-frame occupancy mask is
-  // O(box area); the previous per-cell box scan was O(cells * boxes).
-  const covered = new Uint8Array(grid.width * grid.height);
-  for (const box of layout.boxes.values()) {
-    const left = Math.max(0, box.x);
-    const right = Math.min(grid.width, box.x + box.w);
-    const boxTop = Math.max(0, box.y);
-    const boxBottom = Math.min(grid.height, box.y + box.h);
-    if (right <= left || boxBottom <= boxTop) continue;
-    for (let y = boxTop; y < boxBottom; y++) {
-      covered.fill(1, y * grid.width + left, y * grid.width + right);
-    }
-  }
-
   const base = palette.borderHot;
   const headColor = palette.text;
-  const from = Math.max(0, Math.floor(top));
-  const to = Math.min(grid.height, Math.ceil(bottom));
   for (let y = from; y < to; y++) {
-    for (let x = 0; x < grid.width; x++) {
-      const index = y * grid.width + x;
-      if (covered[index]) continue;
-      const bits = grid.bits[index];
-      const arrow = grid.arrowFlags[index];
+    const row = (y - from) * raster.width;
+    for (let x = 0; x < raster.width; x++) {
+      const index = row + x;
+      if (raster.covered[index]) continue;
+      const bits = raster.bits[index];
+      const arrow = raster.arrowFlags[index];
       if (!bits && !arrow) continue;
-      const flow = grid.flowAmounts[index];
+      const flow = raster.flowAmounts[index];
       const lit = motion && flow > 0.02;
       const glow = lit ? 0.9 * flow : 0;
       // A crossing is two independent edges meeting, not a junction. Keep the
       // vertical arm so the glyph cannot imply a dependency.
-      const glyphBits = grid.crossing(index) ? bits & 3 : bits;
+      const glyphBits = raster.crossing(index) ? bits & 3 : bits;
       canvas.put(x, y, arrow ? '▼' : WIRE_GLYPHS[glyphBits] ?? ' ', {
         fg: arrow
           ? mix(palette.accent, headColor, glow)
@@ -781,7 +857,7 @@ export function drawGraph(canvas, layout, options) {
   }
 }
 
-export { WIRE_GLYPHS, WireGrid, wirePoints, routeWirePoints, cellsAlong, pathHitsBox, MAX_LAYOUT_ROWS };
+export { WIRE_GLYPHS, WireRaster, wirePoints, routeWirePoints, cellsAlong, pathHitsBox, MAX_LAYOUT_ROWS };
 
 export function nodeScrollTarget(layout, nodeId, viewportHeight) {
   const box = layout.boxes.get(nodeId);
