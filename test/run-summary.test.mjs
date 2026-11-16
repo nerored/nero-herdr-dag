@@ -28,6 +28,28 @@ test('an empty run has no fabricated metrics', () => {
   assert.deepEqual(runSummary({}), { nodes: 0 });
 });
 
+test('cached run summaries are deeply frozen and preserve identity', () => {
+  const source = run([
+    node('a', {
+      startedAt: at(T0),
+      completedAt: at(T0 + 1_000),
+      tokensIn: 10,
+      tokensOut: 5,
+    }),
+  ]);
+  const summary = runSummary(source, { now: T0 + 2_000 });
+  assert.ok(Object.isFrozen(summary));
+  assert.ok(Object.isFrozen(summary.tokens));
+  assert.ok(Object.isFrozen(summary.critical));
+  assert.ok(Object.isFrozen(summary.critical.nodeIds));
+  assert.throws(() => { summary.critical.nodeIds.push('mutated'); }, TypeError);
+  assert.throws(() => { summary.tokens.in = 99; }, TypeError);
+
+  const first = runSummary(source, { now: T0 + 2_000 });
+  const second = runSummary(source, { now: T0 + 2_000 });
+  assert.equal(first, second);
+});
+
 test('node evidence sums into run totals', () => {
   const summary = runSummary(run([
     node('a', {

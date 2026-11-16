@@ -221,6 +221,24 @@ test('SingleEntryCache replaces its single entry and counts the eviction', () =>
   assert.equal(cache.size, 0);
 });
 
+test('SingleEntryCache retains the previous entry when replacement build throws', () => {
+  const cache = new SingleEntryCache('transactional');
+  const first = cache.get('a', () => ({ value: 1 }));
+  const before = cache.stats();
+  assert.throws(() => cache.get('b', () => { throw new Error('build failed'); }), /build failed/);
+  assert.equal(cache.has('a'), true);
+  assert.equal(cache.has('b'), false);
+  assert.equal(cache.get('a', () => { throw new Error('must not rebuild'); }), first);
+  assert.deepEqual(cache.stats(), { ...before, hits: before.hits + 1 });
+
+  const empty = new SingleEntryCache('empty-transactional');
+  const emptyBefore = empty.stats();
+  assert.throws(() => empty.get('a', () => { throw new Error('empty failure'); }), /empty failure/);
+  assert.equal(empty.size, 0);
+  assert.equal(empty.has('a'), false);
+  assert.deepEqual(empty.stats(), emptyBefore);
+});
+
 test('the viewer keeps one graph layout and replaces it when the run changes', async () => {
   const viewer = await createViewer(
     { noColor: true, noMotion: true, fps: 10 },

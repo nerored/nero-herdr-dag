@@ -20,8 +20,9 @@
 // reuses one entry across frames.
 //
 // Arrays and stats handed back are frozen: every caller holds the same object,
-// so a mutation would leak into the next frame. Sets stay internal to the
-// lookup and are read-only by convention, matching the old return values.
+// so a mutation would leak into the next frame. Set results are private-copy
+// read-only views: callers can inspect and iterate them, but cannot mutate the
+// cached backing set or affect a later lookup.
 //
 // Bound: every entry is either a WeakMap key (collected with the snapshot/run/
 // task it describes) or, for progressCounts, an inner Map keyed by object
@@ -31,8 +32,57 @@
 // with the WeakMap key. runSummary keeps its own four-clock ring.
 
 const EMPTY_LIST = Object.freeze([]);
-const EMPTY_SET = new Set();
 const RUN_SUMMARY_CLOCKS = 4;
+
+class ReadOnlySetView {
+  #set;
+
+  constructor(values) {
+    this.#set = new Set(values);
+  }
+
+  get size() {
+    return this.#set.size;
+  }
+
+  has(value) {
+    return this.#set.has(value);
+  }
+
+  keys() {
+    return this.#set.keys();
+  }
+
+  values() {
+    return this.#set.values();
+  }
+
+  entries() {
+    return this.#set.entries();
+  }
+
+  forEach(callback, thisArg) {
+    this.#set.forEach(value => callback.call(thisArg, value, value, this));
+  }
+
+  [Symbol.iterator]() {
+    return this.#set[Symbol.iterator]();
+  }
+
+  add() {
+    throw new TypeError('read-only Set view');
+  }
+
+  delete() {
+    throw new TypeError('read-only Set view');
+  }
+
+  clear() {
+    throw new TypeError('read-only Set view');
+  }
+}
+
+const EMPTY_SET = new ReadOnlySetView([]);
 
 const navTaskCache = new WeakMap();
 const linkedIdsCache = new WeakMap();
@@ -62,6 +112,13 @@ export function resetDerivedCacheCounts() {
 
 const cacheable = value => Boolean(value) && typeof value === 'object';
 
+function deepFreeze(value, seen = new WeakSet()) {
+  if (!cacheable(value) || seen.has(value)) return value;
+  seen.add(value);
+  for (const child of Object.values(value)) deepFreeze(child, seen);
+  return Object.freeze(value);
+}
+
 export function memoNavTasks(snapshot, compute) {
   if (!cacheable(snapshot)) return EMPTY_LIST;
   const cached = navTaskCache.get(snapshot);
@@ -77,7 +134,7 @@ export function memoLinkedTaskIds(snapshot, compute) {
   const cached = linkedIdsCache.get(snapshot);
   if (cached) return cached;
   counters.linkedTaskIds++;
-  const value = compute(snapshot);
+  const value = new ReadOnlySetView(compute(snapshot));
   linkedIdsCache.set(snapshot, value);
   return value;
 }
@@ -87,7 +144,7 @@ export function memoLinkedRunTaskIds(run, compute) {
   const cached = runLinkedIdsCache.get(run);
   if (cached) return cached;
   counters.runLinkedTaskIds++;
-  const value = compute(run);
+  const value = new ReadOnlySetView(compute(run));
   runLinkedIdsCache.set(run, value);
   return value;
 }
@@ -138,7 +195,7 @@ export function memoRunSummary(run, clock, compute) {
     if (Object.is(entry.clock, clock)) return entry.summary;
   }
   counters.runSummary++;
-  const summary = compute();
+  const summary = deepFreeze(compute());
   entries.push({ clock, summary });
   if (entries.length > RUN_SUMMARY_CLOCKS) entries.shift();
   return summary;

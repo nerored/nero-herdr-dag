@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { derivedCacheCounts, resetDerivedCacheCounts } from '../src/derived-cache.mjs';
+import {
+  derivedCacheCounts, memoLinkedRunTaskIds, memoLinkedTaskIds, resetDerivedCacheCounts,
+} from '../src/derived-cache.mjs';
 import { runStats } from '../src/model.mjs';
 import { navTasks, progressCounts, renderApp } from '../src/render.mjs';
 import { runSummary } from '../src/run-summary.mjs';
@@ -50,6 +52,36 @@ test('one frame computes navigation and run summary once per snapshot object', (
   const second = renderOverview(snapshot, { detailsScroll: 3 }, { time: 90 });
   assert.match(second.text, /RUN SUMMARY/);
   assert.deepEqual(derivedCacheCounts(), cold, 'a ui-only state change reuses the snapshot entry');
+});
+
+test('linked-id memo views isolate mutations and preserve Set iteration semantics', () => {
+  const snapshot = frameSnapshot();
+  const run = snapshot.runs[0];
+  const linkedTaskIds = new Set(['st_api', 'st_tests']);
+  const linkedRunTaskIds = new Set(['st_api']);
+  const tasks = memoLinkedTaskIds(snapshot, () => {
+    linkedTaskIds.add('compute-only');
+    return linkedTaskIds;
+  });
+  const runs = memoLinkedRunTaskIds(run, () => linkedRunTaskIds);
+
+  assert.deepEqual([...tasks], ['st_api', 'st_tests', 'compute-only']);
+  assert.equal(tasks.size, 3);
+  assert.equal(tasks.has('st_api'), true);
+  assert.deepEqual([...tasks.keys()], [...tasks]);
+  assert.deepEqual([...tasks.values()], [...tasks]);
+  assert.deepEqual([...tasks.entries()], [...tasks].map(value => [value, value]));
+  const seen = [];
+  tasks.forEach((value, key, view) => seen.push([value, key, view]));
+  assert.deepEqual(seen.map(([value, key]) => [value, key]), [...tasks].map(value => [value, value]));
+  assert.ok(seen.every(([, , view]) => view === tasks));
+  assert.throws(() => tasks.add('caller-mutation'), TypeError);
+  assert.throws(() => tasks.delete('st_api'), TypeError);
+  assert.throws(() => tasks.clear(), TypeError);
+  assert.equal(tasks.has('caller-mutation'), false);
+  assert.equal(memoLinkedTaskIds(snapshot, () => new Set()), tasks);
+  assert.equal(runs.has('st_api'), true);
+  assert.throws(() => runs.add('caller-mutation'), TypeError);
 });
 
 // A live run whose summary wall time is exactly the supplied clock offset:

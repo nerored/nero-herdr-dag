@@ -160,7 +160,10 @@ export class BoundedKeySet {
 // A cache that retains exactly one build result. It is the explicit form of the
 // single-slot caches (graph layout, wire raster): a changed key replaces the
 // value, so the retained size is always 0 or 1 and the previous entry becomes
-// collectable. `get(key, build)` counts builds, hits and replacements.
+// collectable. `get(key, build)` counts builds, hits and replacements. A
+// replacement is published only after build() succeeds: a failed build keeps
+// the previous key/value and all counters unchanged (or leaves an empty cache
+// empty), so callers retain the last known-good entry.
 export class SingleEntryCache {
   constructor(name = 'entry') {
     this.name = name;
@@ -185,12 +188,14 @@ export class SingleEntryCache {
       this.hits++;
       return this.value;
     }
-    if (this.filled) this.evictions++;
+    const value = build();
+    const replaced = this.filled;
     this.key = key;
-    this.value = build();
+    this.value = value;
     this.filled = true;
     this.builds++;
-    return this.value;
+    if (replaced) this.evictions++;
+    return value;
   }
 
   clear() {
