@@ -32,10 +32,26 @@ const SHIMMER_PADDING = 10;
 const SHIMMER_BAND_HALF_WIDTH = 5;
 const SHIMMER_SWEEP_MS = 2000;
 
-export function wireShimmerIntensity(distance, total, time) {
+function shimmerSweep(total, time) {
   const period = total + SHIMMER_PADDING * 2;
-  const sweep = ((Math.max(0, time) % SHIMMER_SWEEP_MS) / SHIMMER_SWEEP_MS) * period;
-  const bandDistance = Math.abs(distance + SHIMMER_PADDING - sweep);
+  return ((Math.max(0, time) % SHIMMER_SWEEP_MS) / SHIMMER_SWEEP_MS) * period;
+}
+
+// Intensity is nonzero only when the padded sweep lands within one band half
+// width of a cell, so the animation loop can visit that closed distance
+// window instead of every cell of every wire. The window is inclusive and
+// clipped to the cells that exist; callers still skip intensity 0 at the
+// window edges, exactly as the per-cell function does.
+export function wireShimmerBand(total, time) {
+  const sweep = shimmerSweep(total, time);
+  return {
+    start: Math.max(0, Math.ceil(sweep - SHIMMER_PADDING - SHIMMER_BAND_HALF_WIDTH)),
+    end: Math.min(total - 1, Math.floor(sweep - SHIMMER_PADDING + SHIMMER_BAND_HALF_WIDTH)),
+  };
+}
+
+export function wireShimmerIntensity(distance, total, time) {
+  const bandDistance = Math.abs(distance + SHIMMER_PADDING - shimmerSweep(total, time));
   if (bandDistance > SHIMMER_BAND_HALF_WIDTH) return 0;
   return 0.5 * (1 + Math.cos(Math.PI * (bandDistance / SHIMMER_BAND_HALF_WIDTH)));
 }
@@ -75,6 +91,10 @@ class WireRaster {
     this.vMulti = new Uint8Array(size);
     this.hMulti = new Uint8Array(size);
     this.covered = new Uint8Array(size);
+    // Filled by buildWireRaster: one cached flow-cell list per edge. The
+    // geometry cache owns the lifetime, so a reused raster never re-walks a
+    // wire just to animate it.
+    this.flowCells = [];
   }
 
   resetFlow() {
@@ -173,11 +193,15 @@ function buildWireRaster(layout, top, bottom) {
   const raster = new WireRaster(layout.width, layout.height, top, bottom - top);
   layout.edges.forEach((edge, index) => {
     raster.path(edge.points, index + 1);
+    // The flow cells share the raster's geometry lifetime: a reused raster
+    // never walks a wire again just to animate it.
+    raster.flowCells.push(flowCells(edge.points));
     if (edge.fallback) return;
     const end = edge.points.at(-1);
     raster.arrow(end.x, end.y);
   });
   for (const box of layout.boxes.values()) raster.cover(box);
+  flowCellCached = raster.flowCells.reduce((total, cells) => total + cells.length, 0);
   return raster;
 }
 
@@ -216,6 +240,14 @@ const WIRE_RASTER_CACHE_LIMIT = 1;
 let sharedWireRaster = null;
 let wireRasterBuilds = 0;
 let wireRasterHits = 0;
+// Flow-cell witnesses: allocation counts prove a reused raster owns its cell
+// lists, and the skipped/evaluated counts prove a frame visits only the
+// shimmer band instead of every wire cell.
+let flowCellAllocations = 0;
+let flowCellCached = 0;
+let shimmerCellsSkipped = 0;
+let shimmerCellsEvaluated = 0;
+let shimmerZeroCells = 0;
 
 function wireRasterFor(layout, top, bottom) {
   const cached = sharedWireRaster;
@@ -246,6 +278,13 @@ export function wireRasterStats() {
     rows: raster?.rows ?? 0,
     top: raster?.top ?? 0,
     cells: raster ? raster.width * raster.rows : 0,
+    flow: {
+      allocatedCells: flowCellAllocations,
+      cachedCells: flowCellCached,
+      skippedCells: shimmerCellsSkipped,
+      evaluatedCells: shimmerCellsEvaluated,
+      zeroCells: shimmerZeroCells,
+    },
   };
 }
 
@@ -255,6 +294,11 @@ export function resetWireRaster() {
   sharedWireRaster = null;
   wireRasterBuilds = 0;
   wireRasterHits = 0;
+  flowCellAllocations = 0;
+  flowCellCached = 0;
+  shimmerCellsSkipped = 0;
+  shimmerCellsEvaluated = 0;
+  shimmerZeroCells = 0;
 }
 
 function wirePoints(source, target) {
@@ -321,6 +365,9 @@ function flowCells(points) {
     if (last && last.x === cell.x && last.y === cell.y) continue;
     cells.push({ x: cell.x, y: cell.y, distance: cells.length });
   }
+  // Count the allocation where it happens, not where the caller intends to
+  // cache it: a regression that walks a wire per frame then shows up here.
+  flowCellAllocations += cells.length;
   return cells;
 }
 
@@ -733,13 +780,32 @@ function drawWire(canvas, layout, { time, motion, palette, top = 0, bottom = lay
   // Only the shimmer band changes between frames. The flow array is cleared
   // when the raster is reused and refilled with this frame's intensities.
   if (motion) {
-    layout.edges.forEach(edge => {
-      const cells = flowCells(edge.points);
+    layout.edges.forEach((edge, index) => {
+      // The flow cells were built with the raster and share its geometry
+      // cache key; a per-frame walk would reallocate them on every scene.
+      const cells = raster.flowCells[index];
       const total = cells.length;
-      if (total < 2) return;
-      for (const cell of cells) {
+      if (total < 2) {
+        shimmerCellsSkipped += total;
+        return;
+      }
+      const band = wireShimmerBand(total, time);
+      const start = Math.max(0, band.start);
+      const end = Math.min(total - 1, band.end);
+      const window = Math.max(0, end - start + 1);
+      // Skipped = the whole wire outside the closed distance window. Every
+      // cached cell is therefore either skipped or evaluated once.
+      shimmerCellsSkipped += total - window;
+      for (let cellIndex = start; cellIndex <= end; cellIndex++) {
+        shimmerCellsEvaluated++;
+        const cell = cells[cellIndex];
         const intensity = wireShimmerIntensity(cell.distance, total, time);
-        if (!intensity) continue;
+        // The window edges evaluate to exactly 0; skip them so raster.flow is
+        // only called for cells that can change a pixel.
+        if (!intensity) {
+          shimmerZeroCells++;
+          continue;
+        }
         raster.flow(cell.x, cell.y, intensity);
       }
     });

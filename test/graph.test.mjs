@@ -4,7 +4,8 @@ import { Canvas, BOLD, DIM } from '../src/canvas.mjs';
 import { DemoEngine } from '../src/demo.mjs';
 import {
   assignSlots, computeLayout, drawGraph, graphLayoutKey, graphLayoutMatches, MAX_LAYOUT_ROWS,
-  resetWireRaster, wirePoints, wireRasterStats, wireShimmerIntensity, pathHitsBox, WIRE_GLYPHS,
+  resetWireRaster, wirePoints, wireRasterStats, wireShimmerBand, wireShimmerIntensity,
+  pathHitsBox, WIRE_GLYPHS,
 } from '../src/graph.mjs';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { paletteAt } from '../src/theme.mjs';
@@ -304,6 +305,73 @@ test('a warm wire raster paints byte-identical cells to a cold build', () => {
     assert.equal(wireRasterStats().builds, 1, `${name}: warm frames reuse the static raster`);
     assert.deepEqual(warm.cells, cold.cells, `${name}: cached and cold frames differ`);
   }
+});
+
+test('flow cells are cached on the wire raster and reused without reallocation', () => {
+  resetWireRaster();
+  const layout = computeLayout(tightRun(), 35);
+  const cold = drawFrame(layout, { motion: true, time: 750 });
+  const built = wireRasterStats();
+  assert.equal(built.builds, 1, 'the first animated frame builds the raster');
+  assert.ok(built.flow.cachedCells > 0, 'the raster stores one flow-cell list per edge');
+  assert.equal(built.flow.allocatedCells, built.flow.cachedCells,
+    'the build allocates exactly the cells it caches');
+  assert.ok(built.flow.evaluatedCells > 0, 'the band evaluates real cells');
+  assert.ok(built.flow.skippedCells > built.flow.evaluatedCells,
+    'the band is a small window of the whole wire');
+  assert.equal(built.flow.skippedCells + built.flow.evaluatedCells, built.flow.cachedCells,
+    'every cached cell is either skipped or evaluated once');
+
+  const warm = drawFrame(layout, { motion: true, time: 750 });
+  const reused = wireRasterStats();
+  assert.equal(reused.builds, 1, 'the animated frame reuses the raster');
+  assert.equal(reused.hits, 1);
+  assert.equal(reused.flow.allocatedCells, built.flow.allocatedCells,
+    'a raster hit must not allocate flow cells again');
+  assert.equal(reused.flow.cachedCells, built.flow.cachedCells);
+  assert.deepEqual(warm.cells, cold.cells, 'cached flow cells paint the same pixels');
+
+  // A cold rebuild at the same instant must also repaint the same pixels; only
+  // the cached lists made the warm frame cheaper.
+  resetWireRaster();
+  const rebuilt = drawFrame(layout, { motion: true, time: 750 });
+  const rebuiltStats = wireRasterStats();
+  assert.deepEqual(rebuilt.cells, cold.cells, 'cold and cached animation pixels match');
+  assert.equal(rebuiltStats.flow.allocatedCells, rebuiltStats.flow.cachedCells);
+  assert.equal(rebuiltStats.flow.allocatedCells, built.flow.allocatedCells,
+    'one allocation per raster build, not per frame');
+});
+
+test('the shimmer band covers exactly the cells with nonzero intensity', () => {
+  const totals = [2, 3, 10, 44, 99, 100, 101, 120];
+  const times = [0, 1, 125, 500, 750, 999, 1000, 1250, 1500, 1999, 2000, 2731];
+  for (const total of totals) {
+    for (const time of times) {
+      const band = wireShimmerBand(total, time);
+      assert.ok(band.start >= 0, 'the band starts at an existing cell');
+      assert.ok(band.end <= total - 1, 'the band ends at an existing cell');
+      for (let distance = 0; distance < total; distance++) {
+        const inside = distance >= band.start && distance <= band.end;
+        const intensity = wireShimmerIntensity(distance, total, time);
+        if (!inside) assert.equal(intensity, 0, 'distance ' + distance + ' outside the band is dark at ' + time + 'ms / ' + total);
+        if (intensity > 0) assert.ok(inside, 'distance ' + distance + ' is lit at ' + time + 'ms / ' + total + ' but outside the band');
+      }
+    }
+  }
+});
+
+test('a zero-intensity band edge is evaluated but never painted', () => {
+  resetWireRaster();
+  const layout = computeLayout(tightRun(), 35);
+  // tightRun's single wire is 48 cells; at 500ms the padded sweep (68 * 1/4 =
+  // 17) puts both closed-window edges on integer distances, where the raised
+  // cosine evaluates to exactly 0.
+  drawFrame(layout, { motion: true, time: 500 });
+  const stats = wireRasterStats().flow;
+  assert.ok(stats.zeroCells > 0, 'the band edge hit a zero-intensity cell');
+  assert.ok(stats.evaluatedCells < stats.cachedCells, 'only the band is evaluated');
+  assert.equal(stats.skippedCells + stats.evaluatedCells, stats.cachedCells,
+    'every cached cell is either skipped or evaluated once');
 });
 
 test('tight single-column detours leave and enter through vertical stubs', () => {

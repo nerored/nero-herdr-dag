@@ -1,5 +1,5 @@
 import { createFrameBuffers } from '../src/frame-primitives.mjs';
-import { computeLayout, graphLayoutMatches, wireRasterStats } from '../src/graph.mjs';
+import { computeLayout, graphLayoutMatches, resetWireRaster, wireRasterStats } from '../src/graph.mjs';
 import { dashboardLayout, renderApp, subjectResolutionStats } from '../src/render.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -38,9 +38,10 @@ if (!graphRect) throw new Error('bench frame has no graph pane');
 // graphPanel measures the graph canvas as rect.w - 2 and then insets twice.
 const CONTENT_WIDTH = Math.max(8, graphRect.w - 4);
 
-// The UI fixture is frozen: no folded nodes, no motion, no clock-derived
-// scroll. Every run starts from the same state so only renderer work varies.
-function uiFor(run) {
+// The UI fixture is frozen: no folded nodes and no clock-derived scroll.
+// Motion is requested only by the animated row; every run starts from the same
+// state so only renderer work varies.
+function uiFor(run, motion = false) {
   return {
     runIndex: 0,
     focus: 'graph',
@@ -48,7 +49,7 @@ function uiFor(run) {
     selectedNodeId: run.nodes[0]?.id,
     selectedTaskId: undefined,
     follow: false,
-    motion: false,
+    motion,
     help: false,
     verbose: false,
     folded: new Set(),
@@ -78,6 +79,25 @@ function timed(fn) {
 
 function samplesOf(fn, count) {
   return Array.from({ length: count }, () => timed(fn));
+}
+
+// Pixel witness for the animated row: the whole cell grid (glyph, fg, bg,
+// flags, wide-glyph halves), not the ANSI text, because the color-disabled
+// bench theme strips color escapes. A cold build and a cached flow reuse
+// must hash identically at the same instant.
+function cellSignature(frame) {
+  let hash = 0x811c9dc5;
+  for (const row of frame.canvas.cells) {
+    for (const cell of row) {
+      const token = cell.ch + '\u0000' + cell.fg + '\u0000' + cell.bg +
+        '\u0000' + cell.flags + '\u0000' + cell.cont + '\u0000' + cell.width;
+      for (let index = 0; index < token.length; index++) {
+        hash ^= token.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
+      }
+    }
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 function collectGarbage() {
@@ -133,10 +153,10 @@ function budgetsFor(name, layoutMs, warmMs) {
   return [];
 }
 
-function runFixture({ name, snapshot }) {
+function runFixture({ name, snapshot, motion = false, time = 0 }) {
   const run = snapshot.runs[0];
   const now = Date.parse(snapshot.provenance?.capturedAt ?? snapshot.generatedAt) || FIXED_NOW;
-  const ui = uiFor(run);
+  const ui = uiFor(run, motion);
   // The viewer owns one frame-buffer handle for its lifetime. Reuse the same
   // handle here or the benchmark measures per-frame allocation the product
   // does not do.
@@ -152,21 +172,50 @@ function runFixture({ name, snapshot }) {
   const render = () => renderApp(snapshot, ui, {
     width: FRAME.width,
     height: FRAME.height,
-    time: 0,
+    time,
     now,
     palette,
     theme,
     graphLayout: layout,
     buffers,
   });
+  // Measure the first frame with a cold wire raster separately, then the
+  // warm median. The animated row reports both so a cache miss (or a
+  // regression back to per-frame flow allocation) is visible in the row.
+  resetWireRaster();
+  const flowBefore = wireRasterStats().flow;
+  const coldStart = performance.now();
+  const coldFrame = render();
+  const firstFrameMs = performance.now() - coldStart;
   for (let index = 0; index < WARM_WARMUP; index++) render();
   const warmSamples = samplesOf(render, WARM_SAMPLES);
+  const warmFrame = render();
   const layoutMs = median(layoutSamples);
   const warmMs = median(warmSamples);
   const budgets = budgetsFor(name, layoutMs, warmMs);
   const finite = Number.isFinite(layoutMs) && Number.isFinite(warmMs);
   const budgetPass = budgets.length ? budgets.every(budget => budget.pass) : null;
   const status = !finite ? 'FAIL' : budgets.length ? (budgetPass ? 'PASS' : 'FAIL') : 'REPORT';
+  const flowAfter = wireRasterStats().flow;
+  const coldSignature = cellSignature(coldFrame);
+  const warmSignature = cellSignature(warmFrame);
+  const motionRow = motion
+    ? {
+      time,
+      firstFrameMs: round(firstFrameMs),
+      warmMs: round(warmMs),
+      // Cold and warm must paint the same pixels; only the work changes.
+      pixelsEqual: warmSignature === coldSignature,
+      pixelHash: coldSignature,
+      flow: {
+        allocatedCells: flowAfter.allocatedCells - flowBefore.allocatedCells,
+        skippedCells: flowAfter.skippedCells - flowBefore.skippedCells,
+        evaluatedCells: flowAfter.evaluatedCells - flowBefore.evaluatedCells,
+        zeroCells: flowAfter.zeroCells - flowBefore.zeroCells,
+        cachedCells: flowAfter.cachedCells,
+      },
+    }
+    : undefined;
   return {
     fixture: name,
     nodes: run.nodes.length,
@@ -179,6 +228,7 @@ function runFixture({ name, snapshot }) {
       samplesMs: warmSamples,
       layoutReusable: graphLayoutMatches(layout, run, CONTENT_WIDTH, ui.folded),
     },
+    ...(motionRow ? { motion: motionRow } : {}),
     memory: memorySnapshot(),
     finite,
     budgets,
@@ -191,17 +241,25 @@ function formatRow(row) {
   const budgets = row.budgets.length
     ? row.budgets.map(budget => `${budget.metric}<=${budget.limitMs}`).join(' ')
     : 'report-only';
-  return [
-    row.fixture.padEnd(8),
+  const parts = [
+    row.fixture.padEnd(10),
     `nodes=${String(row.nodes).padStart(3)}`,
     `edges=${String(row.edges).padStart(3)}`,
     `layout=${row.layout.medianMs.toFixed(2)}ms`,
     `warm=${row.warm.medianMs.toFixed(2)}ms`,
-    `heap=${row.memory.heapUsedMb.toFixed(1)}MB`,
-    `rss=${row.memory.rssMb.toFixed(1)}MB`,
-    budgets,
-    row.status,
-  ].join('  ');
+  ];
+  if (row.motion) {
+    parts.push(`motion-cold=${row.motion.firstFrameMs.toFixed(2)}ms`);
+    parts.push(`motion-warm=${row.motion.warmMs.toFixed(2)}ms`);
+    parts.push(`pixels=${row.motion.pixelsEqual ? 'same' : 'CHANGED'}`);
+    parts.push(`flow-alloc=${row.motion.flow.allocatedCells}`);
+    parts.push(`flow-cached=${row.motion.flow.cachedCells}`);
+    parts.push(`flow-skip=${row.motion.flow.skippedCells}`);
+  }
+  parts.push(`heap=${row.memory.heapUsedMb.toFixed(1)}MB`);
+  parts.push(`rss=${row.memory.rssMb.toFixed(1)}MB`);
+  parts.push(budgets, row.status);
+  return parts.join('  ');
 }
 
 // The frame-path memory probe. It renders the committed demo fixture with a
@@ -300,6 +358,14 @@ function formatProbe(probe) {
 
 function failuresFor(row) {
   const failures = [];
+  if (row.motion && !row.motion.pixelsEqual) {
+    failures.push(`${row.fixture} motion pixels differ between cold and cached frames`);
+  }
+  // A reused raster must not walk a wire again: the only allocation in a
+  // motion row is the one build that fills the cache.
+  if (row.motion && row.motion.flow.allocatedCells !== row.motion.flow.cachedCells) {
+    failures.push(`${row.fixture} allocated ${row.motion.flow.allocatedCells} flow cells for ${row.motion.flow.cachedCells} cached cells`);
+  }
   if (!Number.isFinite(row.layout.medianMs)) {
     failures.push(`${row.fixture} layoutMs ${String(row.layout.medianMs)} is not finite`);
   }

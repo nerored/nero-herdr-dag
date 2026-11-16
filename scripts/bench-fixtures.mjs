@@ -84,6 +84,10 @@ export function demoSnapshot() {
 export function benchFixtures() {
   return [
     { name: 'demo', snapshot: demoSnapshot() },
+    // Animated variant of the same deterministic fixture at a mid-sweep
+    // instant. It reports cold/warm frame time and hashes the cell grid so a
+    // flow-cache regression cannot hide behind a faster median.
+    { name: 'demo/motion', snapshot: demoSnapshot(), motion: true, time: 750 },
     ...BENCH_GRAPHS.map(spec => ({ name: spec.name, snapshot: syntheticSnapshot(spec) })),
   ];
 }
