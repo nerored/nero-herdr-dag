@@ -941,7 +941,69 @@ test('run ordering and empty-run statistics are stable', () => {
   assert.equal(stats.percent, undefined);
   assert.equal(stats.percentKnown, false);
   assert.equal(stats.done, 0);
+  assert.equal(stats.finished, 0);
   assert.deepEqual(stats.counts, {
-    running: 0, completed: 0, failed: 0, blocked: 0, paused: 0, pending: 0, scheduled: 0, cancelled: 0, skipped: 0,
+    running: 0, completed: 0, failed: 0, blocked: 0, paused: 0, pending: 0,
+    scheduled: 0, cancelled: 0, skipped: 0, error: 0, interrupted: 0, lost: 0,
   });
+});
+
+test('run statistics keep completed progress apart from terminal and triage counts', () => {
+  const run = {
+    nodes: [
+      { id: 'done', state: 'completed', percent: 100 },
+      { id: 'skip', state: 'skipped' },
+      { id: 'cancel', state: 'cancelled' },
+      { id: 'err', state: 'error' },
+      { id: 'lost', state: 'lost' },
+      { id: 'fail', state: 'failed' },
+      { id: 'pause', state: 'paused' },
+      { id: 'block', state: 'blocked' },
+      { id: 'stop', state: 'interrupted' },
+      { id: 'live', state: 'running', percent: 40 },
+    ],
+  };
+  const stats = runStats(run);
+  assert.equal(stats.total, 10);
+  assert.equal(stats.done, 1, 'done is completed-only progress');
+  assert.equal(stats.finished, 7, 'finished counts every terminal state');
+  assert.equal(stats.counts.completed, 1);
+  assert.equal(stats.counts.failed, 3, 'failed, error, and lost share the failure bucket');
+  assert.equal(stats.counts.blocked, 2, 'blocked and paused share the blocked bucket');
+  assert.equal(stats.counts.error, 1);
+  assert.equal(stats.counts.lost, 1);
+  assert.equal(stats.counts.paused, 1);
+  assert.equal(stats.counts.cancelled, 1);
+  assert.equal(stats.counts.skipped, 1);
+  assert.equal(stats.counts.interrupted, 1);
+  assert.equal(stats.percentKnown, false);
+  assert.equal(stats.percent, undefined);
+});
+
+test('a run with only terminal states reports finished as the whole total', () => {
+  const run = {
+    nodes: [
+      { id: 'done', state: 'completed' },
+      { id: 'skip', state: 'skipped' },
+      { id: 'cancel', state: 'cancelled' },
+      { id: 'err', state: 'error' },
+      { id: 'lost', state: 'lost' },
+    ],
+  };
+  const stats = runStats(run);
+  assert.equal(stats.done, 1);
+  assert.equal(stats.finished, stats.total);
+  assert.equal(stats.counts.failed, 2);
+  assert.equal(stats.counts.blocked, 0);
+});
+
+test('an empty run reports percent unavailable instead of deriving from no nodes', () => {
+  const run = normalizeRun({ id: 'empty', status: 'pending', nodes: [], edges: [] });
+  assert.equal(run.provenance.percent.kind, 'unavailable');
+  assert.equal('from' in run.provenance.percent, false);
+  const stats = runStats(run);
+  assert.equal(stats.percent, undefined);
+  assert.equal(stats.percentKnown, false);
+  assert.equal(stats.done, 0);
+  assert.equal(stats.finished, 0);
 });

@@ -177,7 +177,9 @@ export function nodeProvenance(source, task, mode = 'live', { legacy = false } =
 
 export function runProvenance(raw, nodes, mode = 'live', { legacy = false } = {}) {
   if (mode === 'demo') return Object.fromEntries(['state', 'percent'].map(field => [field, provenanceEntry('simulated')]));
-  const known = nodes.every(node => Number.isFinite(node.percent));
+  // An empty run has no nodes to derive a percentage from. Every on an empty
+  // array would otherwise claim a derived percentage for work that is absent.
+  const known = nodes.length > 0 && nodes.every(node => Number.isFinite(node.percent));
   const computed = {
     state: STATUSES.has(raw?.status) ? provenanceEntry('recorded', 'status') : provenanceEntry('derived', 'nodes'),
     percent: known ? provenanceEntry('derived', 'nodes') : unavailable(),
@@ -564,20 +566,32 @@ export function nodeMap(run) {
 
 export function runStats(run) {
   const total = run.nodes.length;
-  const counts = { running: 0, completed: 0, failed: 0, blocked: 0, paused: 0, pending: 0, scheduled: 0, cancelled: 0, skipped: 0 };
+  const counts = {
+    running: 0, completed: 0, failed: 0, blocked: 0, paused: 0, pending: 0,
+    scheduled: 0, cancelled: 0, skipped: 0, error: 0, interrupted: 0, lost: 0,
+  };
   let sum = 0;
   let percentKnown = total > 0;
+  let finished = 0;
   for (const node of run.nodes) {
     counts[node.state] = (counts[node.state] ?? 0) + 1;
+    if (TERMINAL.has(node.state)) finished += 1;
     if (Number.isFinite(node.percent)) sum += node.percent;
     else percentKnown = false;
   }
+  // `failed` and `blocked` are triage buckets, not raw state names: the
+  // sidebar, the graph filter and the run summary must agree that an error or
+  // lost node is a failure and paused work is blocked. `done` stays
+  // completed-only progress; `finished` counts every terminal state.
+  counts.failed += counts.error + counts.lost;
+  counts.blocked += counts.paused;
   return {
     total,
     counts,
     percent: percentKnown ? Math.round(sum / total) : undefined,
     percentKnown,
-    done: counts.completed ?? 0,
+    done: counts.completed,
+    finished,
   };
 }
 

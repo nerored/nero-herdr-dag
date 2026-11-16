@@ -16,7 +16,7 @@ export function nodeMatchesFilter(node, filter, criticalIds = new Set()) {
   const states = [nodeState(node), node?.status].filter(Boolean);
   switch (filter) {
     case 'failed':
-      return states.includes('failed') || states.includes('error');
+      return states.includes('failed') || states.includes('error') || states.includes('lost');
     case 'blocked':
       return states.includes('blocked') || states.includes('paused');
     case 'running':

@@ -45,6 +45,23 @@ test('filters cover failed, blocked, running, and critical nodes', () => {
   assert.equal(nodeMatchesFilter(run.nodes[4], 'all'), true);
 });
 
+test('filters treat error, lost, and paused nodes as failed or blocked', () => {
+  const nodes = [
+    node('a', 'failed'),
+    node('b', 'error'),
+    node('c', 'lost'),
+    node('d', 'blocked'),
+    node('e', 'paused'),
+  ];
+  assert.deepEqual(filterCounts(nodes), {
+    all: 5, failed: 3, blocked: 2, running: 0, critical: 0,
+  });
+  assert.equal(nodeMatchesFilter(nodes[1], 'failed'), true);
+  assert.equal(nodeMatchesFilter(nodes[2], 'failed'), true);
+  assert.equal(nodeMatchesFilter(nodes[3], 'blocked'), true);
+  assert.equal(nodeMatchesFilter(nodes[4], 'blocked'), true);
+});
+
 test('focusSubgraph keeps the selected node and its direct neighbors only', () => {
   const focused = focusSubgraph(run, 'b');
   assert.deepEqual(focused.nodes.map(item => item.id), ['a', 'b', 'c']);
