@@ -477,6 +477,7 @@ export function computeLayout(run, width, { folded = new Set() } = {}) {
   const boxes = new Map();
   const rowInfo = [];
   let y = 2;
+  let unlaid = 0;
 
   const desiredFor = node => {
     const parentPositions = (parents.get(node.id) ?? [])
@@ -489,8 +490,14 @@ export function computeLayout(run, width, { folded = new Set() } = {}) {
 
   const chooseSlots = (count, desired) => assignSlots(count, desired, columns);
 
-  for (const layer of logicalRows) {
-    if (y > MAX_LAYOUT_ROWS) break;
+  for (let layerIndex = 0; layerIndex < logicalRows.length; layerIndex++) {
+    const layer = logicalRows[layerIndex];
+    if (y > MAX_LAYOUT_ROWS) {
+      // Count every node the row cap keeps off the canvas. The renderer labels
+      // this count so a capped graph never looks like the whole workflow.
+      unlaid = logicalRows.slice(layerIndex).reduce((total, rest) => total + rest.length, 0);
+      break;
+    }
     const desired = new Map(layer.map(node => [node.id, desiredFor(node)]));
     const ordered = [...layer].sort((a, b) => desired.get(a.id) - desired.get(b.id));
     for (let offset = 0; offset < ordered.length; offset += columns) {
@@ -533,6 +540,11 @@ export function computeLayout(run, width, { folded = new Set() } = {}) {
   }
   const height = Math.max(8, Math.min(MAX_LAYOUT_ROWS, y + 1));
   const boxesList = [...boxes.values()];
+  // Nodes below the clamped height have no pixels on the canvas even though a
+  // box exists; count them with the skipped layers so the loss is exact.
+  let hiddenNodes = unlaid;
+  for (const box of boxesList) if (box.y >= height) hiddenNodes += 1;
+  const capped = hiddenNodes > 0;
   // One occupancy mask per layout replaces the per-cell `boxes.some(...)`
   // scan. The old scan was O(boxes) inside every Dijkstra neighbor and every
   // routed cell; with a fan-in graph that turned one layout into seconds.
@@ -573,7 +585,8 @@ export function computeLayout(run, width, { folded = new Set() } = {}) {
     edges.push({ from: edge.from, to: edge.to, points, length: pathLength(points), fallback });
     markPath(points);
   }
-  return { width, height, rows: rowInfo, boxes, edges };
+  const fallbackEdges = edges.reduce((total, edge) => total + (edge.fallback ? 1 : 0), 0);
+  return { width, height, rows: rowInfo, boxes, edges, capped, hiddenNodes, fallbackEdges };
 }
 
 function drawWire(canvas, layout, { time, motion, palette, top = 0, bottom = layout.height }) {

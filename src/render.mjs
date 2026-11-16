@@ -891,28 +891,27 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
   const stats = run ? runStats(run) : null;
   const graphSummary = run ? runSummary(run, { now: viewNow }) : undefined;
   const warningCount = runWarningCount(run);
-  const graphBadge = text => (warningCount
-    ? `${t(language, 'warningsBadge', { count: warningCount })} · ${text}`
-    : text);
+  // Degradation is evidence, not noise: a dropped record, a capped layout, or
+  // a stub wire must be counted in the panel badge instead of disappearing.
+  const graphBadge = (text, layout) => {
+    const parts = [];
+    if (warningCount) parts.push(t(language, 'warningsBadge', { count: warningCount }));
+    if (layout?.capped) parts.push(t(language, 'graphCapped', { count: layout.hiddenNodes }));
+    if (layout?.fallbackEdges) parts.push(t(language, 'graphFallbackWires', { count: layout.fallbackEdges }));
+    parts.push(text);
+    return parts.join(' · ');
+  };
   const criticalIds = criticalNodeIds(graphSummary);
   const graphRun = focusSubgraph(run, ui.graphFocus);
   const filter = ui.graphFilter ?? 'all';
   const selectedTask = navTasks(snapshot).find(candidate => candidate.id === ui.selectedTaskId);
   const unlinked = Boolean(ui.selectedTaskUnlinked && selectedTask);
-  panel(canvas, rect, t(language, unlinked ? 'taskOverview' : 'graph'), {
-    palette,
-    focused: ui.focus === 'graph',
-    badge: unlinked
-      ? t(language, 'noNodeShort')
-      : run
-        ? graphBadge(stats.percentKnown
-          ? t(language, 'graphBadge', { nodes: stats.total, running: stats.counts.running ?? 0, percent: stats.percent })
-          : t(language, 'graphBadgeCounts', {
-            nodes: stats.total, running: stats.counts.running ?? 0, done: stats.done, total: stats.total,
-          }))
-        : t(language, 'noRun'),
-  });
   if (unlinked) {
+    panel(canvas, rect, t(language, 'taskOverview'), {
+      palette,
+      focused: ui.focus === 'graph',
+      badge: t(language, 'noNodeShort'),
+    });
     const color = statusColor(palette, selectedTask.status);
     const lines = [
       [[`${statusIcon(selectedTask.status)} `, { fg: color, bold: true }], [statusLabel(language, selectedTask.status), { fg: color, bold: true }]],
@@ -932,6 +931,11 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
     return { layout: null, scroll: 0, maxScroll: 0, viewportH: Math.max(1, rect.h - 2), nodeRects: new Map(), contentH: 0, bar: null };
   }
   if (!run) {
+    panel(canvas, rect, t(language, 'graph'), {
+      palette,
+      focused: ui.focus === 'graph',
+      badge: t(language, 'noRun'),
+    });
     renderEmptyState(canvas, rect.x + 2, rect.y + 2, rect.w - 4, rect.h - 3, snapshot, {
       palette, language, now, freshness,
     });
@@ -945,17 +949,32 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
   const contentW = Math.max(8, innerW - 2);
   const depsH = 2;
   const viewportH = Math.max(3, innerH - depsH);
+  const statsBadge = () => (stats.percentKnown
+    ? t(language, 'graphBadge', { nodes: stats.total, running: stats.counts.running ?? 0, percent: stats.percent })
+    : t(language, 'graphBadgeCounts', {
+      nodes: stats.total, running: stats.counts.running ?? 0, done: stats.done, total: stats.total,
+    }));
   let layout;
   try {
     layout = !ui.graphFocus && graphLayout && graphLayoutMatches(graphLayout, run)
       ? bindGraphLayout(graphLayout, run)
       : computeLayout(graphRun, contentW, { folded: ui.folded });
   } catch (error) {
+    panel(canvas, rect, t(language, 'graph'), {
+      palette,
+      focused: ui.focus === 'graph',
+      badge: graphBadge(statsBadge()),
+    });
     rich(canvas, innerX + 1, innerY + 1, innerW - 2, [
       [t(language, 'graphError', { error: error.message }), { fg: palette.failed, bold: true }],
     ], palette, palette.panel);
     return { layout: null, scroll: 0, maxScroll: 0, viewportH, nodeRects: new Map(), contentH: 0, bar: null };
   }
+  panel(canvas, rect, t(language, 'graph'), {
+    palette,
+    focused: ui.focus === 'graph',
+    badge: graphBadge(statsBadge(), layout),
+  });
   const maxScroll = Math.max(0, layout.height - viewportH);
   const scroll = scrollOffset(ui.graphScroll, maxScroll);
   const offset = layout.height <= viewportH ? Math.floor((viewportH - layout.height) / 2) : -scroll;

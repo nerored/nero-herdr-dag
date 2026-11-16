@@ -220,6 +220,8 @@ test('zero-gutter fallback keeps a deterministic source stub clear of boxes', ()
   const edge = layout.edges.find(candidate => candidate.from === 'a' && candidate.to === 'c');
   assert.ok(edge, 'the edge is not silently dropped');
   assert.equal(edge.fallback, true);
+  assert.equal(layout.fallbackEdges, layout.edges.filter(candidate => candidate.fallback).length);
+  assert.ok(layout.fallbackEdges > 0, 'the stub is counted, not silently substituted');
   assert.deepEqual(edge.points[0], { x: source.centerX, y: source.y + source.h });
   assert.ok(edge.points.length > 1, 'the fallback is still drawable');
   assert.equal(pathHitsBox(edge.points, [...layout.boxes.values()]), false);
@@ -329,9 +331,21 @@ test('a very long workflow is capped at MAX_LAYOUT_ROWS', () => {
   const layout = computeLayout(makeSnapshot({
     id: 'long', name: 'long', status: 'running', nodes, edges,
   }).runs[0], 120);
+  assert.equal(MAX_LAYOUT_ROWS, 4096, 'the layout cap is a measured budget, not a tunable');
   assert.equal(layout.height, MAX_LAYOUT_ROWS);
+  assert.equal(layout.capped, true);
+  assert.ok(layout.hiddenNodes > 0, 'the cap hides the tail of the workflow');
+  assert.equal(layout.boxes.size + layout.hiddenNodes, nodes.length,
+    'every node is either laid out or counted as hidden');
   assert.ok(layout.boxes.size < nodes.length, 'nodes past the cap are not laid out');
   assert.ok(layout.edges.length > 0, 'the visible prefix still routes its edges');
+
+  const short = computeLayout(makeSnapshot({
+    id: 'short', name: 'short', status: 'running',
+    nodes: nodes.slice(0, 3), edges: edges.slice(0, 2),
+  }).runs[0], 120);
+  assert.equal(short.capped, false);
+  assert.equal(short.hiddenNodes, 0);
 });
 
 // F-113: two independent edges crossing are not painted as a dependency
