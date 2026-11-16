@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { runSummary } from '../src/run-summary.mjs';
+import { summaryRows } from '../src/render-summary.mjs';
+import { paletteAt } from '../src/theme.mjs';
 
 const T0 = Date.parse('2026-11-11T12:00:00.000Z');
 const at = ms => new Date(ms).toISOString();
@@ -204,4 +207,65 @@ test('token rows require a complete in/out pair', () => {
     node('b', { tokensOut: 5 }),
   ]));
   assert.equal(summary.tokens, undefined);
+});
+
+test('summary rows are pure data and need no canvas', () => {
+  const fixture = run([
+    node('a', {
+      label: 'build-api',
+      startedAt: at(T0 + 1_000),
+      completedAt: at(T0 + 3_000),
+      tokensIn: 100,
+      tokensOut: 50,
+      costUsd: 0.01,
+      costStatus: 'reported',
+      cacheReadTokens: 100,
+      totalTokens: 200,
+      retries: 1,
+      turns: 2,
+      toolCalls: 3,
+    }),
+    node('b', {
+      label: 'build-ui',
+      startedAt: at(T0 + 2_000),
+      completedAt: at(T0 + 5_000),
+    }),
+  ], { edges: [{ from: 'a', to: 'b' }] });
+
+  // No Canvas is constructed or passed: the row builder is pure data.
+  const result = summaryRows(fixture, { counts: { completed: 2 } }, {
+    clock: T0 + 10_000,
+    palette: paletteAt(0),
+    language: 'en',
+    filter: 'all',
+    width: 100,
+    ageLabel: '5m',
+  });
+
+  assert.equal(result.labelWidth, 9);
+  assert.deepEqual(result.rows.map(row => row.type), [
+    'rich', 'rich', 'rich', 'group',
+    'metric', 'metric', 'metric', 'metric', 'metric', 'metric',
+    'gap', 'group',
+    'metric', 'metric', 'metric',
+    'gap', 'group',
+    'metric', 'metric',
+  ]);
+  assert.deepEqual(
+    result.rows.filter(row => row.type === 'group').map(row => row.label),
+    ['EFFICIENCY', 'TIME', 'SCOPE'],
+  );
+
+  const tokens = result.rows.find(row => row.type === 'metric' && row.label === 'tokens');
+  assert.equal(tokens.parts[0][0], '100 in / 50 out');
+  assert.equal(tokens.parts[1][0], ' 1/2');
+
+  // The source itself stays canvas-free, so a later edit cannot quietly make
+  // the pure split depend on a painter.
+  const source = readFileSync(new URL('../src/render-summary.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('export function summaryRows(');
+  assert.ok(start >= 0, 'summaryRows is exported');
+  const end = source.indexOf('\nexport function ', start + 1);
+  const body = source.slice(start, end === -1 ? undefined : end);
+  assert.equal(/\bcanvas\b/.test(body), false, 'summaryRows reads no canvas');
 });
