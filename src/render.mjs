@@ -37,6 +37,12 @@ import { DEFAULT_STALE_AFTER_MS } from './config.mjs';
 
 const HEADER_H = 3;
 const FOOTER_H = 2;
+
+// renderApp's canonical input is the view model built by view-model.mjs. The
+// direct (snapshot, ui, options) form stays available for embedders and frame
+// fixtures: it wraps the same pair in a bare model, never a second paint path.
+const isViewModel = value => Boolean(value && typeof value === 'object' &&
+  value.ui && Object.hasOwn(value, 'snapshot') && Object.hasOwn(value, 'frame'));
 // A connected capture older than this is no longer evidence of live work. The
 // threshold is shared with the viewer so direct render calls and `--help`
 // cannot disagree; callers may override it per frame through `ui.staleAfterMs`.
@@ -1465,10 +1471,18 @@ function renderDetails(canvas, rect, snapshot, ui, {
   return { viewportH: detailsViewportH, contentH, offset, maxScroll, bar, headings: headings.map(item => ({ row: item.row - 2, label: item.label })) };
 }
 
-export function renderApp(snapshot, ui, {
-  width = 120, height = 40, time = 0, now = Date.now(), palette, theme, graphLayout,
-  sidebar = ui.sidebar !== false, buffers,
-} = {}) {
+export function renderApp(viewOrSnapshot, uiOrOptions, options = {}) {
+  const vm = isViewModel(viewOrSnapshot)
+    ? viewOrSnapshot
+    : { snapshot: viewOrSnapshot, ui: uiOrOptions, frame: null };
+  if (isViewModel(viewOrSnapshot)) options = uiOrOptions ?? {};
+  const snapshot = vm.snapshot;
+  const ui = vm.ui;
+  let { width = 120, height = 40 } = options;
+  const {
+    time = 0, now = Date.now(), palette, theme, graphLayout,
+    sidebar = ui.sidebar !== false, buffers,
+  } = options;
   width = Math.max(20, Math.floor(width));
   height = Math.max(12, Math.floor(height));
   // Frame buffers belong to the caller-supplied handle when one is passed in.

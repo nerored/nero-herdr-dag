@@ -32,16 +32,19 @@ import {
   applyHelpScroll, dutyFocusForKey, helpKeyAction, helpScrollMetrics, isEscapeKey, keyToken,
   matchingKeys, resolveKey,
 } from './viewer-keymap.mjs';
-import { keyboardScrollTarget, regionAt, smoothScroll } from './scroll.mjs';
+import { keyboardScrollTarget, regionAt } from './scroll.mjs';
 import {
-  advanceRunSelection, collapseTransition, completedItems, expandTransition, foldedFromView,
+  collapseTransition, completedItems, expandTransition, foldedFromView,
   followTargetForRun, hiddenSnapshot, holdsPendingRun, loadViewState, moveSwitcher,
   saveViewState, setExpanded, structuralFor, switcherItems, syncFoldedRun,
 } from './view-state.mjs';
 import {
-  applySwitcherSelection, ensureSelectionState, selectNode, selectRunById, selectRunOverview,
-  selectTaskAtPoint, selectTaskHit, selectionScrollTarget, setNodeSubject,
+  applySwitcherSelection, selectionScrollTarget, setNodeSubject,
 } from './viewer-selection.mjs';
+import {
+  advanceScroll, applyFocus, attachFrame, buildViewModel, hitTargetAt, reconcile, selectNode,
+  selectRun, selectTask, settleScroll, toggleFold as toggleFoldInView,
+} from './view-model.mjs';
 import { loadOmoAppearance, loadOmoTheme } from './omo.mjs';
 import {
   boundSnapshotInput, failedReadPlaceholder, pruneHiddenSubjects, readFailureEvidence,
@@ -59,9 +62,18 @@ export {
 // existing viewer imports and tests working while callers move to the module.
 export {
   alignTaskSelection, applySwitcherSelection, applyTaskSelection, ensureSelectionState,
-  revealScrollOffset, selectNode, selectRunById, selectRunOverview, selectTaskAtPoint,
+  revealScrollOffset, selectRunById, selectRunOverview, selectTaskAtPoint,
   selectTaskHit, selectionScrollTarget, setNodeSubject,
 } from './viewer-selection.mjs';
+
+// The view-model boundary owns reconciliation, focus, folding, scrolling and
+// pointer resolution. Re-exporting the contract keeps the published viewer
+// imports and tests working.
+export {
+  advanceScroll, applyFocus, applyFocusRequest, attachFrame, buildViewModel, chromeActionAt,
+  focusForStructural, footerActionAt, hitTargetAt, reconcile, selectNode, selectRun, selectTask,
+  settleScroll, toggleFold,
+} from './view-model.mjs';
 
 // Key normalization and the ordered key tables live in viewer-keymap.mjs.
 // Re-exporting the pure helpers keeps the existing viewer imports and tests
@@ -189,19 +201,6 @@ export function frameIntervalMs(fps, motion = true) {
 // clock, and full normalization stops running 60 times a second.
 export function demoSnapshotDue(now, lastAt, minMs = 100) {
   return !Number.isFinite(lastAt) || now - lastAt >= minMs;
-}
-
-// Every scrollbar-backed region eases toward its target; wheel/key steps move
-// the target and the draw loop advances the painted offset with this helper.
-export function advanceScroll(ui, region, maxScroll, elapsedMs, interactive = true) {
-  const key = `${region}Scroll`;
-  const targetKey = `${region}ScrollTarget`;
-  const max = Math.max(0, maxScroll ?? 0);
-  ui[targetKey] = clamp(ui[targetKey] ?? 0, 0, max);
-  ui[key] = interactive
-    ? clamp(smoothScroll(ui[key] ?? 0, ui[targetKey], elapsedMs), 0, max)
-    : ui[targetKey];
-  return { key, targetKey, from: ui[key] };
 }
 
 // Pager input is untrusted record data. Strip terminal control sequences per
@@ -379,45 +378,6 @@ export function createViewerState({
   };
 }
 
-// Frame metrics exist before focus can be trusted: a region with viewportH 0
-// is not painted. When the caller supplies last-frame scroll info, focus is
-// normalized onto a painted region so a hidden RUNS/CELLS/tasks pane cannot
-// keep the keyboard focus (and scroll keys) on nothing visible.
-function hasPaintedMetrics(scrollInfo) {
-  if (!scrollInfo) return false;
-  return ['runs', 'cells', 'tasks', 'graph', 'details']
-    .some(region => Number.isFinite(scrollInfo?.[region]?.viewportH));
-}
-
-export function focusForStructural(focus, structural, scrollInfo) {
-  const painted = region => (scrollInfo?.[region]?.viewportH ?? 0) > 0;
-  const measured = hasPaintedMetrics(scrollInfo);
-  if (structural === 'duty') {
-    const next = focus === 'runs' || focus === 'cells' || focus === 'details' ? focus : 'details';
-    return measured && next !== 'details' && !painted(next) ? 'details' : next;
-  }
-  if (structural === 'investigation') {
-    let next = focus;
-    if (focus === 'runs') next = 'tasks';
-    else if (focus === 'cells') next = 'graph';
-    else if (focus !== 'tasks' && focus !== 'graph' && focus !== 'details') next = 'graph';
-    if (measured && next === 'tasks' && !painted('tasks')) next = 'graph';
-    return next;
-  }
-  return 'details';
-}
-
-// Move focus into a region that exists in the current structural class. When a
-// duty graph/task focus is inherited from a wide frame, the saved owner is
-// retained so the duty body still shows the task subject instead of silently
-// snapping back to a node.
-export function applyFocusRequest(ui, focus, structural, scrollInfo) {
-  const next = focusForStructural(focus, structural, scrollInfo);
-  if (structural === 'duty' && (focus === 'graph' || focus === 'tasks')) ui.lastFocus = focus;
-  ui.focus = next;
-  return next;
-}
-
 // A scroll key may only move a painted region. Duty lists fall back to the duty
 // body when the terminal is too short to paint them; investigation keeps its
 // existing graph/tasks/details mapping.
@@ -456,18 +416,6 @@ export function detailsVerboseAvailable(structural) {
   return structural === 'investigation' || structural === 'expanded';
 }
 
-// N4 footer actions. The render lane owns the padded hitboxes; the viewer only
-// activates the actions when a pointer lands inside one of them.
-export function footerActionAt(hitboxes, x, y) {
-  if (!hitboxes || !Number.isFinite(x) || !Number.isFinite(y)) return undefined;
-  const inside = rect => Boolean(rect) && x >= rect.x && x < rect.x + rect.w &&
-    y >= rect.y && y < rect.y + rect.h;
-  const select = hitboxes.selectHint ?? hitboxes.mouseHint;
-  if (inside(select)) return 'mouse';
-  if (inside(hitboxes.clearHint)) return 'clear';
-  return undefined;
-}
-
 export function runFooterAction(action, { toggleMouse, clear } = {}) {
   if (action === 'mouse') {
     toggleMouse?.();
@@ -478,20 +426,6 @@ export function runFooterAction(action, { toggleMouse, clear } = {}) {
     return true;
   }
   return false;
-}
-
-// Resolve every clickable piece of frame chrome in the same order selectAt
-// applies it: footer actions first, then the Help hint, then Settings. Keeping
-// the hit test pure makes the pointer contract testable without a live viewer.
-export function chromeActionAt(hitboxes, x, y) {
-  const footer = footerActionAt(hitboxes, x, y);
-  if (footer) return footer;
-  if (!hitboxes || !Number.isFinite(x) || !Number.isFinite(y)) return undefined;
-  const inside = rect => Boolean(rect) && x >= rect.x && x < rect.x + rect.w &&
-    y >= rect.y && y < rect.y + rect.h;
-  if (inside(hitboxes.helpHint)) return 'help';
-  if (inside(hitboxes.settings)) return 'settings';
-  return undefined;
 }
 
 // Each viewer owns its snapshot, watcher, render cache, and UI state. The
@@ -565,7 +499,6 @@ export async function createViewer(options = {}, deps = {}) {
   let fatalHandler;
   let toastId = 0;
   let lastCycle;
-  let lastRender;
   let lastDemoAccept = 0;
   let helpFrameDrawn = false;
   let graphLayoutCache = { key: '', layout: null };
@@ -591,6 +524,7 @@ export async function createViewer(options = {}, deps = {}) {
   const ui = createViewerState({
     noMotion, language: initialLanguage, themeName: initialThemeName, fps,
   });
+  const vm = buildViewModel(null, ui);
   ui.installVersion = INSTALL_GENERATION;
 
   const initialPalette = paletteFor(ui.themeName, { appearance });
@@ -645,7 +579,7 @@ export async function createViewer(options = {}, deps = {}) {
   }
 
   function ensureSelection() {
-    ensureSelectionState(ui, snapshot);
+    reconcile(vm, { snapshot });
   }
 
   function stateSignature(current) {
@@ -703,30 +637,7 @@ export async function createViewer(options = {}, deps = {}) {
     snapshot = hiddenSnapshot(normalized, {
       runIds: ui.hiddenRunIds, taskIds: ui.hiddenTaskIds,
     });
-    ensureSelection();
-    if (ui.follow) {
-      const advanced = advanceRunSelection(snapshot.runs, {
-        previousRunIds, hadRuns, follow: ui.follow, pinned: ui.runPinned,
-        runIndex: ui.runIndex, selectedRunId: ui.selectedRunId,
-        followTarget: ui.followTarget,
-      });
-      if (advanced.fresh) {
-        ui.runIndex = advanced.index;
-        ui.selectedRunId = advanced.selectedRunId;
-        // The fresh run owns the subject now. Move the task subject with the
-        // node instead of leaving the previous task's id in the breadcrumb.
-        const freshNode = advanced.fresh.nodes.find(node => node.state === 'running') ??
-          advanced.fresh.nodes[0];
-        ui.selectedNodeId = freshNode?.id;
-        ui.selectedTaskId = freshNode?.taskId;
-        ui.selectedTaskUnlinked = Boolean(freshNode?.taskId) &&
-          !navTasks(snapshot).some(task => task.id === freshNode.taskId);
-        ui.graphScroll = 0;
-        ui.graphScrollTarget = 0;
-        ui.manualScroll = false;
-        ui.followTarget = advanced.followTarget;
-      }
-    }
+    reconcile(vm, { snapshot, previousRunIds, hadRuns });
     if (ui.follow && snapshot.connected) follow(now);
     requestRepaint();
     return true;
@@ -756,12 +667,12 @@ export async function createViewer(options = {}, deps = {}) {
       const index = runIndexById(target.runId);
       if (index >= 0) ui.runIndex = index;
       ui.selectedRunId = target.runId;
-      applyFocusRequest(ui, 'graph', structural, lastRender?.scroll);
+      applyFocus(vm, 'graph', structural, vm.frame?.scroll);
       if (keepDutyList) ui.focus = keepDutyList;
       ui.selectedNodeId = target.nodeId;
       ui.selectedTaskUnlinked = false;
     } else {
-      applyFocusRequest(ui, 'tasks', structural, lastRender?.scroll);
+      applyFocus(vm, 'tasks', structural, vm.frame?.scroll);
       if (keepDutyList) ui.focus = keepDutyList;
       ui.selectedTaskId = target.taskId;
       ui.selectedTaskUnlinked = !nodeForTask(snapshot, target.taskId);
@@ -775,14 +686,14 @@ export async function createViewer(options = {}, deps = {}) {
   }
 
   function selectTaskById(taskId, { announce = false } = {}) {
-    const { handled, linked } = selectTaskHit(ui, snapshot, taskId);
+    const { handled, linked } = selectTask(vm, taskId);
     if (!handled) return;
     if (!linked && announce) {
       addToast(t(ui.language, 'toastTaskUnlinked', { id: taskId }), 'warning');
     }
   }
 
-  function selectTask(direction) {
+  function cycleTaskSelection(direction) {
     const tasks = navTasks(snapshot ?? { runs: [], tasks: [] });
     if (!tasks.length) return;
     const current = Math.max(0, tasks.findIndex(task => task.id === ui.selectedTaskId));
@@ -793,7 +704,7 @@ export async function createViewer(options = {}, deps = {}) {
   function stepGraphNode(direction) {
     const run = snapshot?.runs[ui.runIndex];
     if (!run?.nodes?.length) return;
-    const layout = lastRender?.graph?.layout;
+    const layout = vm.frame?.graph?.layout;
     const next = layout ? nextNodeId(layout, ui.selectedNodeId, direction) : undefined;
     const fallback = run.nodes[
       (Math.max(0, run.nodes.findIndex(node => node.id === ui.selectedNodeId)) + direction + run.nodes.length)
@@ -801,13 +712,13 @@ export async function createViewer(options = {}, deps = {}) {
     ].id;
     const nodeId = next ?? fallback;
     setNodeSubject(ui, snapshot, nodeId, { runId: run.id });
-    ui.focus = lastRender?.layout?.layout === 'duty' ? 'cells' : 'graph';
+    ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
     if (ui.graphFocus) ui.graphFocus = nodeId;
     scrollSelectedIntoView();
   }
 
   function jumpDetailsSection(direction) {
-    const info = lastRender?.scroll?.details;
+    const info = vm.frame?.scroll?.details;
     const headings = info?.headings ?? [];
     if (!headings.length) return;
     const offset = info.offset ?? 0;
@@ -820,7 +731,7 @@ export async function createViewer(options = {}, deps = {}) {
   }
 
   function toggleDetailsSection() {
-    const info = lastRender?.scroll?.details;
+    const info = vm.frame?.scroll?.details;
     const headings = info?.headings ?? [];
     if (!headings.length) return;
     const offset = info.offset ?? 0;
@@ -830,13 +741,10 @@ export async function createViewer(options = {}, deps = {}) {
     else ui.collapsedSections.add(heading.label);
   }
 
-  function switchRun(direction) {    if (!snapshot?.runs.length) return;
+  function switchRun(direction) {
+    if (!snapshot?.runs.length) return;
     const index = (ui.runIndex + direction + snapshot.runs.length) % snapshot.runs.length;
-    if (ui.runOverview) {
-      selectRunOverview(ui, snapshot, snapshot.runs[index].id, lastRender?.scroll);
-    } else {
-      selectRunById(ui, snapshot, snapshot.runs[index].id, lastRender?.scroll);
-    }
+    selectRun(vm, snapshot.runs[index].id, { overview: ui.runOverview });
   }
 
   function openSwitcher() {
@@ -889,7 +797,7 @@ export async function createViewer(options = {}, deps = {}) {
       addToast(t(ui.language, 'switcherEmpty'), 'warning');
       return;
     }
-    const applied = applySwitcherSelection(ui, snapshot, item, lastRender?.scroll);
+    const applied = applySwitcherSelection(ui, snapshot, item, vm.frame?.scroll);
     if (!applied.handled) {
       addToast(t(ui.language, applied.stale ? 'toastSwitcherStale' : 'toastTaskUnlinked', {
         id: item.id,
@@ -930,7 +838,7 @@ export async function createViewer(options = {}, deps = {}) {
     const run = snapshot?.runs?.[ui.runIndex];
     switch (id) {
       case 'overview':
-        if (run) selectRunOverview(ui, snapshot, run.id, lastRender?.scroll);
+        if (run) selectRun(vm, run.id, { overview: true });
         break;
       case 'find':
         closePalette();
@@ -954,7 +862,7 @@ export async function createViewer(options = {}, deps = {}) {
         ui.runOverview = false;
         ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
         ui.selectedTaskUnlinked = false;
-        ui.focus = lastRender?.layout?.layout === 'duty' ? 'cells' : 'graph';
+        ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
         ui.graphFocus = nodeId;
         ui.follow = false;
         break;
@@ -1016,21 +924,17 @@ export async function createViewer(options = {}, deps = {}) {
     }
   }
 
-  function toggleFold() {    const run = snapshot?.runs[ui.runIndex];
-    if (!run || ui.focus !== 'graph') return;
-    const nodeId = ui.selectedNodeId;
-    if (!nodeId) return;
-    if (ui.folded.has(nodeId)) ui.folded.delete(nodeId);
-    else ui.folded.add(nodeId);
-    if (ui.foldedByRun instanceof Map) ui.foldedByRun.set(run.id, new Set(ui.folded));
-    ui.follow = false;
-    ui.manualScroll = false;
-    const sessionKey = viewSessionKey(snapshot);
-    if (statePath && viewState && sessionKey && viewState.sessionId === sessionKey) {
-      setExpanded(viewState, run.id, nodeId, !ui.folded.has(nodeId));
-      trackWrite(saveViewStateFn(statePath, viewState))
-        .catch(error => addToast(t(ui.language, 'toastViewPreferences', { error: error.message }), 'failed'));
-    }
+  function foldSelectedNode() {
+    toggleFoldInView(vm, {
+      persist: (runId, nodeId, expanded) => {
+        const sessionKey = viewSessionKey(snapshot);
+        if (statePath && viewState && sessionKey && viewState.sessionId === sessionKey) {
+          setExpanded(viewState, runId, nodeId, expanded);
+          trackWrite(saveViewStateFn(statePath, viewState))
+            .catch(error => addToast(t(ui.language, 'toastViewPreferences', { error: error.message }), 'failed'));
+        }
+      },
+    });
   }
 
   function sidebarEnabled() {
@@ -1083,7 +987,7 @@ export async function createViewer(options = {}, deps = {}) {
       ui.graphScrollTarget = clamp(
         ui.graphScrollTarget + delta,
         0,
-        lastRender?.scroll?.graph?.maxScroll ?? maxGraphScroll(),
+        vm.frame?.scroll?.graph?.maxScroll ?? maxGraphScroll(),
       );
       return;
     }
@@ -1092,13 +996,13 @@ export async function createViewer(options = {}, deps = {}) {
       ui.tasksScrollTarget = clamp(
         (ui.tasksScrollTarget ?? 0) + delta,
         0,
-        lastRender?.scroll?.tasks?.maxScroll ?? 0,
+        vm.frame?.scroll?.tasks?.maxScroll ?? 0,
       );
       return;
     }
     if (region === 'runs' || region === 'cells') {
       const targetKey = region === 'runs' ? 'runsScrollTarget' : 'cellsScrollTarget';
-      ui[targetKey] = clamp((ui[targetKey] ?? 0) + delta, 0, lastRender?.scroll?.[region]?.maxScroll ?? 0);
+      ui[targetKey] = clamp((ui[targetKey] ?? 0) + delta, 0, vm.frame?.scroll?.[region]?.maxScroll ?? 0);
       return;
     }
     if (region === 'details') {
@@ -1106,16 +1010,16 @@ export async function createViewer(options = {}, deps = {}) {
       ui.detailsScrollTarget = clamp(
         (ui.detailsScrollTarget ?? 0) + delta,
         0,
-        lastRender?.scroll?.details?.maxScroll ?? 0,
+        vm.frame?.scroll?.details?.maxScroll ?? 0,
       );
     }
   }
 
   function dispatchKeyboardScroll(key, pressed) {
-    const structural = lastRender?.layout?.layout ?? structuralFor(terminalWidth(), {
+    const structural = vm.frame?.layout?.layout ?? structuralFor(terminalWidth(), {
       expanded: ui.expanded, sidebar: sidebarEnabled(),
     });
-    const scrollInfo = lastRender?.scroll ?? {};
+    const scrollInfo = vm.frame?.scroll ?? {};
     // Page size only needs the graph's larger step; every other painted region
     // uses half its viewport inside keyboardScrollIntent.
     const pageSize = scrollRegionForFocus(ui.focus, structural, scrollInfo) === 'graph'
@@ -1128,7 +1032,7 @@ export async function createViewer(options = {}, deps = {}) {
   }
 
   function regionStep(region) {
-    const info = lastRender?.scroll?.[region];
+    const info = vm.frame?.scroll?.[region];
     if (!info) return 1;
     return region === 'graph'
       ? Math.max(2, info.viewportH - 4)
@@ -1143,8 +1047,8 @@ export async function createViewer(options = {}, deps = {}) {
       moveSwitcherSelection(direction);
       return;
     }
-    if (!lastRender) return;
-    const region = regionAt(mouse.x, mouse.y, lastRender.hitboxes?.regions);
+    if (!vm.frame) return;
+    const region = regionAt(mouse.x, mouse.y, vm.frame.hitboxes?.regions);
     if (!region) return;
     scrollRegionBy(region, direction * regionStep(region));
   }
@@ -1154,8 +1058,8 @@ export async function createViewer(options = {}, deps = {}) {
     const tasks = navTasks(snapshot);
     const index = tasks.findIndex(task => task.id === ui.selectedTaskId);
     if (index < 0) return;
-    const viewportRows = lastRender?.scroll?.tasks?.viewportH ?? 0;
-    const max = lastRender?.scroll?.tasks?.maxScroll ?? 0;
+    const viewportRows = vm.frame?.scroll?.tasks?.viewportH ?? 0;
+    const max = vm.frame?.scroll?.tasks?.maxScroll ?? 0;
     if (!viewportRows) {
       // The task list is not painted (duty or expanded). Keep its last offset so
       // returning to investigation does not rewind the selection into view.
@@ -1281,134 +1185,120 @@ export async function createViewer(options = {}, deps = {}) {
   }
 
   function selectAt(x, y) {
-    if (!lastRender || !snapshot) return;
-    const inside = rect => x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h;
-    if (ui.palette) {
-      for (const [id, rect] of lastRender.hitboxes.palette ?? []) {
-        if (!inside(rect)) continue;
-        const items = filterCommands(commandItems(ui.language), ui.paletteFilter);
-        const index = items.findIndex(item => item.id === id);
-        if (index >= 0) {
-          ui.paletteIndex = index;
-          applyPaletteCommand(id);
-        }
-        return;
+    if (!snapshot) return;
+    // Read paths that install a failed-read placeholder do not redraw first;
+    // point the model at the snapshot the next pointer event must resolve.
+    vm.snapshot = snapshot;
+    const target = hitTargetAt(vm, x, y);
+    if (!target) return;
+    if (target.kind === 'palette') {
+      const items = filterCommands(commandItems(ui.language), ui.paletteFilter);
+      const index = items.findIndex(item => item.id === target.id);
+      if (index >= 0) {
+        ui.paletteIndex = index;
+        applyPaletteCommand(target.id);
       }
-      if (lastRender.hitboxes.palettePanel && inside(lastRender.hitboxes.palettePanel)) return;
+      return;
+    }
+    if (target.kind === 'palette-panel') return;
+    if (target.kind === 'palette-backdrop') {
       closePalette();
       return;
     }
-    if (ui.switcher) {
-      for (const [key, rect] of lastRender.hitboxes.switcher ?? []) {
-        if (!inside(rect)) continue;
-        confirmSwitcher(key);
-        return;
-      }
-      if (lastRender.hitboxes.switcherPanel && inside(lastRender.hitboxes.switcherPanel)) return;
+    if (target.kind === 'switcher') {
+      confirmSwitcher(target.key);
+      return;
+    }
+    if (target.kind === 'switcher-panel') return;
+    if (target.kind === 'switcher-backdrop') {
       ui.switcher = null;
       return;
     }
-    // Settings owns the pointer while open. Its panel paints over the
-    // breadcrumb, so this branch must run before the context hitboxes (which
-    // renderApp does not clear for this overlay).
-    if (ui.settingsMenu) {
-      const order = ['theme', 'animation', 'language'];
-      for (const [id, rect] of lastRender.hitboxes.settingsOptions ?? []) {
-        if (!inside(rect)) continue;
-        const index = order.indexOf(id);
-        if (index >= 0) applySetting(index);
-        return;
-      }
+    if (target.kind === 'settings') {
+      const index = ['theme', 'animation', 'language'].indexOf(target.id);
+      if (index >= 0) applySetting(index);
+      return;
+    }
+    if (target.kind === 'settings-backdrop') {
       ui.settingsMenu = false;
       return;
     }
-    if (lastRender.hitboxes.tasksToggle && inside(lastRender.hitboxes.tasksToggle)) {
+    if (target.kind === 'tasks-toggle') {
       ui.completedCollapsed = !ui.completedCollapsed;
       ui.tasksScroll = 0;
       ui.tasksScrollTarget = 0;
       return;
     }
-    if (lastRender.hitboxes.context) {
-      for (const kind of ['task', 'node', 'run']) {
-        const rect = lastRender.hitboxes.context[kind];
-        if (!rect || !inside(rect) || !rect.id) continue;
-        if (kind === 'run') {
-          selectRunOverview(ui, snapshot, rect.id, lastRender?.scroll);
-          return;
-        }
-        if (kind === 'task') {
-          selectTaskById(rect.id, { announce: true });
-          if (ui.expanded) {
-            ui.focus = 'details';
-            ui.lastFocus = 'tasks';
-          }
-          return;
-        }
-        const run = lastRender.run;
-        const clickedNode = run?.nodes?.find(node => node.id === rect.id);
-        if (!run || !clickedNode) return;
-        const index = runIndexById(run.id);
-        if (index >= 0) {
-          ui.runIndex = index;
-          ui.selectedRunId = run.id;
-          ui.runPinned = true;
-        }
-        ui.selectedNodeId = rect.id;
-        ui.runOverview = false;
-        ui.selectedTaskId = clickedNode.taskId;
-        ui.selectedTaskUnlinked = false;
-        ui.follow = false;
-        ui.followTarget = undefined;
-        ui.manualScroll = false;
+    if (target.kind === 'context') {
+      if (target.subject === 'run') {
+        selectRun(vm, target.id, { overview: true });
+        return;
+      }
+      if (target.subject === 'task') {
+        selectTaskById(target.id, { announce: true });
         if (ui.expanded) {
           ui.focus = 'details';
-          ui.lastFocus = 'graph';
-        } else {
-          ui.focus = lastRender.layout?.layout === 'duty' ? 'cells' : 'graph';
+          ui.lastFocus = 'tasks';
         }
         return;
       }
-    }
-    const chrome = chromeActionAt(lastRender.hitboxes, x, y);
-    if (chrome === 'mouse' || chrome === 'clear') {
-      runFooterAction(chrome, {
-        toggleMouse: () => setMouseCapture(!ui.mouseCapture),
-        clear: clearCompleted,
-      });
-      return;
-    }
-    if (chrome === 'help') {
-      ui.help = !ui.help;
-      ui.helpScroll = 0;
-      helpFrameDrawn = false;
-      return;
-    }
-    if (chrome === 'settings') {
-      openSettingsMenu();
-      return;
-    }
-    for (const [id, rect] of lastRender.hitboxes.nodes) {
-      if (!inside(rect)) continue;
-      // The painted hitbox and run are from the previous frame. Re-resolve the
+      // The breadcrumb node is painted from the previous frame. Re-resolve the
       // run in the current snapshot and require the node to still belong to it;
       // a stale hit must not retarget a same-id node in another run.
-      const paintedRunId = lastRender.run?.id;
-      const index = paintedRunId ? runIndexById(paintedRunId) : -1;
-      const run = index >= 0 ? snapshot.runs[index] : undefined;
-      const clickedNode = run?.nodes?.find(node => node.id === id);
-      if (!run || !clickedNode) continue;
-      setNodeSubject(ui, snapshot, id, { runId: run.id, manualScroll: true });
-      ui.focus = lastRender.layout?.layout === 'duty' ? 'cells' : 'graph';
+      const paintedRun = vm.frame?.run;
+      const clickedNode = paintedRun?.nodes?.find(node => node.id === target.id);
+      if (!paintedRun || !clickedNode) return;
+      const index = runIndexById(paintedRun.id);
+      if (index >= 0) {
+        ui.runIndex = index;
+        ui.selectedRunId = paintedRun.id;
+        ui.runPinned = true;
+      }
+      ui.selectedNodeId = target.id;
+      ui.runOverview = false;
+      ui.selectedTaskId = clickedNode.taskId;
+      ui.selectedTaskUnlinked = false;
+      ui.follow = false;
+      ui.followTarget = undefined;
+      ui.manualScroll = false;
+      if (ui.expanded) {
+        ui.focus = 'details';
+        ui.lastFocus = 'graph';
+      } else {
+        ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
+      }
       return;
     }
-    // Resolve the task row from the current snapshot and frame geometry. The
-    // painted hitboxes are from the previous frame; after a status reorder the
-    // old id can still exist while the row under the pointer now belongs to a
-    // different task, so the id is not trusted here.
-    const rowTask = selectTaskAtPoint(ui, snapshot, lastRender.layout?.sidebar, x, y);
-    if (rowTask.handled) {
-      if (!rowTask.linked) {
-        addToast(t(ui.language, 'toastTaskUnlinked', { id: ui.selectedTaskId }), 'warning');
+    if (target.kind === 'chrome') {
+      if (target.action === 'mouse' || target.action === 'clear') {
+        runFooterAction(target.action, {
+          toggleMouse: () => setMouseCapture(!ui.mouseCapture),
+          clear: clearCompleted,
+        });
+      } else if (target.action === 'help') {
+        ui.help = !ui.help;
+        ui.helpScroll = 0;
+        helpFrameDrawn = false;
+      } else if (target.action === 'settings') {
+        openSettingsMenu();
+      }
+      return;
+    }
+    if (target.kind === 'node') {
+      const paintedRun = vm.frame?.run;
+      const index = paintedRun ? runIndexById(paintedRun.id) : -1;
+      const run = index >= 0 ? snapshot.runs[index] : undefined;
+      const clickedNode = run?.nodes?.find(node => node.id === target.id);
+      if (!run || !clickedNode) return;
+      setNodeSubject(ui, snapshot, target.id, { runId: run.id, manualScroll: true });
+      ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
+      return;
+    }
+    if (target.kind === 'task') {
+      const clicked = selectTask(vm, target.id);
+      if (!clicked.handled) return;
+      if (!clicked.linked) {
+        addToast(t(ui.language, 'toastTaskUnlinked', { id: target.id }), 'warning');
       }
       if (ui.expanded) {
         ui.focus = 'details';
@@ -1416,10 +1306,9 @@ export async function createViewer(options = {}, deps = {}) {
       }
       return;
     }
-    for (const [id, rect] of lastRender.hitboxes.runs) {
-      if (!inside(rect)) continue;
+    if (target.kind === 'run') {
       // A run row selects the run subject so the details pane paints RUN SUMMARY.
-      if (selectRunOverview(ui, snapshot, id, lastRender?.scroll)) return;
+      selectRun(vm, target.id, { overview: true });
     }
   }
 
@@ -1467,11 +1356,11 @@ export async function createViewer(options = {}, deps = {}) {
       });
       // N3: duty has no graph/task pane, so a graph/tasks focus inherited from a
       // wide frame lands on the duty body. Explicit runs/cells focus survives.
-      applyFocusRequest(ui, ui.focus, structural, lastRender?.scroll);
+      applyFocus(vm, ui.focus, structural, vm.frame?.scroll);
       ensureSelection();
       if (ui.follow && snapshot?.connected) follow(now);
       // Follow may repoint the subject; the overlay still owns focus until Esc.
-      applyFocusRequest(ui, ui.focus, structural, lastRender?.scroll);
+      applyFocus(vm, ui.focus, structural, vm.frame?.scroll);
       const nextDetailsKey = detailsSubjectKey(snapshot, ui);
       if (ui.detailsKey !== nextDetailsKey) {
         ui.detailsKey = nextDetailsKey;
@@ -1496,25 +1385,13 @@ export async function createViewer(options = {}, deps = {}) {
         demoMode, pagerActive, width, preferredFps: fps, now, frameCostMs: ui.frameCostMs,
       });
       const renderStart = Date.now();
-      const result = renderApp(snapshot, ui, {
+      const result = renderApp(vm, {
         width, height, time: now - startAt, now, palette, theme,
         graphLayout: layoutInfo?.layout, sidebar: sidebarEnabled(), buffers: frameBuffers,
       });
       ui.frameCostMs = Date.now() - renderStart;
-      lastRender = result;
-      if (result.layout.graph) {
-        ui.graphScrollTarget = clamp(ui.graphScrollTarget, 0, result.scroll.graph.maxScroll);
-        ui.graphScroll = clamp(ui.graphScroll, 0, result.scroll.graph.maxScroll);
-      }
-      if (result.scroll.tasks.viewportH > 0) {
-        advanceScroll(ui, 'tasks', result.scroll.tasks.maxScroll, elapsed, interactive);
-      }
-      for (const region of ['runs', 'cells']) {
-        if (result.scroll[region].viewportH > 0) {
-          advanceScroll(ui, region, result.scroll[region].maxScroll, elapsed, interactive);
-        }
-      }
-      advanceScroll(ui, 'details', result.scroll.details.maxScroll, elapsed, interactive);
+      attachFrame(vm, result);
+      settleScroll(vm, result, { elapsed, interactive });
       if (interactive) {
         const frame = result.text.replaceAll('\n', '\x1b[K\r\n');
         write(`\x1b[H${frame}\x1b[K\x1b[J`);
@@ -1723,13 +1600,8 @@ export async function createViewer(options = {}, deps = {}) {
     const owner = ui.expanded
       ? (ui.lastFocus === 'tasks' ? 'tasks' : 'graph')
       : (ui.focus === 'tasks' ? 'tasks' : 'graph');
-    if (owner === 'tasks') selectTask(direction);
-    else {
-      selectNode(ui, snapshot, direction, {
-        scrollInfo: lastRender?.scroll,
-        structural: lastRender?.layout?.layout,
-      });
-    }
+    if (owner === 'tasks') cycleTaskSelection(direction);
+    else selectNode(vm, direction);
     // Expansion is an overlay, not a focus destination: cycling keeps details
     // in front and only moves the subject underneath it.
     if (ui.expanded) {
@@ -1953,7 +1825,7 @@ export async function createViewer(options = {}, deps = {}) {
       case 'runOverviewBack': {
         const run = snapshot?.runs?.[ui.runIndex];
         if (!run) return false;
-        selectRunOverview(ui, snapshot, run.id, lastRender?.scroll);
+        selectRun(vm, run.id, { overview: true });
         return true;
       }
       case 'graphFilter':
@@ -1972,7 +1844,7 @@ export async function createViewer(options = {}, deps = {}) {
         ui.runOverview = false;
         ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
         ui.selectedTaskUnlinked = false;
-        ui.focus = lastRender?.layout?.layout === 'duty' ? 'cells' : 'graph';
+        ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
         ui.graphFocus = nodeId;
         ui.follow = false;
         ui.followTarget = undefined;
@@ -2026,7 +1898,7 @@ export async function createViewer(options = {}, deps = {}) {
         addToast(t(ui.language, 'toastDemoReset'), 'warning');
         return true;
       case 'verbose': {
-        const structural = lastRender?.layout?.layout ?? structuralFor(terminalWidth(), {
+        const structural = vm.frame?.layout?.layout ?? structuralFor(terminalWidth(), {
           expanded: ui.expanded, sidebar: sidebarEnabled(),
         });
         if (!detailsVerboseAvailable(structural)) {
@@ -2038,10 +1910,10 @@ export async function createViewer(options = {}, deps = {}) {
         return true;
       }
       case 'dutyFocus': {
-        const structural = lastRender?.layout?.layout ?? structuralFor(terminalWidth(), {
+        const structural = vm.frame?.layout?.layout ?? structuralFor(terminalWidth(), {
           expanded: ui.expanded, sidebar: sidebarEnabled(),
         });
-        applyFocusRequest(ui, value.focus, structural, lastRender?.scroll);
+        applyFocus(vm, value.focus, structural, vm.frame?.scroll);
         helpFrameDrawn = false;
         return true;
       }
@@ -2086,7 +1958,7 @@ export async function createViewer(options = {}, deps = {}) {
         toggleDetailsSection();
         return true;
       case 'fold':
-        toggleFold();
+        foldSelectedNode();
         return true;
       default:
         return false;
@@ -2274,7 +2146,7 @@ export async function createViewer(options = {}, deps = {}) {
     options: { demoMode, statePath, once, interactive, paneMode, closePaneId },
     get snapshot() { return snapshot; },
     get fullSnapshot() { return fullSnapshot; },
-    get lastRender() { return lastRender; },
+    get lastRender() { return vm.frame; },
     acceptSnapshot,
     draw,
     handleKey,
