@@ -163,10 +163,14 @@ bun bin/dag-studio.mjs uninstall --agent-dir /path/to/agent
 
 安装器会在 `<agent-dir>/herdr-dag-studio/integration/` 下创建新的
 generation，并写入稳定入口 `<agent-dir>/extensions/omo-herdr-dag-studio.js`。
-每次安装使用新的模块路径，`/reload` 后能真正加载新的传递依赖；旧 generation
+每次安装使用新的模块路径，因此 `/reload` 会加载更新后的扩展模块；旧 generation
 保留为备份。
 
-安装后在 Herdr pane 中启动新的 OmO 会话，或在现有会话运行 `/reload`，然后：
+`/reload` 不会重启 viewer。图形 pane 是独立的 Node 子进程，会保持启动时使用的
+generation；`/dag-studio` 会复用仍在运行的 pane，而不是替换它。安装后请启动
+新的 OmO 会话（或关闭 DAG pane 后再次运行 `/dag-studio`）以使用新的 viewer。
+如果 `/dag-studio` 复用的 pane 所记录的 generation 早于 `current.json`，它会
+只警告一次并继续复用该 pane，绝不会替你关闭它。然后使用：
 
 ```text
 /dag-studio

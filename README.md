@@ -223,11 +223,16 @@ The installer selects the agent directory in this order:
 
 It creates a new generation under `<agent-dir>/herdr-dag-studio/integration/`
 and a stable wrapper at `<agent-dir>/extensions/omo-herdr-dag-studio.js`.
-Each install gets a fresh module URL, so `/reload` actually loads changed
-transitive modules. Previous generations remain as backups.
+Each install gets a fresh module URL, so `/reload` loads the changed extension
+modules. Previous generations remain as backups.
 
-After installing, start a new OmO session in a Herdr pane or run `/reload` in
-an existing one. Then use:
+`/reload` does not restart the viewer. The graph pane is a separate Node
+subprocess that keeps the generation it was launched with, and `/dag-studio`
+reuses a live pane instead of replacing it. After installing, start a new OmO
+session (or close the DAG pane and run `/dag-studio` again) to run the new
+viewer. If `/dag-studio` reopens a pane whose recorded generation is older than
+`current.json`, it warns once and reuses that pane; it never closes the pane for
+you. Then use:
 
 ```text
 /dag-studio

@@ -34,6 +34,7 @@ async function setup(t, herdr, options = {}) {
   const controller = new DagPane({
     sessionId: 'session-1', parentPane: 'parent', socket: '/tmp/herdr.sock', stateDir,
     cwd: stateDir, node: '/usr/bin/node', viewer: '/tmp/viewer.mjs', herdr,
+    generationFile: join(stateDir, 'current.json'),
     ...options,
   });
   t.after(() => controller.stop());
@@ -1060,4 +1061,49 @@ test('the saved snapshot omits an unused language field', async t => {
   await controller.receive({ parent_session_id: 'session-1', runs: [run] });
   const state = await readJson(controller.stateFile);
   assert.equal('language' in state, false);
+});
+
+test('a created pane record carries the install generation', async t => {
+  const mock = fixture();
+  const { controller } = await setup(t, mock.herdr, { installGeneration: 'generation-000004' });
+  await controller.receive({ parent_session_id: 'session-1', runs: [run] });
+  const record = await readJson(controller.recordFile);
+  assert.equal(record.paneId, 'viewer');
+  assert.equal(record.ready, true);
+  assert.equal(record.generation, 'generation-000004');
+});
+
+test('opening a pane from an older generation warns once and never closes it', async t => {
+  const messages = [];
+  const mock = fixture();
+  const { controller } = await setup(t, mock.herdr, {
+    installGeneration: 'generation-000004', notify: message => messages.push(message),
+  });
+  mock.panes.set('viewer', { pane_id: 'viewer', tab_id: 't1', label: dagTitle('session-1') });
+  await writeJson(controller.generationFile, { generation: 'generation-000006' });
+  await writeJson(controller.recordFile, {
+    paneId: 'viewer', ready: true, generation: 'generation-000003',
+  });
+  for (let attempt = 0; attempt < 2; attempt++) assert.equal(await controller.open(), 'viewer');
+  const warnings = messages.filter(message => message.includes('current install'));
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /generation-000003/);
+  assert.match(warnings[0], /generation-000006/);
+  assert.equal(mock.calls.filter(call => call[0] === 'close').length, 0);
+  assert.equal(mock.calls.filter(call => call[0] === 'split').length, 0);
+});
+
+test('a pane from the current generation opens without a warning', async t => {
+  const messages = [];
+  const mock = fixture();
+  const { controller } = await setup(t, mock.herdr, {
+    installGeneration: 'generation-000004', notify: message => messages.push(message),
+  });
+  mock.panes.set('viewer', { pane_id: 'viewer', tab_id: 't1', label: dagTitle('session-1') });
+  await writeJson(controller.generationFile, { generation: 'generation-000004' });
+  await writeJson(controller.recordFile, {
+    paneId: 'viewer', ready: true, generation: 'generation-000004',
+  });
+  assert.equal(await controller.open(), 'viewer');
+  assert.deepEqual(messages, []);
 });

@@ -60,6 +60,11 @@ export function dagTitle(sessionId) {
   return `DAG Studio · ${sessionId.slice(0, 8)}`;
 }
 
+function generationNumber(value) {
+  const match = typeof value === 'string' ? /^generation-(\d+)$/.exec(value) : null;
+  return match ? Number(match[1]) : undefined;
+}
+
 export function isDagViewerPane(pane) {
   return [pane?.label, pane?.terminal_title, pane?.terminal_title_stripped]
     .some(name => typeof name === 'string' &&
@@ -172,11 +177,12 @@ export class DagPane {
     sessionId, parentPane, socket, stateDir, cwd, node, viewer, herdr,
     // Herdr's split ratio is the source pane's share; 2/3 leaves the viewer pane at 1/3.
     notify = () => {}, taskStateDir, taskStateDirs, retentionDays, streamDelay = 250, ratio = 2 / 3, sessionFile,
-    translate,
+    translate, installGeneration, generationFile,
   }) {
     Object.assign(this, {
       sessionId, parentPane, stateDir, cwd, node, viewer, herdr, notify, ratio, sessionFile,
       translate: typeof translate === 'function' ? translate : undefined,
+      installGeneration, generationFile,
     });
     this.key = viewKey(socket, parentPane, sessionId);
     this.stateFile = join(stateDir, `${this.key}.json`);
@@ -247,6 +253,29 @@ export class DagPane {
     if (this.warnings.has(dedupeKey)) return;
     this.warnings.add(dedupeKey);
     this.emit(key, params, fallback);
+  }
+
+  // `/dag-studio` reopens the pane's already-running viewer subprocess; it does
+  // not restart it. When the install on disk is newer than the generation that
+  // launched the pane, say so once. Never close the pane behind the operator's
+  // back: the warning is the whole contract.
+  async checkPaneGeneration(record) {
+    if (!this.installGeneration || !this.generationFile || !record?.paneId) return;
+    const pane = generationNumber(record.generation);
+    if (pane === undefined) return;
+    let installed;
+    try {
+      installed = await readJson(this.generationFile);
+    } catch (error) {
+      this.warnOnce('generation-pointer',
+        `DAG Studio: cannot read the install generation: ${clean(error?.message ?? error)}`);
+      return;
+    }
+    const current = generationNumber(installed?.generation);
+    if (current === undefined || current <= pane) return;
+    this.warnOnce('pane-generation',
+      `DAG Studio: this pane was started by ${record.generation}, but the current install is ${installed.generation}. ` +
+      '/reload reloads the extension only; start a new session to run the new viewer.');
   }
 
   enqueue(job) {
@@ -574,7 +603,9 @@ export class DagPane {
       }
       await this.restoreRuns();
       await this.save(true);
-      return this.ensure(true);
+      const paneId = await this.ensure(true);
+      await this.checkPaneGeneration(await readJson(this.recordFile));
+      return paneId;
     });
   }
 
@@ -637,7 +668,10 @@ export class DagPane {
     this.assertActive();
     if (typeof this.node === 'function') this.node = await this.node();
     this.assertActive();
-    await writeJson(this.recordFile, { attempted: true });
+    await writeJson(this.recordFile, {
+      attempted: true,
+      ...(this.installGeneration ? { generation: this.installGeneration } : {}),
+    });
     this.assertActive();
     await this.closeDagPanes();
     this.assertActive();
@@ -649,13 +683,14 @@ export class DagPane {
       // Shutdown can land while the split is in flight. Never rename or launch
       // a viewer for a dead session: close the pane just created and abort.
       this.assertActive();
-      await writeJson(this.recordFile, { paneId, ready: false });
+      const record = { paneId, ...(this.installGeneration ? { generation: this.installGeneration } : {}) };
+      await writeJson(this.recordFile, { ...record, ready: false });
       this.assertActive();
       await this.herdr('rename', paneId, dagTitle(this.sessionId));
       this.assertActive();
       await this.herdr('run', paneId, shellCommand([this.node, this.viewer, '--state', this.stateFile, '--close-pane', paneId, '--pane']));
       this.assertActive();
-      await writeJson(this.recordFile, { paneId, ready: true });
+      await writeJson(this.recordFile, { ...record, ready: true });
       return paneId;
     } catch (error) {
       if (this.stopped) await this.closePane(paneId);

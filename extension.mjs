@@ -1,4 +1,4 @@
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DagPane } from './src/controller.mjs';
 import { createHerdr, herdrSession } from './src/herdr.mjs';
@@ -7,12 +7,27 @@ import { resolveViewerRuntime } from './src/runtime.mjs';
 import { tapStreams } from './src/stream-tap.mjs';
 import { resolveTaskStateDirs } from './src/task-data.mjs';
 
-export default function extension(pi) {
+// The installer places this module at
+// <agent-dir>/herdr-dag-studio/integration/generation-NNNNNN/extension.mjs and
+// keeps current.json beside the integration directory. A checkout load has
+// neither, so the pane-generation check is simply unavailable there.
+export function installLocation(moduleUrl) {
+  const dir = dirname(fileURLToPath(moduleUrl));
+  const generation = /^generation-\d+$/.test(basename(dir)) ? basename(dir) : undefined;
+  return {
+    generation,
+    pointer: generation === undefined ? undefined : join(dir, '..', '..', 'current.json'),
+  };
+}
+
+export default function extension(pi, { moduleUrl = import.meta.url } = {}) {
   if (!herdrSession()) return;
   let controller;
   let unsubscribe;
   let streams;
-  const viewer = join(dirname(fileURLToPath(import.meta.url)), 'src', 'viewer.mjs');
+  const moduleDir = dirname(fileURLToPath(moduleUrl));
+  const viewer = join(moduleDir, 'src', 'viewer.mjs');
+  const installed = installLocation(moduleUrl);
   const stateDir = readEnv().stateDir;
 
   async function stop() {
@@ -50,6 +65,8 @@ export default function extension(pi) {
       taskStateDirs,
       taskStateDir: taskStateDirs[0]?.root,
       sessionFile: ctx.sessionManager.getSessionFile?.(),
+      installGeneration: installed.generation,
+      generationFile: installed.pointer,
     });
     const owner = controller;
     streams = tapStreams(
