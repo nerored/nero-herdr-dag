@@ -12,8 +12,9 @@ import { keyboardScrollTarget } from './scroll.mjs';
 import { clamp } from './text.mjs';
 import { themeNames } from './theme.mjs';
 import {
-  completedItems, foldedFromView, followTargetForRun, hiddenSnapshot, holdsPendingRun, loadViewState,
-  moveSwitcher, saveViewState, setExpanded, structuralFor, switcherItems, syncFoldedRun,
+  collapseTransition, completedItems, expandTransition, foldedFromView, followTargetForRun,
+  hiddenSnapshot, holdsPendingRun, loadViewState, moveSwitcher, saveViewState, setExpanded,
+  structuralFor, switcherItems, syncFoldedRun,
 } from './view-state.mjs';
 import { applySwitcherSelection, selectionScrollTarget, setNodeSubject } from './viewer-selection.mjs';
 import {
@@ -97,6 +98,13 @@ export function createViewerState({
     toasts: [],
     ...overrides,
   };
+}
+
+// The duty body does not paint the tier-3 verbose blocks yet, so `d` is a
+// wide/expanded-mode action there. The caller toasts that limitation instead of
+// claiming a frame change that did not happen.
+export function detailsVerboseAvailable(structural) {
+  return structural === 'investigation' || structural === 'expanded';
 }
 
 // A scroll key may only move a painted region. Duty lists fall back to the duty
@@ -303,11 +311,65 @@ export function createViewerSession({
   }
 
   function selectTaskById(taskId, { announce = false } = {}) {
-    const { handled, linked } = selectTask(vm, taskId);
-    if (!handled) return;
-    if (!linked && announce) {
+    const result = selectTask(vm, taskId);
+    if (!result.handled) return result;
+    if (!result.linked && announce) {
       addToast(t(ui.language, 'toastTaskUnlinked', { id: taskId }), 'warning');
     }
+    return result;
+  }
+
+  // Expanded mode routes a task selection into the details pane. The caller
+  // decides whether a handled selection is required: breadcrumb hits keep the
+  // historical focus write even when the stale task no longer resolves.
+  function focusTaskDetails() {
+    if (!ui.expanded) return;
+    ui.focus = 'details';
+    ui.lastFocus = 'tasks';
+  }
+
+  // Pointer targets are resolved against the painted frame; these commands own
+  // the subject writes so the input module never mutates the view model.
+  function selectRunFromPointer(runId) {
+    selectRun(vm, runId, { overview: true });
+  }
+
+  function selectNodeFromContext(nodeId) {
+    // The breadcrumb node is painted from the previous frame. Re-resolve the
+    // run in the current snapshot and require the node to still belong to it;
+    // a stale hit must not retarget a same-id node in another run.
+    const paintedRun = vm.frame?.run;
+    const clickedNode = paintedRun?.nodes?.find(node => node.id === nodeId);
+    if (!paintedRun || !clickedNode) return;
+    const index = runIndexById(paintedRun.id);
+    if (index >= 0) {
+      ui.runIndex = index;
+      ui.selectedRunId = paintedRun.id;
+      ui.runPinned = true;
+    }
+    ui.selectedNodeId = nodeId;
+    ui.runOverview = false;
+    ui.selectedTaskId = clickedNode.taskId;
+    ui.selectedTaskUnlinked = false;
+    ui.follow = false;
+    ui.followTarget = undefined;
+    ui.manualScroll = false;
+    if (ui.expanded) {
+      ui.focus = 'details';
+      ui.lastFocus = 'graph';
+    } else {
+      ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
+    }
+  }
+
+  function selectNodeFromPointer(nodeId) {
+    const paintedRun = vm.frame?.run;
+    const index = paintedRun ? runIndexById(paintedRun.id) : -1;
+    const run = index >= 0 ? snapshot.runs[index] : undefined;
+    const clickedNode = run?.nodes?.find(node => node.id === nodeId);
+    if (!run || !clickedNode) return;
+    setNodeSubject(ui, snapshot, nodeId, { runId: run.id, manualScroll: true });
+    ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
   }
 
   function cycleTaskSelection(direction) {
@@ -897,6 +959,130 @@ export function createViewerSession({
     }
   }
 
+  // Global-action commands. The viewer dispatches the key; these own the
+  // durable UI writes, transitions, and toasts, matching the session boundary.
+  function toggleCompleted() {
+    ui.completedCollapsed = !ui.completedCollapsed;
+    ui.tasksScroll = 0;
+    ui.tasksScrollTarget = 0;
+  }
+
+  function toggleHelp() {
+    ui.help = !ui.help;
+    ui.helpScroll = 0;
+    helpFrameDrawn = false;
+  }
+
+  function invalidateHelpFrame() {
+    helpFrameDrawn = false;
+  }
+
+  function escape() {
+    if (ui.graphFilter !== 'all' || ui.graphFocus) {
+      ui.graphFilter = 'all';
+      ui.graphFocus = undefined;
+      return;
+    }
+    const collapsed = collapseTransition(ui);
+    if (collapsed) Object.assign(ui, collapsed);
+  }
+
+  function setGraphFilter(value) {
+    ui.graphFilter = ['all', 'failed', 'blocked', 'running', 'critical'][value];
+    ui.graphFocus = undefined;
+  }
+
+  function focusGraphNode() {
+    const run = snapshot?.runs[ui.runIndex];
+    if (!run?.nodes?.length) return;
+    if (ui.graphFocus) {
+      ui.graphFocus = undefined;
+      return;
+    }
+    const nodeId = ui.selectedNodeId ?? run.nodes[0].id;
+    ui.selectedNodeId = nodeId;
+    ui.runOverview = false;
+    ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
+    ui.selectedTaskUnlinked = false;
+    ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
+    ui.graphFocus = nodeId;
+    ui.follow = false;
+    ui.followTarget = undefined;
+  }
+
+  function showRunOverview() {
+    const run = snapshot?.runs?.[ui.runIndex];
+    if (!run) return false;
+    selectRun(vm, run.id, { overview: true });
+    return true;
+  }
+
+  function toggleSidebar() {
+    if (terminalWidth() >= 112) {
+      ui.sidebar = !ui.sidebar;
+      addToast(t(ui.language, ui.sidebar ? 'toastSidebarOn' : 'toastSidebarOff'), 'info');
+    } else addToast(t(ui.language, 'toastSidebarHidden'), 'warning');
+  }
+
+  function toggleFollow() {
+    ui.follow = !ui.follow;
+    if (ui.follow) {
+      ui.runPinned = false;
+      follow();
+    }
+    addToast(t(ui.language, ui.follow ? 'toastFollowOn' : 'toastFollowOff'), 'info');
+  }
+
+  function resetDemoView() {
+    ui.hiddenRunIds.clear();
+    ui.hiddenTaskIds.clear();
+    ui.toasts = [];
+    addToast(t(ui.language, 'toastDemoReset'), 'warning');
+  }
+
+  function toggleVerbose() {
+    const structural = vm.frame?.layout?.layout ?? structuralFor(terminalWidth(), {
+      expanded: ui.expanded, sidebar: sidebarEnabled(),
+    });
+    if (!detailsVerboseAvailable(structural)) {
+      addToast(t(ui.language, 'toastDetailsWideOnly'), 'warning');
+      return;
+    }
+    ui.verbose = !ui.verbose;
+    addToast(t(ui.language, ui.verbose ? 'toastDetailsVerbose' : 'toastDetailsCompact'), 'info');
+  }
+
+  function focusDuty(focus) {
+    const structural = vm.frame?.layout?.layout ?? structuralFor(terminalWidth(), {
+      expanded: ui.expanded, sidebar: sidebarEnabled(),
+    });
+    applyFocus(vm, focus, structural, vm.frame?.scroll);
+    helpFrameDrawn = false;
+  }
+
+  function expandDetails() {
+    if (!ui.expanded) Object.assign(ui, expandTransition(ui));
+  }
+
+  function toggleTaskScope() {
+    const structural = structuralFor(terminalWidth(), {
+      expanded: ui.expanded, sidebar: sidebarEnabled(),
+    });
+    if (structural !== 'investigation' || !sidebarEnabled() || ui.expanded) {
+      openSwitcher();
+      return;
+    }
+    ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
+    ui.tasksScroll = 0;
+    ui.tasksScrollTarget = 0;
+  }
+
+  // A failed read installs a placeholder snapshot without a draw; the pointer
+  // resolver and its commands must read that snapshot, not the last frame's.
+  function syncPointerViewModel() {
+    vm.snapshot = snapshot;
+  }
+
   return {
     ui,
     vm,
@@ -913,6 +1099,10 @@ export function createViewerSession({
     acceptSnapshot,
     follow,
     selectTaskById,
+    focusTaskDetails,
+    selectRunFromPointer,
+    selectNodeFromContext,
+    selectNodeFromPointer,
     cycleTaskSelection,
     stepDutyTask,
     stepGraphNode,
@@ -950,5 +1140,20 @@ export function createViewerSession({
     undoCleared,
     restoreHidden,
     cycle,
+    toggleCompleted,
+    toggleHelp,
+    invalidateHelpFrame,
+    escape,
+    setGraphFilter,
+    focusGraphNode,
+    showRunOverview,
+    toggleSidebar,
+    toggleFollow,
+    resetDemoView,
+    toggleVerbose,
+    focusDuty,
+    expandDetails,
+    toggleTaskScope,
+    syncPointerViewModel,
   };
 }
