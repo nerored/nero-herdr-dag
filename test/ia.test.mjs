@@ -11,7 +11,7 @@ import {
   switcherItems,
 } from '../src/view-state.mjs';
 import { applySwitcherSelection, createViewer, selectRunById } from '../src/viewer.mjs';
-import { baseUi as makeBaseUi, themeFor } from './helpers.mjs';
+import { baseUi as makeBaseUi, renderWith, themeFor } from './helpers.mjs';
 
 const now = 1_000_000;
 const snapshot = normalizeSnapshot(new DemoEngine({ now, startOffset: 32_000 }).snapshot(now));
@@ -21,11 +21,10 @@ const baseUi = makeBaseUi({
   expanded: false, returnFocus: 'graph', switcher: null,
 });
 
-function render(overrides = {}, { width = 120, height = 40 } = {}) {
-  return renderApp(snapshot, { ...baseUi, ...overrides }, {
-    width, height, time: 0, now, palette, theme,
-  });
-}
+const render = (overrides = {}, options = {}) => renderWith(
+  renderApp, snapshot, baseUi, palette, theme, now, overrides,
+  { width: 120, height: 40, ...options },
+);
 
 function frameLines(result) {
   return result.text.split('\n');

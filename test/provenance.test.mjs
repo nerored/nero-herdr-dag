@@ -11,7 +11,7 @@ import { renderApp } from '../src/render.mjs';
 import { normalizeOmOTask } from '../src/task-data.mjs';
 import { readJson } from '../src/storage.mjs';
 import { width as textWidth } from '../src/text.mjs';
-import { baseUi as makeBaseUi, themeFor } from './helpers.mjs';
+import { baseUi as makeBaseUi, renderWith, themeFor } from './helpers.mjs';
 
 const now = 1_000_000;
 const { palette, theme } = themeFor(0);
@@ -61,11 +61,10 @@ function stateFixture(mode) {
   });
 }
 
-function render(snapshot, overrides = {}, { width = 120, height = 40 } = {}) {
-  return renderApp(snapshot, { ...baseUi, ...overrides }, {
-    width, height, time: 0, now, palette, theme,
-  });
-}
+const render = (snapshot, overrides = {}, options = {}) => renderWith(
+  renderApp, snapshot, baseUi, palette, theme, now, overrides,
+  { width: 120, height: 40, ...options },
+);
 
 function detailsLines(result) {
   const { x, y, w, h } = result.layout.details;

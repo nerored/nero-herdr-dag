@@ -45,7 +45,9 @@ async function runInstalled(t, {
   const moduleUrl = pathToFileURL(join(container, generation, 'extension.mjs')).href;
 
   const keys = ['HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_SOCKET_PATH', 'HERDR_BIN_PATH', 'OMO_CODING_AGENT_DIR'];
+  keys.push('OMO_HERDR_DAG_STUDIO_STATE_DIR');
   const saved = new Map(keys.map(key => [key, process.env[key]]));
+  delete process.env.OMO_HERDR_DAG_STUDIO_STATE_DIR;
   Object.assign(process.env, {
     HERDR_ENV: '1',
     HERDR_PANE_ID: 'pane-1',
@@ -142,6 +144,8 @@ test('session_start skips non-TUI modes before constructing a DagPane', async t 
   const socket = join(dir, 'herdr.sock');
   writeFileSync(socket, '');
   const stateDir = join(dir, 'state');
+  const ambientStateDir = mkdtempSync(join(tmpdir(), 'dag-extension-ambient-'));
+  t.after(() => rmSync(ambientStateDir, { recursive: true, force: true }));
 
   const keys = ['HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_SOCKET_PATH', 'HERDR_BIN_PATH', 'OMO_HERDR_DAG_STUDIO_STATE_DIR'];
   const saved = new Map(keys.map(key => [key, process.env[key]]));
@@ -150,7 +154,7 @@ test('session_start skips non-TUI modes before constructing a DagPane', async t 
     HERDR_PANE_ID: 'pane-1',
     HERDR_SOCKET_PATH: socket,
     HERDR_BIN_PATH: bin,
-    OMO_HERDR_DAG_STUDIO_STATE_DIR: stateDir,
+    OMO_HERDR_DAG_STUDIO_STATE_DIR: ambientStateDir,
   });
 
   try {
@@ -181,6 +185,7 @@ test('session_start skips non-TUI modes before constructing a DagPane', async t 
         { message: 'DAG Studio is unavailable in this session.', level: 'warning' },
       ]);
       assert.equal(existsSync(stateDir), false);
+      assert.equal(existsSync(ambientStateDir), true);
     }
   } finally {
     for (const [key, value] of saved) {

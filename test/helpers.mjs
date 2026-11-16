@@ -1,8 +1,15 @@
-import { readFileSync, watch } from 'node:fs';
-import { basename, dirname } from 'node:path';
+import { mkdirSync, readFileSync, watch, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { createTheme, paletteAt, paletteFor } from '../src/theme.mjs';
 import { createViewer, createViewerState } from '../src/viewer.mjs';
+
+const mkdtempSync = prefix => {
+  const path = join(tmpdir(), `${prefix}${crypto.randomUUID()}`);
+  mkdirSync(path, { recursive: true });
+  return path;
+};
 
 // Shared fixtures for the node:test suite. Everything here is a plain factory;
 // each test still owns its assertions and the suite keeps using node:test.
@@ -53,7 +60,6 @@ export function makeSnapshot(fields = {}) {
     version: 2,
     sessionId: 'test-session',
     connected: true,
-    runs: [],
     tasks: [],
     ...fields,
   });
@@ -61,6 +67,31 @@ export function makeSnapshot(fields = {}) {
 
 export function snapshotBuilder(defaults = {}) {
   return (overrides = {}) => makeSnapshot({ ...defaults, ...overrides });
+}
+
+export function renderWith(renderApp, snapshot, baseUi, palette, theme, now, overrides = {}, {
+  width = 120, height = 40, time = 0,
+} = {}) {
+  return renderApp(snapshot, { ...baseUi, ...overrides }, {
+    width, height, time, now, palette, theme,
+  });
+}
+
+export function makeTaskStore({ prefix = 'dag-test-', tasks = [], runs = [], snapshot = true } = {}) {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  mkdirSync(join(root, 'tasks'), { recursive: true });
+  mkdirSync(join(root, 'dag', 'runs'), { recursive: true });
+  for (const task of tasks) {
+    const id = typeof task === 'string' ? task : task.id;
+    const payload = typeof task === 'string' ? '{}' : task.payload ?? JSON.stringify(task.value ?? task, null, 2);
+    writeFileSync(join(root, 'tasks', `${id}.json`), payload);
+  }
+  for (const run of runs) {
+    const id = typeof run === 'string' ? run : run.id;
+    writeFileSync(join(root, 'dag', 'runs', `${id}.json`), typeof run === 'string' ? '{}' : JSON.stringify(run));
+  }
+  if (snapshot) writeFileSync(join(root, 'snapshot.json'), '{}');
+  return root;
 }
 
 // Thin viewer factory: collects writes and exit codes, lets the caller inject

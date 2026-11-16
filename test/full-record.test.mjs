@@ -12,7 +12,7 @@ import { normalizeSnapshot } from '../src/model.mjs';
 import { recordForKey } from '../src/records.mjs';
 import { detailsSubjectKey, diagnosisForSelection, recordForSelection, renderApp } from '../src/render.mjs';
 import { terminalRestoreSequence } from '../src/viewer.mjs';
-import { baseUi as makeBaseUi, themeFor, waitForJsonFile, within } from './helpers.mjs';
+import { baseUi as makeBaseUi, makeTaskStore, renderWith, themeFor, waitForJsonFile, within } from './helpers.mjs';
 
 const now = 1_000_000;
 const { palette, theme } = themeFor(0);
@@ -27,12 +27,13 @@ const FULL_RESPONSE = (`FULL-RECORD-START ${'the complete final response survive
   .slice(0, 3373);
 
 function recordJson({ finalResponse = FULL_RESPONSE } = {}) {
-  return JSON.stringify({
+  return ` {\n  "task_id": "st_done",\n  "status": "completed",\n  "description": "Completed release task",\n  "final_response": ${JSON.stringify(finalResponse)}\n}\n`;
+  /* return JSON.stringify({
     task_id: 'st_done',
     status: 'completed',
     description: 'Completed release task',
     final_response: finalResponse,
-  }, null, 2);
+  }, null, 2); */
 }
 
 function fixture({ root, task = {}, node = {}, run = {}, mode = 'live', sources } = {}) {
@@ -78,21 +79,15 @@ function fixture({ root, task = {}, node = {}, run = {}, mode = 'live', sources 
   });
 }
 
-function makeStore({ withRecord = true } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'dag-full-record-'));
-  mkdirSync(join(root, 'tasks'), { recursive: true });
-  mkdirSync(join(root, 'dag', 'runs'), { recursive: true });
-  if (withRecord) writeFileSync(join(root, 'tasks', 'st_done.json'), recordJson());
-  writeFileSync(join(root, 'dag', 'runs', 'dag_done.json'), '{}');
-  writeFileSync(join(root, 'snapshot.json'), '{}');
-  return root;
-}
-
-function render(snapshot, overrides = {}, { width = 160, height = 120 } = {}) {
-  return renderApp(snapshot, { ...baseUi, ...overrides }, {
-    width, height, time: 0, now, palette, theme,
-  });
-}
+const makeStore = ({ withRecord = true } = {}) => makeTaskStore({
+  prefix: 'dag-full-record-',
+  tasks: withRecord ? [{ id: 'st_done', payload: recordJson(), value: JSON.parse(recordJson()) }] : [],
+  runs: ['dag_done'],
+});
+const render = (snapshot, overrides = {}, options = {}) => renderWith(
+  renderApp, snapshot, baseUi, palette, theme, now, overrides,
+  { width: 160, height: 120, ...options },
+);
 
 function fakePager(root, { capture } = {}) {
   const bin = join(root, 'bin');

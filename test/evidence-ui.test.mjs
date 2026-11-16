@@ -6,7 +6,7 @@ import { isUnsuccessfulState } from '../src/model.mjs';
 import { failedReadPlaceholder } from '../src/viewer.mjs';
 import { createTheme, paletteFor, statusColor } from '../src/theme.mjs';
 import { width as textWidth } from '../src/text.mjs';
-import { baseUi as makeBaseUi, themeFor } from './helpers.mjs';
+import { baseUi as makeBaseUi, renderWith, themeFor } from './helpers.mjs';
 
 const now = 1_000_000;
 const { palette, theme } = themeFor(0);
@@ -99,11 +99,10 @@ function snapshot({ task = {}, node = {}, run = {} } = {}) {
   });
 }
 
-function render(snap, overrides = {}, { width = 140, height = 120 } = {}) {
-  return renderApp(snap, { ...baseUi, ...overrides }, {
-    width, height, time: 0, now, palette, theme,
-  });
-}
+const render = (snapshot, overrides = {}, options = {}) => renderWith(
+  renderApp, snapshot, baseUi, palette, theme, now, overrides,
+  { width: 140, height: 120, ...options },
+);
 
 function detailsLines(result) {
   const { x, y, w, h } = result.layout.details;

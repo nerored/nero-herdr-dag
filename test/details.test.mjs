@@ -10,7 +10,7 @@ import { meaningfulReply, recordForKey, recordForSelection, renderApp } from '..
 import {
   center, fitTail, padEnd, padStart, truncateMiddle, width as textWidth, wrap,
 } from '../src/text.mjs';
-import { baseUi as makeBaseUi, snapshotBuilder, themeFor } from './helpers.mjs';
+import { baseUi as makeBaseUi, renderWith, snapshotBuilder, themeFor } from './helpers.mjs';
 
 const now = 1_000_000;
 const { palette, theme } = themeFor(0);
@@ -31,11 +31,10 @@ function synthetic(node = {}, task = {}) {
   });
 }
 
-function render(snapshot, overrides = {}, { width = 140, height = 60 } = {}) {
-  return renderApp(snapshot, { ...baseUi, ...overrides }, {
-    width, height, time: 0, now, palette, theme,
-  });
-}
+const render = (snapshot, overrides = {}, options = {}) => renderWith(
+  renderApp, snapshot, baseUi, palette, theme, now, overrides,
+  { width: 140, height: 60, ...options },
+);
 
 function detailsLines(result) {
   const { x, y, w, h } = result.layout.details;

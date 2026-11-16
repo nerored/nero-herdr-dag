@@ -9,20 +9,12 @@ import {
 } from '../src/graph.mjs';
 import { normalizeSnapshot } from '../src/model.mjs';
 import { paletteAt } from '../src/theme.mjs';
+import { makeSnapshot } from './helpers.mjs';
 
 const palette = paletteAt(0);
 const cornerGlyphs = new Set(['└', '┘', '┌', '┐']);
 const junctionGlyphs = new Set(['├', '┤', '┬', '┴']);
 const verticalGlyphs = new Set(['│', '┤', '├', '┼', '┐', '┌', '┘', '└', '┬', '┴']);
-
-function makeSnapshot(run) {
-  return normalizeSnapshot({
-    version: 2,
-    sessionId: 'wire-test',
-    runs: [run],
-    tasks: [],
-  });
-}
 
 function renderRun(run, width = 80) {
   const layout = computeLayout(run, width);
@@ -60,7 +52,7 @@ function cellsAlong(points) {
 }
 
 test('a turned connector uses corner glyphs instead of four-way crosses', () => {
-  const snapshot = makeSnapshot({
+  const snapshot = makeSnapshot({ sessionId: 'wire-test', runs: [{
     id: 'wire', name: 'wire', status: 'running',
     nodes: [
       { id: 'a', label: 'a', state: 'completed', percent: 100 },
@@ -68,7 +60,7 @@ test('a turned connector uses corner glyphs instead of four-way crosses', () => 
       { id: 'c', label: 'c', state: 'completed', percent: 100 },
     ],
     edges: [{ from: 'a', to: 'c' }, { from: 'b', to: 'c' }],
-  });
+  }] });
   const { layout, canvas } = renderRun(snapshot.runs[0]);
   const edge = layout.edges.find(candidate => candidate.from === 'a' && candidate.to === 'c');
   assert.ok(edge);
@@ -87,7 +79,7 @@ test('a turned connector uses corner glyphs instead of four-way crosses', () => 
 });
 
 test('a shared column keeps a parent-child connector straight', () => {
-  const snapshot = makeSnapshot({
+  const snapshot = makeSnapshot({ sessionId: 'wire-test', runs: [{
     id: 'aligned', name: 'aligned', status: 'running',
     nodes: [
       { id: 'a', label: 'a', state: 'running', percent: 50 },
@@ -95,7 +87,7 @@ test('a shared column keeps a parent-child connector straight', () => {
       { id: 'c', label: 'c', state: 'pending', percent: 0 },
     ],
     edges: [{ from: 'a', to: 'c' }],
-  });
+  }] });
   const { layout } = renderRun(snapshot.runs[0]);
   const source = layout.boxes.get('a');
   const target = layout.boxes.get('c');
@@ -146,7 +138,7 @@ test('long connectors route around intermediate node boxes', () => {
 });
 
 function tightRun() {
-  return makeSnapshot({
+  return makeSnapshot({ runs: [{
     id: 'tight', name: 'tight', status: 'running',
     nodes: [
       { id: 'a', label: 'a', state: 'pending', percent: 0 },
@@ -154,11 +146,11 @@ function tightRun() {
       { id: 'c', label: 'c', state: 'pending', percent: 0 },
     ],
     edges: [{ from: 'a', to: 'c' }],
-  }).runs[0];
+  }] }).runs[0];
 }
 
 function wideRun() {
-  return makeSnapshot({
+  return makeSnapshot({ runs: [{
     id: 'wide', name: 'wide', status: 'running',
     nodes: [
       { id: 'a', label: 'a', state: 'pending', percent: 0 },
@@ -168,7 +160,7 @@ function wideRun() {
       { id: 't', label: 't', state: 'pending', percent: 0 },
     ],
     edges: [{ from: 'a', to: 't' }],
-  }).runs[0];
+  }] }).runs[0];
 }
 
 function renderLayout(layout, { motion = false, time = 0, folded = new Set() } = {}) {
@@ -523,9 +515,9 @@ test('a very long workflow is capped at MAX_LAYOUT_ROWS', () => {
     id: `long-${index}`, label: `long-${index}`, state: 'pending',
   }));
   const edges = nodes.slice(1).map((node, index) => ({ from: nodes[index].id, to: node.id }));
-  const layout = computeLayout(makeSnapshot({
+  const layout = computeLayout(makeSnapshot({ runs: [{
     id: 'long', name: 'long', status: 'running', nodes, edges,
-  }).runs[0], 120);
+  }] }).runs[0], 120);
   assert.equal(MAX_LAYOUT_ROWS, 4096, 'the layout cap is a measured budget, not a tunable');
   assert.equal(layout.height, MAX_LAYOUT_ROWS);
   assert.equal(layout.capped, true);
@@ -535,10 +527,10 @@ test('a very long workflow is capped at MAX_LAYOUT_ROWS', () => {
   assert.ok(layout.boxes.size < nodes.length, 'nodes past the cap are not laid out');
   assert.ok(layout.edges.length > 0, 'the visible prefix still routes its edges');
 
-  const short = computeLayout(makeSnapshot({
+  const short = computeLayout(makeSnapshot({ runs: [{
     id: 'short', name: 'short', status: 'running',
     nodes: nodes.slice(0, 3), edges: edges.slice(0, 2),
-  }).runs[0], 120);
+  }] }).runs[0], 120);
   assert.equal(short.capped, false);
   assert.equal(short.hiddenNodes, 0);
 });

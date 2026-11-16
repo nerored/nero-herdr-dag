@@ -14,7 +14,7 @@ import {
 import { normalizeSnapshot } from '../src/model.mjs';
 import { diagnosisForSelection, renderApp } from '../src/render.mjs';
 import { width as textWidth } from '../src/text.mjs';
-import { baseUi as makeBaseUi, themeFor } from './helpers.mjs';
+import { baseUi as makeBaseUi, makeTaskStore, renderWith, themeFor } from './helpers.mjs';
 
 const now = 1_000_000;
 const { palette, theme } = themeFor(0);
@@ -105,23 +105,15 @@ function fixture({ mode = 'live', root, task = {}, node = {}, run = {} } = {}) {
   });
 }
 
-function makeStore() {
-  const root = mkdtempSync(join(tmpdir(), 'dag-failure-ux-'));
-  mkdirSync(join(root, 'tasks'), { recursive: true });
-  mkdirSync(join(root, 'dag', 'runs'), { recursive: true });
-  for (const id of ['st_fail', 'st_cancel', 'st_block']) {
-    writeFileSync(join(root, 'tasks', `${id}.json`), '{}');
-  }
-  writeFileSync(join(root, 'dag', 'runs', 'dag_release_audit.json'), '{}');
-  writeFileSync(join(root, 'snapshot.json'), '{}');
-  return root;
-}
-
-function render(snapshot, overrides = {}, { width = 120, height = 40 } = {}) {
-  return renderApp(snapshot, { ...baseUi, ...overrides }, {
-    width, height, time: 0, now, palette, theme,
-  });
-}
+const makeStore = () => makeTaskStore({
+  prefix: 'dag-failure-ux-',
+  tasks: ['st_fail', 'st_cancel', 'st_block'],
+  runs: ['dag_release_audit'],
+});
+const render = (snapshot, overrides = {}, options = {}) => renderWith(
+  renderApp, snapshot, baseUi, palette, theme, now, overrides,
+  { width: 120, height: 40, ...options },
+);
 
 function detailsText(result) {
   const { x, y, w, h } = result.layout.details;
