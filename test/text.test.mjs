@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { charWidth, clean, compactDuration, fit, truncateMiddle, width, wrap } from '../src/text.mjs';
+import { charWidth, clean, compactDuration, fit, fitTail, segments, truncateMiddle, width, wrap } from '../src/text.mjs';
 
 test('text-default symbols are one cell, default emoji are two', () => {
   assert.equal(width('⚙'), 1);
@@ -12,6 +12,20 @@ test('text-default symbols are one cell, default emoji are two', () => {
   assert.equal(width('💭'), 2);
   assert.equal(width('⚙\uFE0F'), 2);
   assert.equal(width('⏳\uFE0E'), 1);
+});
+
+test('cached grapheme measurement survives fitTail and repeated calls', () => {
+  // fitTail reverses a copy; reversing the cached array in place would corrupt
+  // every later width/segments call for the same string.
+  assert.equal(fitTail('abcdef', 4), '…def');
+  assert.equal(fitTail('abcdef', 4), '…def');
+  assert.equal(width('abcdef'), 6);
+  assert.deepEqual(segments('abcdef'), ['a', 'b', 'c', 'd', 'e', 'f']);
+  // Repeated measurement of a wide/emoji string stays stable under the cache.
+  assert.equal(width('⏳'), 2);
+  assert.equal(width('⏳'), 2);
+  assert.equal(width('한글'), 4);
+  assert.equal(width('한글'), 4);
 });
 
 test('combining marks extend a base without changing its width', () => {

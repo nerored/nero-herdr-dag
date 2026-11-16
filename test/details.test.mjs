@@ -211,6 +211,32 @@ test('task details use the same spine without connections', () => {
   assert.ok(headingIndex(duty, 'TOKEN RATE') < headingIndex(duty, 'ACTIVITY'));
 });
 
+test('spawned plan tasks show their contract and plan path in details', () => {
+  const snapshot = synthetic({}, {
+    summary: 'Review the quality plan',
+    ownerKind: 'task', ownerTaskId: 'st_parent',
+    executionMode: 'in-process', backgroundMode: 'background', depth: 2,
+    planPath: '.omo/plans/quality-and-next.md', planRole: 'plan-reviewer',
+    workdir: '/home/me/project',
+    modelRequested: 'provider/requested', modelResolved: 'provider/resolved',
+    runtimeMs: 120000, tokensPerSecond: 42, costUsd: 0.0123, cacheHitRate: 0.75,
+  });
+  const full = detailsLines(render(snapshot, {
+    focus: 'tasks', selectedTaskId: 'st_n', expanded: true,
+  }, { width: 200, height: 60 }));
+  assert.ok(hasHeading(full, 'TASK CONTRACT'));
+  const text = full.join('\n');
+  assert.match(text, /Review the quality plan/);
+  assert.match(text, /plan-reviewer/);
+  assert.match(text, /quality-and-next\.md/);
+  assert.match(text, /in-process/);
+  assert.match(text, /42 tok\/s/);
+  const duty = detailsLines(render(snapshot, {
+    focus: 'tasks', selectedTaskId: 'st_n',
+  }, { width: 54, height: 42 }));
+  assert.match(duty.join('\n'), /plan-reviewer/);
+});
+
 test('verbose reply follows connections and is hidden in the default details', () => {
   const thinking = 'Review the parser edge cases before shipping.';
   const snapshot = synthetic({

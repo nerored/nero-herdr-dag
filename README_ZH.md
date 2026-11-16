@@ -19,6 +19,8 @@
   重试次数、实时活动、token 速率 sparkline、依赖、子任务、错误、模型思考/回复摘录；
   按 `d` 进入详细模式时显示最近日志。选中 run 时显示运行汇总：token、成本、
   缓存命中率、墙钟/忙碌时长、关键路径与并行度；节点证据不完整时标注 `seen/total`。
+  被委派或计划任务会显示任务契约：宿主摘要、归属、执行方式、模型链、运行统计，
+  以及提取出的计划路径与角色。
 - **动画**：有运行中任务、活动滚动或 demo 时按 60 fps 播放（可用 `--fps N` 提升到 120）；宽屏三栏布局至少保持 24 fps，窄屏 duty 布局降到 1 fps，pager 暂停帧循环；输入/状态变化会立即重绘；`--no-motion` 保留 1 fps 时钟刷新。包含平滑 PageUp/PageDown 与鼠标滚轮滚动、LIVE 呼吸点。状态变化提示显示在 footer，不会覆盖画布或详情。
 - **与 OmO 一致的主题**：system、dark、light、grok-day、grok-night 五套，使用 OmO 的配色；
   `system` 按终端明暗外观切换，页面背景与正文使用终端默认色，因此终端的背景设置
@@ -177,7 +179,7 @@ Herdr 的 ratio 是原 pane 的占比，所以原 pane 保留三分之二，嵌�
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
 | `OMO_HERDR_DAG_STUDIO_STATE_DIR` | `~/.omo/agent/herdr-dag-studio` | 快照、pane 记录、视图偏好 |
-| `OMO_HERDR_DAG_STUDIO_TASK_STATE_DIR` | `~/.omo/agent/projects/<project-key>/senpi-task` | OmO agent 任务存储根目录；不再读取仓库内的 store |
+| `OMO_HERDR_DAG_STUDIO_TASK_STATE_DIR` | `~/.omo/agent/projects/<project-key>/senpi-task` | OmO agent 任务存储根目录；仅读取当前会话带标记的 `.omo/senpi-task`，不读取其他仓库的 store |
 | `OMO_HERDR_DAG_STUDIO_RUNTIME` | 探测到的 Bun 1.4+ / Node 24+ | viewer 运行时；兼容旧变量 `OMO_HERDR_DAG_STUDIO_NODE` |
 | `OMO_HERDR_DAG_STUDIO_RETENTION_DAYS` | `14` | 过期快照清理；`0` 关闭 |
 | `OMO_HERDR_DAG_STUDIO_STALE_MS` | `60000` | 快照年龄超过该毫秒数即标记 `▲ STALE`；无效或非正值使用默认值 |
@@ -225,7 +227,7 @@ OmO 进程                                  Herdr viewer 进程
 ## 开发与验证
 
 ```bash
-bun test            # 319 项行为测试
+bun test            # 587 项行为测试
 bun run build       # 语法检查 + 组装 dist/
 bun run check       # test + build
 ```

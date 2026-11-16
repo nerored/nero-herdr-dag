@@ -179,20 +179,35 @@ async function readTaskRecord(directory, name) {
 
 // Resolve every read-only task/DAG store candidate for this session, in
 // precedence order. Explicit roots are exclusive; automatic roots are the
-// session-derived store (when the session file reveals one) and the host
-// project store. The repository-local store is deliberately not read: a
-// cloned repository must not be able to feed DAG Studio task or checkpoint
-// data into the host. The legacy flat agent root only joins when it already
-// holds records for this session.
+// current session's marked project store, the session-derived store, and the
+// host project store. The project store is accepted only when `.omo/senpi-task`
+// carries the `.in-project` marker AND already holds a record for this session;
+// a cloned repository's arbitrary store still cannot feed DAG Studio data.
+function projectLocalRoot(cwd, sessionId) {
+  if (!sessionId) return undefined;
+  const working = pathValue(cwd);
+  if (!working) return undefined;
+  const root = join(working, '.omo', 'senpi-task');
+  try {
+    const marker = statSync(join(root, '.in-project'));
+    if (!marker.isFile()) return undefined;
+  } catch {
+    return undefined;
+  }
+  return storeHasSessionTasks(root, sessionId) ? root : undefined;
+}
+
 export function resolveTaskStateDirs({ sessionFile, env = process.env, cwd = process.cwd(), stateDirs, sessionId } = {}) {
   if (Array.isArray(stateDirs) && stateDirs.length) return normalizeDescriptors(stateDirs);
   const explicit = explicitRoots(env);
   if (explicit.length) return normalizeDescriptors(explicit);
 
   const candidates = [];
+  const working = pathValue(cwd) ?? process.cwd();
+  const inProject = projectLocalRoot(working, sessionId);
+  if (inProject) candidates.push(rootDescriptor(inProject, 'session', 'project store'));
   const derived = sessionRoot(sessionFile);
   if (derived) candidates.push(rootDescriptor(derived, 'session', 'session store'));
-  const working = pathValue(cwd) ?? process.cwd();
   const { agentDir } = readEnv(env);
   candidates.push(rootDescriptor(join(agentDir, 'projects', projectKey(working), 'senpi-task'), 'agent-project', 'host store'));
   const legacy = join(agentDir, 'senpi-task');
@@ -216,6 +231,45 @@ function iso(value) {
   return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
 }
 
+const modelDisplay = value => text(value?.display, 128) ?? text(value?.model_id, 128) ?? text(value, 128);
+
+function ownerFields(owner) {
+  if (!owner || typeof owner !== 'object') return {};
+  return defined({
+    ownerKind: text(owner.kind, 32),
+    ownerRunId: text(owner.runId, 80),
+    ownerNodeId: text(owner.nodeId, 80),
+    ownerTaskId: text(owner.taskId, 80),
+  });
+}
+
+// Plan artifacts are referenced inside the task prompt, but the prompt itself
+// is never persisted (the snapshot whitelist forbids prompt/transcript data).
+// Extract only the plan path, the acting role and the working directory.
+function planFields(spawn) {
+  const spec = spawn && typeof spawn === 'object' ? spawn : {};
+  const prompt = typeof spec.prompt === 'string' ? spec.prompt : '';
+  const match = /(?:^|[\s(])(\.omo\/(?:plans|drafts)\/[A-Za-z0-9._\/-]+\.md)/.exec(prompt);
+  const role = ['plan-reviewer', 'plan-consultant', 'ulw-execute', 'ulw-plan', 'mass-ulw']
+    .find(candidate => prompt.includes(candidate));
+  return defined({
+    planPath: match?.[1] ? text(match[1], 512) : undefined,
+    planRole: role ? text(role, 64) : undefined,
+    workdir: text(spec.cwd, 512),
+  });
+}
+
+function runStatsFields(stats) {
+  if (!stats || typeof stats !== 'object') return {};
+  return defined({
+    runtimeMs: numeric(stats.runtime_ms),
+    generationMs: numeric(stats.generation_ms),
+    tokensPerSecond: numeric(stats.tokens_per_second),
+    costUsd: numeric(stats.cost_usd),
+    cacheHitRate: numeric(stats.cache_hit_rate_run ?? stats.cache_hit_rate_last),
+  });
+}
+
 export function normalizeOmOTask(raw) {
   if (!raw || !taskId(raw.task_id)) return null;
   const live = raw.live_progress;
@@ -228,10 +282,25 @@ export function normalizeOmOTask(raw) {
   const values = {
     id: raw.task_id,
     description: text(raw.description) ?? text(raw.task_summary) ?? text(raw.name),
+    summary: text(raw.task_summary, 240),
     agent: text(raw.agent, 128) ?? text(raw.agent_type, 128),
     category: text(raw.category, 128),
     model: text(raw.resolved_model?.display, 256) ?? text(raw.model, 256),
+    modelRequested: modelDisplay(raw.requested_model),
+    modelEffective: modelDisplay(raw.effective_model),
+    modelResolved: modelDisplay(raw.resolved_model),
     status,
+    ...ownerFields(raw.owner),
+    ...planFields(raw.spawn_spec),
+    executionMode: text(raw.execution_mode, 32),
+    backgroundMode: text(raw.background_mode, 32),
+    depth: numeric(raw.depth),
+    residencyState: text(raw.residency_state, 32),
+    configGeneration: numeric(raw.config_generation),
+    parentSessionId: text(raw.parent_session_id, 80),
+    rootSessionId: text(raw.root_session_id, 80),
+    childSessionId: text(raw.child_session_id, 80),
+    ...runStatsFields(stats),
     percent: numeric(raw.percent ?? live?.percent),
     tokensIn: numeric(raw.tokens_in ?? raw.usage?.input_tokens ?? raw.token_usage?.input ?? stats?.input_tokens),
     tokensOut: numeric(raw.tokens_out ?? raw.usage?.output_tokens ?? raw.token_usage?.output ?? stats?.output_tokens),

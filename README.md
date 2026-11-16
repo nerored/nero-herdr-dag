@@ -19,7 +19,9 @@ architecture, then adds a much richer terminal UI:
   bounded model reasoning and reply excerpts, and verbose recent logs. Selecting
   a run shows a run summary: tokens, cost, cache hit rate, wall/busy time,
   critical path, and parallelism, with an explicit `seen/total` coverage marker
-  when node evidence is partial.
+  when node evidence is partial. Spawned and plan tasks add a task contract:
+  host summary, owner, execution mode, model chain, run stats, and the
+  extracted plan path/role.
 - **Animation** — 60 fps while a run, task, or scroll is active in interactive
   terminals (`--fps N` overrides up to 120); the wide three-pane layout never
   drops below 24 fps so ambient animation stays smooth, the duty layout idles
@@ -242,7 +244,7 @@ viewer stays closed until `/dag-studio` is run.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `OMO_HERDR_DAG_STUDIO_STATE_DIR` | `~/.omo/agent/herdr-dag-studio` | Snapshot, pane record, and view-preference directory |
-| `OMO_HERDR_DAG_STUDIO_TASK_STATE_DIR` | `~/.omo/agent/projects/<project-key>/senpi-task` | OmO agent task store root (`tasks/`, `dag/runs/`); repository-local stores are never read |
+| `OMO_HERDR_DAG_STUDIO_TASK_STATE_DIR` | `~/.omo/agent/projects/<project-key>/senpi-task` | OmO agent task store root (`tasks/`, `dag/runs/`); the current session's marked `.omo/senpi-task` store is read, never another repository's store |
 | `OMO_HERDR_DAG_STUDIO_RUNTIME` | probed Bun 1.4+ / Node 24+ | Explicit viewer runtime; legacy `OMO_HERDR_DAG_STUDIO_NODE` is also accepted |
 | `OMO_HERDR_DAG_STUDIO_RETENTION_DAYS` | `14` | Snapshot retention; `0` or invalid disables pruning |
 | `OMO_HERDR_DAG_STUDIO_STALE_MS` | `60000` | Capture age in ms before a connected snapshot is marked `▲ STALE`; invalid or non-positive values use the default |
@@ -362,7 +364,7 @@ detail panel includes only bounded, sanitized reasoning and reply excerpts.
 ## Development
 
 ```bash
-bun test            # 319 behavior tests
+bun test            # 587 behavior tests
 bun run build       # syntax-check and assemble dist/
 bun run check       # test + build
 ```

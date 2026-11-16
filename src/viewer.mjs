@@ -252,20 +252,40 @@ export function needsAnimationFrame(snapshot, ui, { demoMode = false, pagerActiv
 export const WIDE_IDLE_FPS = 24;
 
 export function framePacingFps(snapshot, ui, {
-  demoMode = false, pagerActive = false, now = Date.now(), width = 120, preferredFps = 60,
+  demoMode = false, pagerActive = false, now = Date.now(), width = 120, preferredFps = 60, frameCostMs = 0,
 } = {}) {
   const animated = needsAnimationFrame(snapshot, ui, { demoMode, pagerActive, now });
   // The pager owns the screen while it runs, and --no-motion asks for static
   // frames, so neither may inherit the wide floor.
   const floor = ui?.motion && !pagerActive && structuralFor(width) === 'investigation'
     ? WIDE_IDLE_FPS : 1;
-  return Math.max(animated ? preferredFps : floor, floor);
+  // A frame that does not fit its budget must not be requested at full rate:
+  // on a slow terminal or a very large graph the 60 fps loop otherwise pins a
+  // core to render frames the terminal cannot consume. The measured cost is
+  // the previous frame's render time, so the cap is one frame behind but never
+  // oscillates inside a single frame.
+  const cost = Number(frameCostMs);
+  if (!Number.isFinite(cost) || cost <= 0) {
+    return Math.max(animated ? preferredFps : floor, floor);
+  }
+  const paced = cost >= 40 ? 10 : cost >= 25 ? 15 : cost >= 12 ? 30 : preferredFps;
+  return animated
+    ? Math.max(1, Math.min(Math.max(preferredFps, floor), paced))
+    : Math.max(1, Math.min(floor, paced));
 }
 
 // The effective interval is unquantized so the footer's requested fps and the
 // timer cadence agree (flooring 1000/60 produced 62.5 Hz).
 export function frameIntervalMs(fps, motion = true) {
   return motion ? Math.max(8, 1000 / fps) : 1000;
+}
+
+// The demo engine produces a new raw world every frame, but the task/progress
+// fields it changes are read at interface speed, not animation speed. Accept
+// a demo snapshot at most ten times a second; animations still use the frame
+// clock, and full normalization stops running 60 times a second.
+export function demoSnapshotDue(now, lastAt, minMs = 100) {
+  return !Number.isFinite(lastAt) || now - lastAt >= minMs;
 }
 
 // Every scrollbar-backed region eases toward its target; wheel/key steps move
@@ -1065,6 +1085,7 @@ export async function createViewer(options = {}, deps = {}) {
   let toastId = 0;
   let lastCycle;
   let lastRender;
+  let lastDemoAccept = 0;
   let helpFrameDrawn = false;
   let graphLayoutCache = { key: '', layout: null };
   let lastDrawAt = 0;
@@ -1999,8 +2020,10 @@ export async function createViewer(options = {}, deps = {}) {
       const elapsed = lastDrawAt ? Math.min(100, now - lastDrawAt) : 0;
       lastDrawAt = now;
       if (demoMode && engine) {
-        const raw = engine.snapshot(now);
-        acceptSnapshot(raw);
+        if (demoSnapshotDue(now, lastDemoAccept)) {
+          lastDemoAccept = now;
+          acceptSnapshot(engine.snapshot(now));
+        }
       }
       const width = terminalWidth();
       const height = terminalHeight();
@@ -2035,12 +2058,14 @@ export async function createViewer(options = {}, deps = {}) {
       ui.toasts = ui.toasts.filter(toast => now - toast.at < 6500);
       applyPalette();
       ui.fps = framePacingFps(snapshot, ui, {
-        demoMode, pagerActive, width, preferredFps: fps, now,
+        demoMode, pagerActive, width, preferredFps: fps, now, frameCostMs: ui.frameCostMs,
       });
+      const renderStart = Date.now();
       const result = renderApp(snapshot, ui, {
         width, height, time: now - startAt, now, palette, theme,
         graphLayout: layoutInfo?.layout, sidebar: sidebarEnabled(),
       });
+      ui.frameCostMs = Date.now() - renderStart;
       lastRender = result;
       if (result.layout.graph) {
         ui.graphScrollTarget = clamp(ui.graphScrollTarget, 0, result.scroll.graph.maxScroll);

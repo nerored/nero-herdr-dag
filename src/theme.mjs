@@ -171,11 +171,22 @@ export function paletteAt(index) {
 // Parses `#rrggbb` (or `rrggbb`) into RGB channels. Returns null for anything
 // else, including the `''` default-color sentinel, so callers can distinguish
 // "terminal default" from a malformed value instead of treating both as white.
+// `#rrggbb` parsing runs for every painted cell that blends or converts a
+// color, so the same dozens of palette strings are parsed thousands of times
+// per frame. Cache the pure result; callers only read the channels.
+const hexCache = new Map();
 export function parseHex(value) {
-  const match = /^#?([0-9a-f]{6})$/i.exec(String(value ?? ''));
-  if (!match) return null;
-  const number = Number.parseInt(match[1], 16);
-  return [(number >> 16) & 255, (number >> 8) & 255, number & 255];
+  const key = String(value ?? '');
+  const hit = hexCache.get(key);
+  if (hit !== undefined) return hit;
+  const match = /^#?([0-9a-f]{6})$/i.exec(key);
+  const result = match ? (() => {
+    const number = Number.parseInt(match[1], 16);
+    return [(number >> 16) & 255, (number >> 8) & 255, number & 255];
+  })() : null;
+  if (hexCache.size >= 512) hexCache.delete(hexCache.keys().next().value);
+  hexCache.set(key, result);
+  return result;
 }
 
 export function rgbToHex([r, g, b]) {

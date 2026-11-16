@@ -3,6 +3,26 @@ import { normalizeLanguage } from './i18n.mjs';
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
+// A frame measures the same labels, borders, glyphs and padding hundreds of
+// times: the profile of a 120x40 demo frame put grapheme segmentation and
+// width measurement at roughly half of all self time. These bounded caches
+// keep the pure result of each string and drop the oldest entry at the cap, so
+// a long-lived viewer cannot grow without limit on unique log lines.
+const CACHE_LIMIT = 4096;
+const cleanCache = new Map();
+const segmentCache = new Map();
+const charWidthCache = new Map();
+const widthCache = new Map();
+
+function cached(map, key, compute, limit = CACHE_LIMIT) {
+  const hit = map.get(key);
+  if (hit !== undefined) return hit;
+  const value = compute();
+  if (map.size >= limit) map.delete(map.keys().next().value);
+  map.set(key, value);
+  return value;
+}
+
 // Format characters that occupy no terminal cell. They are dropped rather than
 // replaced by a space so text measurement matches what the terminal paints.
 function zeroWidthFormat(cp) {
@@ -13,24 +33,32 @@ function zeroWidthFormat(cp) {
 }
 
 export function clean(value) {
-  const text = stripVTControlCharacters(String(value ?? ''));
-  let out = '';
-  for (const character of text) {
-    const cp = character.codePointAt(0);
-    if (zeroWidthFormat(cp)) continue;
-    const forbidden = (cp >= 0 && cp <= 0x1f) || (cp >= 0x7f && cp <= 0x9f) ||
-      (cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x2069);
-    out += forbidden ? ' ' : character;
-  }
-  return out;
+  const key = String(value ?? '');
+  return cached(cleanCache, key, () => {
+    const text = stripVTControlCharacters(key);
+    let out = '';
+    for (const character of text) {
+      const cp = character.codePointAt(0);
+      if (zeroWidthFormat(cp)) continue;
+      const forbidden = (cp >= 0 && cp <= 0x1f) || (cp >= 0x7f && cp <= 0x9f) ||
+        (cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x2069);
+      out += forbidden ? ' ' : character;
+    }
+    return out;
+  });
 }
 
 export function segments(text) {
-  return [...segmenter.segment(clean(text))].map(part => part.segment);
+  const key = String(text ?? '');
+  return cached(segmentCache, key, () => [...segmenter.segment(clean(key))].map(part => part.segment));
 }
 
 export function charWidth(segment) {
   if (!segment) return 0;
+  return cached(charWidthCache, segment, () => measureCharWidth(segment), 1024);
+}
+
+function measureCharWidth(segment) {
   // Base character of the grapheme; combining marks do not change its width.
   const base = [...segment].find(character => !/\p{Mark}/u.test(character));
   if (!base) return 0;
@@ -57,15 +85,19 @@ export function charWidth(segment) {
 }
 
 export function width(text) {
-  let total = 0;
-  for (const segment of segments(text)) total += charWidth(segment);
-  return total;
+  const key = String(text ?? '');
+  return cached(widthCache, key, () => {
+    let total = 0;
+    for (const segment of segments(key)) total += charWidth(segment);
+    return total;
+  });
 }
 
 export function fit(text, columns, pad = false) {
   const source = clean(text);
   if (columns <= 0) return '';
-  if (width(source) <= columns) return pad ? source + ' '.repeat(columns - width(source)) : source;
+  const sourceWidth = width(source);
+  if (sourceWidth <= columns) return pad ? source + ' '.repeat(columns - sourceWidth) : source;
   const limit = columns - 1;
   let out = '';
   let used = 0;
@@ -86,7 +118,8 @@ export function fitTail(text, columns) {
   const limit = columns - 1;
   const kept = [];
   let used = 0;
-  for (const segment of segments(source).reverse()) {
+  // segments() is cached and shared: reverse a copy, never the cached array.
+  for (const segment of [...segments(source)].reverse()) {
     const size = charWidth(segment);
     if (used + size > limit) break;
     kept.unshift(segment);

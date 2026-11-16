@@ -16,6 +16,14 @@ const WIRE_GLYPHS = {
 // Canvas + wire grid cannot grow without limit; nodes past the cap are simply
 // not laid out (the graph is scroll-bounded either way).
 const MAX_LAYOUT_ROWS = 4096;
+// A* routing is bounded: on a very tall wrapped graph the corridor search can
+// visit hundreds of thousands of states per edge. Past this budget the edge
+// falls back to the deterministic stub instead of freezing the frame.
+const MAX_ROUTE_STATES = 5_000;
+// The floor is per edge; small layouts can afford a much larger corridor
+// search, so give the whole layout a fixed state budget instead of starving a
+// 16-edge demo to keep a 185-edge stress graph bounded.
+const ROUTE_STATE_BUDGET = 1_000_000;
 
 // Port OmO's working-status shimmer verbatim: an 11-cell raised-cosine band
 // sweeps a padded path every 2 seconds. The room before and after the path is
@@ -187,10 +195,6 @@ function wirePoints(source, target) {
   ];
 }
 
-function insideBox(box, x, y) {
-  return x >= box.x && x < box.x + box.w && y >= box.y && y < box.y + box.h;
-}
-
 function cellsAlong(points) {
   const cells = [];
   for (let index = 0; index < points.length - 1; index++) {
@@ -227,9 +231,8 @@ function flowCells(points) {
 // Last-resort deterministic stub for a zero-gutter layout. It never crosses a
 // box: prefer a downward run from the source-adjacent cell, then a short side
 // exit when the cell directly below is occupied.
-function fallbackWirePoints(source, target, { width, height, boxes }) {
-  const blocked = (x, y) => x < 0 || y < 0 || x >= width || y >= height ||
-    boxes.some(box => insideBox(box, x, y));
+function fallbackWirePoints(source, target, { width, height, mask }) {
+  const blocked = (x, y) => x < 0 || y < 0 || x >= width || y >= height || mask[y * width + x] === 1;
   const startX = source.centerX;
   const startY = source.y + source.h;
   if (!blocked(startX, startY)) {
@@ -251,7 +254,7 @@ function fallbackWirePoints(source, target, { width, height, boxes }) {
   return null;
 }
 
-function pathHitsBox(points, boxes) {
+function pathHitsBox(points, mask, width, height) {
   for (let index = 0; index < points.length - 1; index++) {
     const a = points[index];
     const b = points[index + 1];
@@ -260,7 +263,7 @@ function pathHitsBox(points, boxes) {
     let x = a.x;
     let y = a.y;
     for (;;) {
-      if (boxes.some(box => insideBox(box, x, y))) return true;
+      if (x >= 0 && y >= 0 && x < width && y < height && mask[y * width + x]) return true;
       if (x === b.x && y === b.y) break;
       x += stepX;
       y += stepY;
@@ -308,11 +311,10 @@ class MinHeap {
   }
 }
 
-function routeWirePoints(source, target, { width, height, boxes, used = new Set() }) {
+function routeWirePoints(source, target, { width, height, mask, used = new Set(), maxStates = MAX_ROUTE_STATES }) {
   const startX = source.centerX;
   const startY = source.y + source.h;
-  const blocked = (x, y) => x < 0 || y < 0 || x >= width || y >= height ||
-    boxes.some(box => insideBox(box, x, y));
+  const blocked = (x, y) => x < 0 || y < 0 || x >= width || y >= height || mask[y * width + x] === 1;
   if (blocked(startX, startY) || blocked(startX, startY + 1)) return null;
 
   const entryX = target.centerX;
@@ -347,6 +349,7 @@ function routeWirePoints(source, target, { width, height, boxes, used = new Set(
 
   let finalState;
   while (heap.size) {
+    if (distances.size > maxStates) break;
     const current = heap.pop();
     if (!current) break;
     if (current.g !== distances.get(current.state)) continue;
@@ -530,8 +533,21 @@ export function computeLayout(run, width, { folded = new Set() } = {}) {
   }
   const height = Math.max(8, Math.min(MAX_LAYOUT_ROWS, y + 1));
   const boxesList = [...boxes.values()];
+  // One occupancy mask per layout replaces the per-cell `boxes.some(...)`
+  // scan. The old scan was O(boxes) inside every Dijkstra neighbor and every
+  // routed cell; with a fan-in graph that turned one layout into seconds.
+  const mask = new Uint8Array(Math.max(1, width) * Math.max(1, height));
+  for (const box of boxesList) {
+    const left = Math.max(0, box.x);
+    const right = Math.min(width, box.x + box.w);
+    const top = Math.max(0, box.y);
+    const bottom = Math.min(height, box.y + box.h);
+    if (right <= left || bottom <= top) continue;
+    for (let row = top; row < bottom; row++) mask.fill(1, row * width + left, row * width + right);
+  }
   const used = new Set();
   const edges = [];
+  const routeStates = Math.max(MAX_ROUTE_STATES, Math.floor(ROUTE_STATE_BUDGET / Math.max(1, run.edges.length)));
   const markPath = points => {
     for (const cell of cellsAlong(points)) used.add(cell.y * width + cell.x);
   };
@@ -539,17 +555,17 @@ export function computeLayout(run, width, { folded = new Set() } = {}) {
     const source = boxes.get(edge.from);
     const target = boxes.get(edge.to);
     if (!source || !target) continue;
-    const invalid = points => !points || pathHitsBox(points, boxesList) || !hasDownwardExit(points);
+    const invalid = points => !points || pathHitsBox(points, mask, width, height) || !hasDownwardExit(points);
     let points = wirePoints(source, target);
     let fallback = false;
     if (invalid(points)) {
       const routed = routeWirePoints(source, target, {
-        width, height, boxes: boxesList, used,
+        width, height, mask, used, maxStates: routeStates,
       });
       if (!invalid(routed)) {
         points = routed;
       } else {
-        points = fallbackWirePoints(source, target, { width, height, boxes: boxesList });
+        points = fallbackWirePoints(source, target, { width, height, mask });
         if (!points) continue;
         fallback = true;
       }
@@ -560,7 +576,7 @@ export function computeLayout(run, width, { folded = new Set() } = {}) {
   return { width, height, rows: rowInfo, boxes, edges };
 }
 
-function drawWire(canvas, layout, { time, motion, palette }) {
+function drawWire(canvas, layout, { time, motion, palette, top = 0, bottom = layout.height }) {
   const grid = wireGridFor(layout.width, layout.height);
   layout.edges.forEach((edge, index) => {
     grid.path(edge.points, index + 1);
@@ -588,17 +604,19 @@ function drawWire(canvas, layout, { time, motion, palette }) {
   for (const box of layout.boxes.values()) {
     const left = Math.max(0, box.x);
     const right = Math.min(grid.width, box.x + box.w);
-    const top = Math.max(0, box.y);
-    const bottom = Math.min(grid.height, box.y + box.h);
-    if (right <= left || bottom <= top) continue;
-    for (let y = top; y < bottom; y++) {
+    const boxTop = Math.max(0, box.y);
+    const boxBottom = Math.min(grid.height, box.y + box.h);
+    if (right <= left || boxBottom <= boxTop) continue;
+    for (let y = boxTop; y < boxBottom; y++) {
       covered.fill(1, y * grid.width + left, y * grid.width + right);
     }
   }
 
   const base = palette.borderHot;
   const headColor = palette.text;
-  for (let y = 0; y < grid.height; y++) {
+  const from = Math.max(0, Math.floor(top));
+  const to = Math.min(grid.height, Math.ceil(bottom));
+  for (let y = from; y < to; y++) {
     for (let x = 0; x < grid.width; x++) {
       const index = y * grid.width + x;
       if (covered[index]) continue;
@@ -724,9 +742,12 @@ function drawMeta(canvas, box, node, { palette, selected, language }) {
 }
 
 export function drawGraph(canvas, layout, options) {
-  const { time = 0, motion = true, palette, selectedId, folded = new Set(), now = Date.now(), connected = true, language = 'en' } = options;
-  drawWire(canvas, layout, { time, motion, palette });
+  const { time = 0, motion = true, palette, selectedId, folded = new Set(), now = Date.now(), connected = true, language = 'en', clip } = options;
+  const top = Math.max(0, Math.floor(clip?.top ?? 0));
+  const bottom = Math.min(layout.height, Math.ceil(clip?.bottom ?? layout.height));
+  drawWire(canvas, layout, { time, motion, palette, top, bottom });
   for (const box of layout.boxes.values()) {
+    if (box.y + box.h <= top || box.y >= bottom) continue;
     const { node } = box;
     const selected = node.id === selectedId;
     const border = selected

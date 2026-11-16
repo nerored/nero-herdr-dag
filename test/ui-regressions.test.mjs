@@ -14,7 +14,7 @@ import { createTheme, paletteAt } from '../src/theme.mjs';
 import { width as textWidth } from '../src/text.mjs';
 import {
   applyFocusRequest, applyHelpScroll, advanceScroll, boundSnapshotInput, chromeActionAt, createViewer,
-  detailsVerboseAvailable, dutyFocusForKey, failedReadPlaceholder, focusForStructural,
+  demoSnapshotDue, detailsVerboseAvailable, dutyFocusForKey, failedReadPlaceholder, focusForStructural,
   footerActionAt, frameIntervalMs, framePacingFps, helpKeyAction, helpScrollForKey, helpScrollMetrics,
   helpViewportRows, keyboardScrollIntent, loadInitialSnapshot, needsAnimationFrame, nextFrameDeadline,
   pruneHiddenSubjects, readFailureEvidence, readStateFile, runFooterAction, sanitizePagerText,
@@ -1213,6 +1213,20 @@ test('the wide layout never idles below 24 frames while duty idles at one', () =
   assert.equal(framePacingFps(idle, { ...ui, motion: false }, { now, width: 140 }), 1);
   assert.equal(framePacingFps(idle, ui, { now, width: 140, pagerActive: true }), 1);
   assert.equal(frameIntervalMs(framePacingFps(idle, ui, { now, width: 140 })), 1000 / 24);
+  // A measured frame cost over budget caps the requested rate instead of
+  // pinning a core to frames the terminal cannot consume.
+  assert.equal(framePacingFps(live, ui, { now, width: 140, frameCostMs: 13 }), 30);
+  assert.equal(framePacingFps(live, ui, { now, width: 140, frameCostMs: 30 }), 15);
+  assert.equal(framePacingFps(live, ui, { now, width: 140, frameCostMs: 50 }), 10);
+  assert.equal(framePacingFps(live, ui, { now, width: 70, frameCostMs: 30 }), 15);
+  assert.equal(framePacingFps(idle, ui, { now, width: 140, frameCostMs: 30 }), 15);
+});
+
+test('demo snapshots are accepted at interface speed, not frame speed', () => {
+  assert.equal(demoSnapshotDue(1_000, 0, 100), true);
+  assert.equal(demoSnapshotDue(1_050, 1_000, 100), false);
+  assert.equal(demoSnapshotDue(1_100, 1_000, 100), true);
+  assert.equal(demoSnapshotDue(1_000, undefined, 100), true);
 });
 
 test('every scrollbar region eases toward its target instead of snapping', () => {

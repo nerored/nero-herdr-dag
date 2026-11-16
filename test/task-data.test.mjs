@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { normalizeOmOTask, TaskData } from '../src/task-data.mjs';
+import { normalizeOmOTask, resolveTaskStateDirs, TaskData } from '../src/task-data.mjs';
 import { normalizeSnapshot, normalizeTask } from '../src/model.mjs';
 import { writeJson } from '../src/storage.mjs';
 
@@ -771,6 +771,60 @@ test('recorded reply and error evidence survives re-normalization', () => {
   assert.equal(task.errorKind, 'provider_error');
   assert.equal(task.turns, 7);
   assert.equal(task.toolCalls, 9);
+});
+
+test('the current session project store needs its marker and a session record', async t => {
+  const root = await tempStore(t, 'dag-project-');
+  const store = join(root, '.omo', 'senpi-task');
+  await mkdir(join(store, 'tasks'), { recursive: true });
+  await writeFile(join(store, '.in-project'), '1');
+  await writeJson(join(store, 'tasks', 'st_plan.json'), record('st_plan', { task_summary: 'Plan work' }));
+  const env = { HOME: root };
+  const accepted = resolveTaskStateDirs({ cwd: root, sessionId, env });
+  assert.ok(accepted.some(d => d.root === store && d.origin === 'session'), 'marked store with this session record is accepted');
+  const foreign = resolveTaskStateDirs({ cwd: root, sessionId: 'other-session', env });
+  assert.ok(!foreign.some(d => d.root === store), 'a store with only another session record is rejected');
+  await rm(join(store, '.in-project'));
+  const unmarked = resolveTaskStateDirs({ cwd: root, sessionId, env });
+  assert.ok(!unmarked.some(d => d.root === store), 'a repository store without .in-project is rejected');
+});
+
+test('plan task records expose contract metadata without persisting prompt prose', () => {
+  const task = normalizeOmOTask({
+    task_id: 'st_plan',
+    parent_session_id: sessionId,
+    task_summary: 'Review the quality plan',
+    owner: { kind: 'task', taskId: 'st_parent' },
+    execution_mode: 'in-process',
+    background_mode: 'background',
+    depth: 2,
+    requested_model: { display: 'provider/requested' },
+    resolved_model: { display: 'provider/resolved' },
+    run_stats: { runtime_ms: 120000, tokens_per_second: 42.5, cost_usd: 0.0123, cache_hit_rate_run: 0.75 },
+    spawn_spec: { cwd: '/repo', prompt: 'TASK: review .omo/plans/quality-and-next.md with plan-reviewer\nSECRET PROMPT TEXT' },
+  });
+  assert.equal(task.summary, 'Review the quality plan');
+  assert.equal(task.ownerKind, 'task');
+  assert.equal(task.ownerTaskId, 'st_parent');
+  assert.equal(task.executionMode, 'in-process');
+  assert.equal(task.backgroundMode, 'background');
+  assert.equal(task.depth, 2);
+  assert.equal(task.planPath, '.omo/plans/quality-and-next.md');
+  assert.equal(task.planRole, 'plan-reviewer');
+  assert.equal(task.workdir, '/repo');
+  assert.equal(task.modelRequested, 'provider/requested');
+  assert.equal(task.modelResolved, 'provider/resolved');
+  assert.equal(task.runtimeMs, 120000);
+  assert.equal(task.tokensPerSecond, 42.5);
+  assert.equal(task.costUsd, 0.0123);
+  assert.equal(task.cacheHitRate, 0.75);
+  assert.ok(!JSON.stringify(task).includes('SECRET PROMPT TEXT'), 'prompt prose is never persisted');
+  const normalized = normalizeTask(task, { mode: 'live' });
+  assert.equal(normalized.planPath, '.omo/plans/quality-and-next.md');
+  assert.equal(normalized.planRole, 'plan-reviewer');
+  assert.equal(normalized.ownerKind, 'task');
+  assert.equal(normalized.executionMode, 'in-process');
+  assert.equal(normalized.costUsd, 0.0123);
 });
 
 test('an empty or non-numeric tokenRate array falls back to run_stats', () => {

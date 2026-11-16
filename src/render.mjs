@@ -1093,13 +1093,20 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
   const maxScroll = Math.max(0, layout.height - viewportH);
   const scroll = scrollOffset(ui.graphScroll, maxScroll);
   const offset = layout.height <= viewportH ? Math.floor((viewportH - layout.height) / 2) : -scroll;
+  // Paint only the rows the blit can show. A tall wrapped graph used to
+  // rasterize its whole height (100 nodes = 1103 rows) on every frame even
+  // though the pane shows ~35 of them.
+  const clipTop = layout.height <= viewportH ? 0 : scroll;
+  const clipBottom = layout.height <= viewportH ? layout.height : scroll + viewportH;
   const graphCanvas = graphCanvasFor(layout.width, layout.height, palette);
   drawGraph(graphCanvas, layout, {
     time, motion, palette, selectedId: ui.selectedNodeId, folded: ui.folded,
     now: viewNow, connected: isActiveSnapshot(snapshot), language,
+    clip: { top: clipTop, bottom: clipBottom },
   });
   if (filter !== 'all') {
     for (const box of layout.boxes.values()) {
+      if (box.y + box.h <= clipTop || box.y >= clipBottom) continue;
       if (nodeMatchesFilter(box.node, filter, criticalIds)) continue;
       graphCanvas.fadeRect(box.x, box.y, box.w, box.h, 0.64, palette.bg);
     }
@@ -2178,6 +2185,42 @@ function nodeDetails(canvas, rect, run, node, snapshot, ui, {
   }
 }
 
+// A spawned task record carries host summary and spawn metadata that the
+// generic status/metrics block does not show. Plan artifacts are referenced by
+// path inside the prompt; show the extracted path and role, never the prompt.
+function taskContractRows(task, language, compact) {
+  const rows = [];
+  if (task.summary && task.summary !== task.description) {
+    rows.push({ key: 'summary', label: t(language, 'taskSummary'), value: task.summary });
+  }
+  const owner = task.ownerKind === 'dag'
+    ? [t(language, 'ownerDag'), task.ownerRunId, task.ownerNodeId].filter(Boolean).join(' · ')
+    : task.ownerKind === 'task'
+      ? [t(language, 'ownerTask'), task.ownerTaskId].filter(Boolean).join(' · ')
+      : task.ownerKind;
+  if (owner) rows.push({ key: 'owner', label: t(language, 'taskOwner'), value: owner });
+  const execution = [
+    task.executionMode,
+    task.backgroundMode,
+    Number.isFinite(task.depth) ? `${t(language, 'depth')} ${task.depth}` : undefined,
+  ].filter(Boolean).join(' · ');
+  if (execution) rows.push({ key: 'execution', label: t(language, 'taskExecution'), value: execution });
+  if (task.planRole) rows.push({ key: 'planRole', label: t(language, 'taskPlan'), value: task.planRole });
+  if (task.planPath) rows.push({ key: 'planPath', label: t(language, 'taskPath'), value: task.planPath });
+  if (task.workdir) rows.push({ key: 'workdir', label: t(language, 'taskWorkdir'), value: shortPath(task.workdir) });
+  if (task.modelRequested && task.modelResolved && task.modelRequested !== task.modelResolved) {
+    rows.push({ key: 'models', label: t(language, 'taskModels'), value: `${task.modelRequested} → ${task.modelResolved}` });
+  }
+  const stats = [
+    Number.isFinite(task.runtimeMs) ? `${t(language, 'taskRuntime')} ${compactDuration(task.runtimeMs, language)}` : undefined,
+    Number.isFinite(task.tokensPerSecond) ? `${Math.round(task.tokensPerSecond)} tok/s` : undefined,
+    Number.isFinite(task.costUsd) ? `$${task.costUsd.toFixed(4)}` : undefined,
+    Number.isFinite(task.cacheHitRate) ? `${(task.cacheHitRate * 100).toFixed(1)}% ${t(language, 'taskCacheHit')}` : undefined,
+  ].filter(Boolean);
+  if (stats.length) rows.push({ key: 'stats', label: t(language, 'taskStats'), value: stats.join(' · ') });
+  return compact ? rows.filter(row => ['summary', 'planPath', 'owner'].includes(row.key)).slice(0, 3) : rows;
+}
+
 function taskDetails(canvas, rect, task, snapshot, ui, {
   now, time, motion = true, palette, language, viewportH, freshness,
 }) {
@@ -2204,6 +2247,16 @@ function taskDetails(canvas, rect, task, snapshot, ui, {
   y++;
   const linked = linkedNodeForTask(snapshot, task.id);
   const compact = w < 60 || (Number.isFinite(viewportH) && viewportH < 26);
+  const contractRows = taskContractRows(task, language, compact);
+  if (contractRows.length && y < bottom - 2) {
+    y = detailSection(canvas, x, y, w, t(language, 'taskContract'), palette);
+    const contractWidth = labelWidthFor(contractRows.map(row => row.label));
+    for (const row of contractRows) {
+      y = metricRow(canvas, x, y, w, row.label, [[row.value, { fg: palette.text }]], palette, contractWidth);
+      if (y >= bottom) return;
+    }
+    y++;
+  }
   const { diagnosis, record } = selectionResolution(
     snapshot,
     { snapshot, run: linked?.run, node: linked?.node, task, subject: 'task' },
@@ -2725,6 +2778,7 @@ function dutyBody(canvas, full, snapshot, ui, {
   const subjectLabel = showTask ? task.description
     : node ? node.label : run ? displayRunName(run) : t(language, 'noWorkflow');
   const subjectId = showTask ? task.id : node ? node.id : run ? run.id : '—';
+  const planText = showTask ? [task.planRole, task.planPath].filter(Boolean).join(' · ') : undefined;
   const linkedTaskId = showTask ? task.id : node?.taskId;
   const identity = linkedTaskId && linkedTaskId !== subjectId
     ? `${subjectLabel} · ${subjectId} · ${linkedTaskId}`
@@ -2771,6 +2825,13 @@ function dutyBody(canvas, full, snapshot, ui, {
       rich(canvas, x, y, w, line, palette, palette.panel);
       y++;
     }
+    if (planText && y < bottom) {
+      rich(canvas, x, y, w, [
+        [`${t(language, 'taskPlan')} `, { fg: palette.faint }],
+        [fit(planText, Math.max(8, w - textWidth(t(language, 'taskPlan')) - 1)), { fg: palette.text }],
+      ], palette, palette.panel);
+      y++;
+    }
     return y;
   }
 
@@ -2788,6 +2849,15 @@ function dutyBody(canvas, full, snapshot, ui, {
     y = detailLine(canvas, x, y, w, [[t(language, 'dutyRunLine', {
       name: displayRunName(run), done: stats.done, total: stats.total, running: runningCount,
     }), { fg: palette.dim }]], palette);
+  }
+  // Plan identity belongs above progress and source health: on a short duty
+  // pane the rows below the health block are already clipped, and a plan task
+  // is unusable without its plan path.
+  if (planText) {
+    y = detailLine(canvas, x, y, w, [
+      [`${t(language, 'taskPlan')} `, { fg: palette.faint }],
+      [planText, { fg: palette.text }],
+    ], palette);
   }
   y = progressBlock(canvas, x, y, w, progress, {
     time, motion, palette, color, bg: palette.panel, bold: status === 'running',
