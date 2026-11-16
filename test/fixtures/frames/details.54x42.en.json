@@ -1,0 +1,160 @@
+{
+  "surface": "details",
+  "width": 54,
+  "height": 42,
+  "language": "en",
+  "text": [
+    "  DAG STUDIO  v0.1.0  ● LIVE   fr…001   captured now  ",
+    "  build pipeline › build-api › st_api · RUNNING       ",
+    "──────────────────────────────────────────────────────",
+    "╭─ RUNS ─────────────────────────────────────────────╮",
+    "│ ▸ ● build pipeline 54%                             │",
+    "│   ✓ docs refresh 100%                              │",
+    "│                                                    │",
+    "│                                                    │",
+    "│                                                    │",
+    "╰────────────────────────────────────────────────────╯",
+    "╭─ CELLS · build pipeline ───────────────────────────╮",
+    "│   ✓ intake 100%                                    │",
+    "│ ▸ ● build-api 62%                                  │",
+    "│   ○ test-suite 0%                                  │",
+    "│                                                    │",
+    "│                                                    │",
+    "╰────────────────────────────────────────────────────╯",
+    "╭─ CURRENT NODE · build-api ──────────────── Running ╮",
+    "│                                                    │",
+    "│  ● RUNNING   00:02:20  attempt 1                   │",
+    "│ build-api · api · st_api                           │",
+    "│ build pipeline · 1/3 done · 1 running              │",
+    "│ ████████████████████████████───────────────── 62%  │",
+    "│                                                    │",
+    "│ error none recorded                                │",
+    "│ coder · provider/model                             │",
+    "│ e details · v switch · s settings · ? help         │",
+    "│ METRICS ────────────────────────────────────────── │",
+    "│ tokens     12.3k in / 6.8k out                     │",
+    "│ TOKEN RATE ▁▁▁▁▁▁▁▁▁▁▁▁▄▅▆█ (history)  peak 42/s   │",
+    "│ retries    failed turns not recorded               │",
+    "│ turns      — · tools —                             │",
+    "│ CONNECTIONS ────────────────────────────────────── │",
+    "│ in  intake                                         │",
+    "│ out test-suite                                     │",
+    "│ ACTIVITY ───────────────────────────────────────── │",
+    "│ ▶ bash running 3s                                  │",
+    "│                                                    │",
+    "│                                                    │",
+    "╰────────────────────────────────────────────────────╯",
+    "──────────────────────────────────────────────────────",
+    " ● ✓ × ◌  ? Help m select x clear   ● OFF  ⚙ SETTINGS "
+  ],
+  "hitboxes": {
+    "clearHint": {
+      "x": 26,
+      "y": 41,
+      "w": 7,
+      "h": 1
+    },
+    "context": {
+      "node": {
+        "x": 19,
+        "y": 1,
+        "w": 9,
+        "h": 1
+      },
+      "run": {
+        "x": 2,
+        "y": 1,
+        "w": 14,
+        "h": 1
+      },
+      "task": {
+        "x": 31,
+        "y": 1,
+        "w": 6,
+        "h": 1
+      }
+    },
+    "helpHint": {
+      "x": 10,
+      "y": 41,
+      "w": 6,
+      "h": 1
+    },
+    "helpPanel": null,
+    "nodes": {
+      "api": {
+        "x": 1,
+        "y": 12,
+        "w": 52,
+        "h": 1
+      },
+      "intake": {
+        "x": 1,
+        "y": 11,
+        "w": 52,
+        "h": 1
+      },
+      "tests": {
+        "x": 1,
+        "y": 13,
+        "w": 52,
+        "h": 1
+      }
+    },
+    "palette": null,
+    "paletteFilter": null,
+    "palettePanel": null,
+    "regions": {
+      "cells": {
+        "x": 1,
+        "y": 11,
+        "w": 52,
+        "h": 5
+      },
+      "details": {
+        "x": 0,
+        "y": 17,
+        "w": 54,
+        "h": 23
+      },
+      "runs": {
+        "x": 1,
+        "y": 4,
+        "w": 52,
+        "h": 5
+      }
+    },
+    "runs": {
+      "run_build": {
+        "x": 1,
+        "y": 4,
+        "w": 52,
+        "h": 1
+      },
+      "run_docs": {
+        "x": 1,
+        "y": 5,
+        "w": 52,
+        "h": 1
+      }
+    },
+    "scrollbars": {},
+    "selectHint": {
+      "x": 17,
+      "y": 41,
+      "w": 8,
+      "h": 1
+    },
+    "settings": {
+      "x": 43,
+      "y": 41,
+      "w": 10,
+      "h": 1
+    },
+    "settingsOptions": {},
+    "switcher": null,
+    "switcherFilter": null,
+    "switcherPanel": null,
+    "tasks": {}
+  }
+}

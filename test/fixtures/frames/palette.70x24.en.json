@@ -1,0 +1,217 @@
+{
+  "surface": "palette",
+  "width": 70,
+  "height": 24,
+  "language": "en",
+  "text": [
+    "  DAG STUDIO  v0.1.0      ● LIVE   frame-fixture-0001   captured now  ",
+    "  build pipeline › run overview · RUNNING · 1/3 done · 1 running      ",
+    "───╔═ COMMANDS ═══════════════════════════════════════════════ 16 ╗───",
+    "╭─ ║ : type a command                                             ║──╮",
+    "│ ▸║ ▸ Open run summary                                           ║ █│",
+    "╰──║   Find run, node, or task                                    ║──╯",
+    "╭─ ║   Filter graph: failed                                       ║──╮",
+    "│  ║   Filter graph: blocked                                      ║ █│",
+    "╰──║   Filter graph: running                                      ║──╯",
+    "╭─ ║   Highlight the critical path                                ║g ╮",
+    "│  ║   Show all graph nodes                                       ║  │",
+    "│  ║   Focus selected node                                        ║ █│",
+    "│ b║   Toggle task scope                                          ║ █│",
+    "│ b║   Toggle completed tasks                                     ║ █│",
+    "│ █║   Toggle verbose details                                     ║ █│",
+    "│  ║   Start the tour                                             ║ ░│",
+    "│ e║   Undo clear completed                                       ║ ░│",
+    "│ a║   HELP · KEY BINDINGS                                        ║ ░│",
+    "│ e║   SETTINGS                                                   ║ ░│",
+    "│ R║   quit (close Help first)                                    ║─░│",
+    "│ ×║  ↑↓ move · Enter run · :/Esc close                           ║ ░│",
+    "╰──╚══════════════════════════════════════════════════════════════╝──╯",
+    "──────────────────────────────────────────────────────────────────────",
+    " ●run ✓done ×fail ◌wait ? Help m select x clear  z… ● OFF  ⚙ SETTINGS "
+  ],
+  "hitboxes": {
+    "clearHint": {
+      "x": 40,
+      "y": 23,
+      "w": 7,
+      "h": 1
+    },
+    "context": {},
+    "helpHint": {
+      "x": 24,
+      "y": 23,
+      "w": 6,
+      "h": 1
+    },
+    "helpPanel": null,
+    "nodes": {},
+    "palette": {
+      "completed": {
+        "x": 4,
+        "y": 13,
+        "w": 62,
+        "h": 1
+      },
+      "filter-blocked": {
+        "x": 4,
+        "y": 7,
+        "w": 62,
+        "h": 1
+      },
+      "filter-clear": {
+        "x": 4,
+        "y": 10,
+        "w": 62,
+        "h": 1
+      },
+      "filter-critical": {
+        "x": 4,
+        "y": 9,
+        "w": 62,
+        "h": 1
+      },
+      "filter-failed": {
+        "x": 4,
+        "y": 6,
+        "w": 62,
+        "h": 1
+      },
+      "filter-running": {
+        "x": 4,
+        "y": 8,
+        "w": 62,
+        "h": 1
+      },
+      "find": {
+        "x": 4,
+        "y": 5,
+        "w": 62,
+        "h": 1
+      },
+      "focus": {
+        "x": 4,
+        "y": 11,
+        "w": 62,
+        "h": 1
+      },
+      "help": {
+        "x": 4,
+        "y": 17,
+        "w": 62,
+        "h": 1
+      },
+      "overview": {
+        "x": 4,
+        "y": 4,
+        "w": 62,
+        "h": 1
+      },
+      "quit": {
+        "x": 4,
+        "y": 19,
+        "w": 62,
+        "h": 1
+      },
+      "scope": {
+        "x": 4,
+        "y": 12,
+        "w": 62,
+        "h": 1
+      },
+      "settings": {
+        "x": 4,
+        "y": 18,
+        "w": 62,
+        "h": 1
+      },
+      "tour": {
+        "x": 4,
+        "y": 15,
+        "w": 62,
+        "h": 1
+      },
+      "undo": {
+        "x": 4,
+        "y": 16,
+        "w": 62,
+        "h": 1
+      },
+      "verbose": {
+        "x": 4,
+        "y": 14,
+        "w": 62,
+        "h": 1
+      }
+    },
+    "paletteFilter": {
+      "x": 4,
+      "y": 3,
+      "w": 62,
+      "h": 1
+    },
+    "palettePanel": {
+      "x": 3,
+      "y": 2,
+      "w": 64,
+      "h": 20
+    },
+    "regions": {
+      "cells": {
+        "x": 1,
+        "y": 7,
+        "w": 68,
+        "h": 1
+      },
+      "details": {
+        "x": 0,
+        "y": 9,
+        "w": 70,
+        "h": 13
+      },
+      "runs": {
+        "x": 1,
+        "y": 4,
+        "w": 68,
+        "h": 1
+      }
+    },
+    "runs": {},
+    "scrollbars": {
+      "cells": {
+        "x": 68,
+        "y": 7,
+        "w": 1,
+        "h": 1
+      },
+      "details": {
+        "x": 68,
+        "y": 11,
+        "w": 1,
+        "h": 10
+      },
+      "runs": {
+        "x": 68,
+        "y": 4,
+        "w": 1,
+        "h": 1
+      }
+    },
+    "selectHint": {
+      "x": 31,
+      "y": 23,
+      "w": 8,
+      "h": 1
+    },
+    "settings": {
+      "x": 59,
+      "y": 23,
+      "w": 10,
+      "h": 1
+    },
+    "settingsOptions": {},
+    "switcher": null,
+    "switcherFilter": null,
+    "switcherPanel": null,
+    "tasks": {}
+  }
+}

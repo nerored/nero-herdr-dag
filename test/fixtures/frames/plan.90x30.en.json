@@ -1,0 +1,149 @@
+{
+  "surface": "plan",
+  "width": 90,
+  "height": 30,
+  "language": "en",
+  "text": [
+    "  DAG STUDIO  v0.1.0               ● LIVE   frame-fixture-0001   captured now   12:00:00  ",
+    "  build pipeline › no node › st_plan · RUNNING · 1/3 done · 1 running                     ",
+    "──────────────────────────────────────────────────────────────────────────────────────────",
+    "╭─ RUNS ─────────────────────────────────────────────────────────────────────────────────╮",
+    "│ ▸ ● build pipeline 54%                                                                 │",
+    "│   ✓ docs refresh 100%                                                                  │",
+    "╰────────────────────────────────────────────────────────────────────────────────────────╯",
+    "╭─ CELLS · build pipeline ───────────────────────────────────────────────────────────────╮",
+    "│   ✓ intake 100%                                                                       █│",
+    "│   ● build-api 62%                                                                     ░│",
+    "╰────────────────────────────────────────────────────────────────────────────────────────╯",
+    "╭─ TASK · st_plan ────────────────────────────────────────────────────────────── Running ╮",
+    "│                                                                                        │",
+    "│  ● RUNNING   —  attempt 1                                                             █│",
+    "│ Execute plan todo 13 · st_plan · no node                                              █│",
+    "│ build pipeline · 1/3 done · 1 running                                                 █│",
+    "│ plan plan-executor · .omo/plans/quality-and-next.md                                   █│",
+    "│ ████████████████████████████████───────────────────────────────────────────────── 40% █│",
+    "│                                                                                       █│",
+    "│ error none recorded                                                                   █│",
+    "│ agent not recorded · model not recorded                                               █│",
+    "│ e details · v switch · s settings · ? help                                            █│",
+    "│ METRICS ──────────────────────────────────────────────────────────────────────────────█│",
+    "│ tokens     — in / — out                                                               █│",
+    "│ hit        (75.0%) · $0.0123                                                          █│",
+    "│ retries    failed turns not recorded                                                  ░│",
+    "│ turns      — · tools —                                                                ░│",
+    "╰────────────────────────────────────────────────────────────────────────────────────────╯",
+    "──────────────────────────────────────────────────────────────────────────────────────────",
+    " ●run ✓done ×fail ◌wait ? Help m select x clear  Enter open · t… ● OFF  12fps  ⚙ SETTINGS "
+  ],
+  "hitboxes": {
+    "clearHint": {
+      "x": 40,
+      "y": 29,
+      "w": 7,
+      "h": 1
+    },
+    "context": {
+      "run": {
+        "x": 2,
+        "y": 1,
+        "w": 14,
+        "h": 1
+      },
+      "task": {
+        "x": 29,
+        "y": 1,
+        "w": 7,
+        "h": 1
+      }
+    },
+    "helpHint": {
+      "x": 24,
+      "y": 29,
+      "w": 6,
+      "h": 1
+    },
+    "helpPanel": null,
+    "nodes": {
+      "api": {
+        "x": 1,
+        "y": 9,
+        "w": 88,
+        "h": 1
+      },
+      "intake": {
+        "x": 1,
+        "y": 8,
+        "w": 88,
+        "h": 1
+      }
+    },
+    "palette": null,
+    "paletteFilter": null,
+    "palettePanel": null,
+    "regions": {
+      "cells": {
+        "x": 1,
+        "y": 8,
+        "w": 88,
+        "h": 2
+      },
+      "details": {
+        "x": 0,
+        "y": 11,
+        "w": 90,
+        "h": 17
+      },
+      "runs": {
+        "x": 1,
+        "y": 4,
+        "w": 88,
+        "h": 2
+      }
+    },
+    "runs": {
+      "run_build": {
+        "x": 1,
+        "y": 4,
+        "w": 88,
+        "h": 1
+      },
+      "run_docs": {
+        "x": 1,
+        "y": 5,
+        "w": 88,
+        "h": 1
+      }
+    },
+    "scrollbars": {
+      "cells": {
+        "x": 88,
+        "y": 8,
+        "w": 1,
+        "h": 2
+      },
+      "details": {
+        "x": 88,
+        "y": 13,
+        "w": 1,
+        "h": 14
+      }
+    },
+    "selectHint": {
+      "x": 31,
+      "y": 29,
+      "w": 8,
+      "h": 1
+    },
+    "settings": {
+      "x": 79,
+      "y": 29,
+      "w": 10,
+      "h": 1
+    },
+    "settingsOptions": {},
+    "switcher": null,
+    "switcherFilter": null,
+    "switcherPanel": null,
+    "tasks": {}
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "surface": "help",
+  "width": 111,
+  "height": 40,
+  "language": "en",
+  "text": [
+    "  DAG STUDIO  v0.1.0                                    ● LIVE   frame-fixture-0001   captured now   12:00:00  ",
+    "  build pipeline › run overview · RUNNING · 1/3 done · 1 running                                               ",
+    "─────────────────────╔═ HELP · KEY BINDINGS ════════════════════════════════════════════╗──────────────────────",
+    "╭─ RUNS ─────────────║                                                                  ║─────────────────────╮",
+    "│ ▸ ● build pipeline ║  MOVE                                                            ║                     │",
+    "│   ✓ docs refresh 10║  ↑/↓  j/k            scroll the focused region one line          ║                     │",
+    "│                    ║  PgUp / PgDn         scroll the focused region by half a page    ║                     │",
+    "│                    ║  g / G  Home/End     jump the focused region to top/bottom       ║                     │",
+    "╰────────────────────║  Tab / Shift-Tab     select next / previous cell                 ║─────────────────────╯",
+    "╭─ CELLS · build pipe║  VIEW                                                            ║─────────────────────╮",
+    "│   ✓ intake 100%    ║  Click               select node, task, or run                   ║                     │",
+    "│   ● build-api 62%  ║  m                   release mouse tracking for Herdr drag-sel…  ║                     │",
+    "│   ○ test-suite 0%  ║  Mouse wheel         scroll one page                             ║                     │",
+    "│                    ║  ← / →               switch run                                  ║                     │",
+    "╰────────────────────║  Space / Enter       fold or unfold selected node                ║─────────────────────╯",
+    "╭─ RUN · build pipeli║  d                   toggle verbose details (wide layouts) · r…  ║──────────── Running ╮",
+    "│                    ║  e / Esc             expand details · Backspace returns to the…  ║                     │",
+    "│  ● RUNNING   —  att║  v / /               open finder (runs/nodes/tasks)              ║                    █│",
+    "│ build pipeline · ru║  f                   toggle auto-follow                          ║                    █│",
+    "│ build pipeline · 1/║  S                   toggle sidebar on wide layouts              ║                    █│",
+    "│ ███████████████████║  ACTIONS                                                         ║─────────────── 54% █│",
+    "│                    ║  t                   toggle task scope (run/all)                 ║                    █│",
+    "│ error none recorded║  T                   collapse / expand completed tasks           ║                    █│",
+    "│ agent not recorded ║  1–5                 graph filter: all/failed/blocked/running/…  ║                    █│",
+    "│ e details · v switc║  1 / 2 / 3           focus runs / cells / current node (narrow…  ║                    █│",
+    "│ RUN SUMMARY ───────║  z                   focus selected node and neighbors           ║────────────────────█│",
+    "│ × 0 failed · ◌ 0 bl║  n / N               previous / next node                        ║                    █│",
+    "│ ● 1 running · ✓ 1 d║  [ / ]               previous / next details section             ║                    █│",
+    "│ ▸ 1 all · 2 ×0 · 3 ║  c / p / o           copy diagnosis · copy paths · open record   ║                    █│",
+    "│ EFFICIENCY         ║  x / X / u           x clears · X restores · u undoes            ║                    █│",
+    "│ tokens   12.3k in /║  s                   open settings                               ║                    █│",
+    "│                    ║  r                   restart demo cycle                          ║                    █│",
+    "│ TIME               ║  SYSTEM                                                          ║                    █│",
+    "│ wall     3m 0s (bus║  :                   open the command palette                    ║                    ░│",
+    "│ critical intake → b║  ? / Esc             close this help                             ║                    ░│",
+    "│ parallel max 1 · av║  q                   quit (close Help first)                     ║                    ░│",
+    "│                    ║  Data: LIVE · controller · 2026-11-16T12:00:00Z                  ║                    ░│",
+    "╰────────────────────╚══════════════════════════════════════════════════════════════════╝─────────────────────╯",
+    "───────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    " ●run ✓done ×fail ◌wait ? Help m select x clear  z focus · n/N nodes · 1–5 fi… ● FOLLOW OFF  12fps  ⚙ SETTINGS "
+  ],
+  "hitboxes": {
+    "clearHint": {
+      "x": 40,
+      "y": 39,
+      "w": 7,
+      "h": 1
+    },
+    "context": {
+      "run": {
+        "x": 2,
+        "y": 1,
+        "w": 14,
+        "h": 1
+      }
+    },
+    "helpHint": {
+      "x": 24,
+      "y": 39,
+      "w": 6,
+      "h": 1
+    },
+    "helpPanel": {
+      "x": 21,
+      "y": 2,
+      "w": 68,
+      "h": 36
+    },
+    "nodes": {
+      "api": {
+        "x": 1,
+        "y": 11,
+        "w": 109,
+        "h": 1
+      },
+      "intake": {
+        "x": 1,
+        "y": 10,
+        "w": 109,
+        "h": 1
+      },
+      "tests": {
+        "x": 1,
+        "y": 12,
+        "w": 109,
+        "h": 1
+      }
+    },
+    "palette": null,
+    "paletteFilter": null,
+    "palettePanel": null,
+    "regions": {},
+    "runs": {
+      "run_build": {
+        "x": 1,
+        "y": 4,
+        "w": 109,
+        "h": 1
+      },
+      "run_docs": {
+        "x": 1,
+        "y": 5,
+        "w": 109,
+        "h": 1
+      }
+    },
+    "scrollbars": {},
+    "selectHint": {
+      "x": 31,
+      "y": 39,
+      "w": 8,
+      "h": 1
+    },
+    "settings": {
+      "x": 100,
+      "y": 39,
+      "w": 10,
+      "h": 1
+    },
+    "settingsOptions": {},
+    "switcher": null,
+    "switcherFilter": null,
+    "switcherPanel": null,
+    "tasks": {}
+  }
+}

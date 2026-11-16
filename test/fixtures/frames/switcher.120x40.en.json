@@ -1,0 +1,145 @@
+{
+  "surface": "switcher",
+  "width": 120,
+  "height": 40,
+  "language": "en",
+  "text": [
+    "  DAG STUDIO  v0.1.0                                             ● LIVE   frame-fixture-0001   captured now   12:00:00  ",
+    "  build pipeline › run overview · RUNNING · 1/3 done · 1 running                                                        ",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "╭─ NAVIGATION ───────────╮ ╭─ GRAPH ─────────────────── 3 nodes · 1 running · 54% ╮ ╭─ RUN · build pipeline ── Running ╮",
+    "│RUNS  2                 │ │                                                     █│ │                                  │",
+    "│▸ ● build pipeline      │ │                                                     █│ │  ● RUNNING   54% complete        │",
+    "│  ████──── 54% · 1/3    │ │          ╭────────────────────────────────╮         █│ │ build pipeline                   │",
+    "│  ✓ docs refresh    ╔═ FIND · RUNS, NODES & TASKS ═══════════════════════════════════════════ 10 ╗                    │",
+    "│  ████████ 100% · 1/║ / filter  ▏                                                                ║─────────── 54%     │",
+    "│                    ║ RUNS ───────────────────────────────────────────────────────────────────── ║                    │",
+    "│TASKS  3 · run · ✓1 ║ ▸ ● build pipeline  1/3 · 54%                                              ║─────────────────── │",
+    "│  ● build the HTTP A║   ✓ docs refresh  1/1 · 100%                                               ║◌ 0 blocked         │",
+    "│  ███████████───────║ NODES ──────────────────────────────────────────────────────────────────── ║ ✓ 1 done           │",
+    "│  ○ run the test sui║   ✓ intake  intake · st_intake                                             ║0 · 3 ◌0 · 4 ●1 · … │",
+    "│  ────────── —      ║   ● build-api  api · coder · provider/…                                    ║                    │",
+    "│                    ║   ○ test-suite  tests · st_tests                                           ║k in / 6.8k out 1/3 │",
+    "│                    ║   ✓ docs  docs · st_docs                                                   ║                    │",
+    "│                    ║ TASKS ──────────────────────────────────────────────────────────────────── ║                    │",
+    "│                    ║   ● build the HTTP API  st_api · coder · provid…                           ║s (busy 2m 40s)     │",
+    "│                    ║   ● Execute plan todo 13  st_plan                                          ║ke → build-api      │",
+    "│                    ║   ✓ intake probe  st_intake                                                ║40s)                │",
+    "│                    ║   ○ run the test suite  st_tests                                           ║1 · avg 0.9 2/3     │",
+    "│                    ║                                                                            ║                    │",
+    "│                    ║                                                                            ║                    │",
+    "│                    ║                                                                            ║des · 2 edges       │",
+    "│                    ║                                                                            ║ted 3m ago          │",
+    "│                    ║                                                                            ║                    │",
+    "│                    ║                                                                            ║─────────────────── │",
+    "│                    ║                                                                            ║%                   │",
+    "│                    ║                                                                            ║62%                 │",
+    "│                    ║                                                                            ║ 0%                 │",
+    "│                    ║  r: runs · n: nodes · t: tasks · Enter open                                ║                    │",
+    "│                    ╚════════════════════════════════════════════════════════════════════════════╝ick to select a no… │",
+    "│                        │ │          ╰────────────────────────────────╯         ░│ │                                  │",
+    "│                        │ │                                                     ░│ │                                  │",
+    "│                        │ │──────────────────────────────────────────────────────│ │                                  │",
+    "│                        │ │ 2 edges · 3 nodes                                    │ │                                  │",
+    "╰────────────────────────╯ ╰──────────────────────────────────────────────────────╯ ╰──────────────────────────────────╯",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    " ●run ✓done ×fail ◌wait ? Help m select x clear  z focus · n/N nodes · 1–5 filter · / … ● FOLLOW OFF  12fps  ⚙ SETTINGS "
+  ],
+  "hitboxes": {
+    "clearHint": null,
+    "context": {},
+    "helpHint": null,
+    "helpPanel": null,
+    "nodes": {},
+    "palette": null,
+    "paletteFilter": null,
+    "palettePanel": null,
+    "regions": {},
+    "runs": {},
+    "scrollbars": {},
+    "selectHint": null,
+    "settings": null,
+    "settingsOptions": {},
+    "switcher": {
+      "node:run_build:api": {
+        "x": 22,
+        "y": 14,
+        "w": 76,
+        "h": 1
+      },
+      "node:run_build:intake": {
+        "x": 22,
+        "y": 13,
+        "w": 76,
+        "h": 1
+      },
+      "node:run_build:tests": {
+        "x": 22,
+        "y": 15,
+        "w": 76,
+        "h": 1
+      },
+      "node:run_docs:docs": {
+        "x": 22,
+        "y": 16,
+        "w": 76,
+        "h": 1
+      },
+      "run:run_build": {
+        "x": 22,
+        "y": 10,
+        "w": 76,
+        "h": 1
+      },
+      "run:run_docs": {
+        "x": 22,
+        "y": 11,
+        "w": 76,
+        "h": 1
+      },
+      "task:st_api": {
+        "x": 22,
+        "y": 18,
+        "w": 76,
+        "h": 1
+      },
+      "task:st_intake": {
+        "x": 22,
+        "y": 20,
+        "w": 76,
+        "h": 1
+      },
+      "task:st_plan": {
+        "x": 22,
+        "y": 19,
+        "w": 76,
+        "h": 1
+      },
+      "task:st_tests": {
+        "x": 22,
+        "y": 21,
+        "w": 76,
+        "h": 1
+      }
+    },
+    "switcherFilter": {
+      "x": 22,
+      "y": 8,
+      "w": 76,
+      "h": 1
+    },
+    "switcherPanel": {
+      "x": 21,
+      "y": 7,
+      "w": 78,
+      "h": 26
+    },
+    "tasks": {},
+    "tasksToggle": {
+      "x": 1,
+      "y": 10,
+      "w": 24,
+      "h": 1
+    }
+  }
+}

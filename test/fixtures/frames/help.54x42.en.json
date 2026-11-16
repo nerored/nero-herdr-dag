@@ -1,0 +1,134 @@
+{
+  "surface": "help",
+  "width": 54,
+  "height": 42,
+  "language": "en",
+  "text": [
+    "  DAG STUDIO  v0.1.0  ● LIVE   fr…001   captured now  ",
+    "  build pipeline › run overview · RUNNING             ",
+    "──────────────────────────────────────────────────────",
+    "╭─╔═ HELP · KEY BINDINGS ══════════════════════════╗─╮",
+    "│ ║                                                ║ │",
+    "│ ║  MOVE                                          ║ │",
+    "│ ║  ↑/↓  j/k            scroll the focused regi…  ║ │",
+    "│ ║  PgUp / PgDn         scroll the focused regi…  ║ │",
+    "│ ║  g / G  Home/End     jump the focused region…  ║ │",
+    "╰─║  Tab / Shift-Tab     select next / previous …  ║─╯",
+    "╭─║  VIEW                                          ║─╮",
+    "│ ║  Click               select node, task, or r…  ║ │",
+    "│ ║  m                   release mouse tracking …  ║ │",
+    "│ ║  Mouse wheel         scroll one page           ║ │",
+    "│ ║  ← / →               switch run                ║ │",
+    "│ ║  Space / Enter       fold or unfold selected…  ║ │",
+    "╰─║  d                   toggle verbose details …  ║─╯",
+    "╭─║  e / Esc             expand details · Backsp…  ║ ╮",
+    "│ ║  v / /               open finder (runs/nodes…  ║ │",
+    "│ ║  f                   toggle auto-follow        ║█│",
+    "│ ║  S                   toggle sidebar on wide …  ║█│",
+    "│ ║  ACTIONS                                       ║█│",
+    "│ ║  t                   toggle task scope (run/…  ║█│",
+    "│ ║  T                   collapse / expand compl…  ║█│",
+    "│ ║  1–5                 graph filter: all/faile…  ║█│",
+    "│ ║  1 / 2 / 3           focus runs / cells / cu…  ║█│",
+    "│ ║  z                   focus selected node and…  ║█│",
+    "│ ║  n / N               previous / next node      ║█│",
+    "│ ║  [ / ]               previous / next details…  ║█│",
+    "│ ║  c / p / o           copy diagnosis · copy p…  ║█│",
+    "│ ║  x / X / u           x clears · X restores ·…  ║█│",
+    "│ ║  s                   open settings             ║█│",
+    "│ ║  r                   restart demo cycle        ║█│",
+    "│ ║  SYSTEM                                        ║█│",
+    "│ ║  :                   open the command palette  ║█│",
+    "│ ║  ? / Esc             close this help           ║░│",
+    "│ ║  q                   quit (close Help first)   ║░│",
+    "│ ║  Data: LIVE · controller · 2026-11-16T12:00:…  ║░│",
+    "│ ╚════════════════════════════════════════════════╝░│",
+    "╰────────────────────────────────────────────────────╯",
+    "──────────────────────────────────────────────────────",
+    " ● ✓ × ◌  ? Help m select x clear   ● OFF  ⚙ SETTINGS "
+  ],
+  "hitboxes": {
+    "clearHint": {
+      "x": 26,
+      "y": 41,
+      "w": 7,
+      "h": 1
+    },
+    "context": {
+      "run": {
+        "x": 2,
+        "y": 1,
+        "w": 14,
+        "h": 1
+      }
+    },
+    "helpHint": {
+      "x": 10,
+      "y": 41,
+      "w": 6,
+      "h": 1
+    },
+    "helpPanel": {
+      "x": 2,
+      "y": 3,
+      "w": 50,
+      "h": 36
+    },
+    "nodes": {
+      "api": {
+        "x": 1,
+        "y": 12,
+        "w": 52,
+        "h": 1
+      },
+      "intake": {
+        "x": 1,
+        "y": 11,
+        "w": 52,
+        "h": 1
+      },
+      "tests": {
+        "x": 1,
+        "y": 13,
+        "w": 52,
+        "h": 1
+      }
+    },
+    "palette": null,
+    "paletteFilter": null,
+    "palettePanel": null,
+    "regions": {},
+    "runs": {
+      "run_build": {
+        "x": 1,
+        "y": 4,
+        "w": 52,
+        "h": 1
+      },
+      "run_docs": {
+        "x": 1,
+        "y": 5,
+        "w": 52,
+        "h": 1
+      }
+    },
+    "scrollbars": {},
+    "selectHint": {
+      "x": 17,
+      "y": 41,
+      "w": 8,
+      "h": 1
+    },
+    "settings": {
+      "x": 43,
+      "y": 41,
+      "w": 10,
+      "h": 1
+    },
+    "settingsOptions": {},
+    "switcher": null,
+    "switcherFilter": null,
+    "switcherPanel": null,
+    "tasks": {}
+  }
+}

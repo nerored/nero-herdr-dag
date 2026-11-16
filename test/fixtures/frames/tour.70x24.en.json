@@ -1,0 +1,116 @@
+{
+  "surface": "tour",
+  "width": 70,
+  "height": 24,
+  "language": "en",
+  "text": [
+    "  DAG STUDIO  v0.1.0      ● LIVE   frame-fixture-0001   captured now  ",
+    "  build pipeline › run overview · RUNNING · 1/3 done · 1 running      ",
+    "──────────────────────────────────────────────────────────────────────",
+    "╭─ RUNS ─────────────────────────────────────────────────────────────╮",
+    "│ ▸ ● build pipeline 54%                                            █│",
+    "╰────────────────────────────────────────────────────────────────────╯",
+    "╭─ CELLS · build pipeline ───────────────────────────────────────────╮",
+    "│   ✓ intake 100%                                                   █│",
+    "╰────────────────────────────────────────────────────────────────────╯",
+    "╭─ RUN · build pipeline ──────────────────────────────────── Running ╮",
+    "│                                                                    │",
+    "│  ● RUNNING   —  attempt 1                                         █│",
+    "│ build pipeline · run_build                                        █│",
+    "│ buil╔═ TOUR ════════════════════════════════════════════ 3/5 ╗    █│",
+    "│ ████║                                                        ║54% █│",
+    "│     ║  3/5 / searches runs, nodes, and tasks; r:/n:/t:       ║    ░│",
+    "│ erro║  narrow it.                                            ║    ░│",
+    "│ agen║                                                        ║    ░│",
+    "│ e de║                                                        ║    ░│",
+    "│ RUN ║  Enter next · Esc close                                ║────░│",
+    "│ × 0 ╚════════════════════════════════════════════════════════╝    ░│",
+    "╰────────────────────────────────────────────────────────────────────╯",
+    "──────────────────────────────────────────────────────────────────────",
+    " ●run ✓done ×fail ◌wait ? Help m select x clear  z… ● OFF  ⚙ SETTINGS "
+  ],
+  "hitboxes": {
+    "clearHint": {
+      "x": 40,
+      "y": 23,
+      "w": 7,
+      "h": 1
+    },
+    "context": {},
+    "helpHint": {
+      "x": 24,
+      "y": 23,
+      "w": 6,
+      "h": 1
+    },
+    "helpPanel": null,
+    "nodes": {},
+    "palette": null,
+    "paletteFilter": null,
+    "palettePanel": null,
+    "regions": {
+      "cells": {
+        "x": 1,
+        "y": 7,
+        "w": 68,
+        "h": 1
+      },
+      "details": {
+        "x": 0,
+        "y": 9,
+        "w": 70,
+        "h": 13
+      },
+      "runs": {
+        "x": 1,
+        "y": 4,
+        "w": 68,
+        "h": 1
+      }
+    },
+    "runs": {},
+    "scrollbars": {
+      "cells": {
+        "x": 68,
+        "y": 7,
+        "w": 1,
+        "h": 1
+      },
+      "details": {
+        "x": 68,
+        "y": 11,
+        "w": 1,
+        "h": 10
+      },
+      "runs": {
+        "x": 68,
+        "y": 4,
+        "w": 1,
+        "h": 1
+      }
+    },
+    "selectHint": {
+      "x": 31,
+      "y": 23,
+      "w": 8,
+      "h": 1
+    },
+    "settings": {
+      "x": 59,
+      "y": 23,
+      "w": 10,
+      "h": 1
+    },
+    "settingsOptions": {},
+    "switcher": null,
+    "switcherFilter": null,
+    "switcherPanel": null,
+    "tasks": {},
+    "tourPanel": {
+      "x": 6,
+      "y": 13,
+      "w": 58,
+      "h": 8
+    }
+  }
+}

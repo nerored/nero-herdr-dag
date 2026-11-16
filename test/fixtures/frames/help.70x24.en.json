@@ -1,0 +1,98 @@
+{
+  "surface": "help",
+  "width": 70,
+  "height": 24,
+  "language": "en",
+  "text": [
+    "  DAG STUDIO  v0.1.0      ● LIVE   frame-fixture-0001   captured now  ",
+    "  ╔═ HELP · KEY BINDINGS ═════════════════════════════════1-17/32══╗  ",
+    "──║                                                                ║──",
+    "╭─║  MOVE                                                          ║─╮",
+    "│ ║  ↑/↓  j/k            scroll the focused region one line        ║█│",
+    "╰─║  PgUp / PgDn         scroll the focused region by half a page  ║─╯",
+    "╭─║  g / G  Home/End     jump the focused region to top/bottom     ║─╮",
+    "│ ║  Tab / Shift-Tab     select next / previous cell               ║█│",
+    "╰─║  VIEW                                                          ║─╯",
+    "╭─║  Click               select node, task, or run                 ║ ╮",
+    "│ ║  m                   release mouse tracking for Herdr drag-s…  ║ │",
+    "│ ║  Mouse wheel         scroll one page                           ║█│",
+    "│ ║  ← / →               switch run                                ║█│",
+    "│ ║  Space / Enter       fold or unfold selected node              ║█│",
+    "│ ║  d                   toggle verbose details (wide layouts) ·…  ║█│",
+    "│ ║  e / Esc             expand details · Backspace returns to t…  ║░│",
+    "│ ║  v / /               open finder (runs/nodes/tasks)            ║░│",
+    "│ ║  f                   toggle auto-follow                        ║░│",
+    "│ ║  S                   toggle sidebar on wide layouts            ║░│",
+    "│ ║  ACTIONS                                                       ║░│",
+    "│ ║  Data: LIVE · controller · 2026-11-16T12:00:00Z                ║░│",
+    "╰─╚════════════════════════════════════════════════════════════════╝─╯",
+    "──────────────────────────────────────────────────────────────────────",
+    " ●run ✓done ×fail ◌wait ? Help m select x clear  z… ● OFF  ⚙ SETTINGS "
+  ],
+  "hitboxes": {
+    "clearHint": {
+      "x": 40,
+      "y": 23,
+      "w": 7,
+      "h": 1
+    },
+    "context": {
+      "run": {
+        "x": 2,
+        "y": 1,
+        "w": 14,
+        "h": 1
+      }
+    },
+    "helpHint": {
+      "x": 24,
+      "y": 23,
+      "w": 6,
+      "h": 1
+    },
+    "helpPanel": {
+      "x": 2,
+      "y": 1,
+      "w": 66,
+      "h": 21
+    },
+    "nodes": {
+      "intake": {
+        "x": 1,
+        "y": 7,
+        "w": 68,
+        "h": 1
+      }
+    },
+    "palette": null,
+    "paletteFilter": null,
+    "palettePanel": null,
+    "regions": {},
+    "runs": {
+      "run_build": {
+        "x": 1,
+        "y": 4,
+        "w": 68,
+        "h": 1
+      }
+    },
+    "scrollbars": {},
+    "selectHint": {
+      "x": 31,
+      "y": 23,
+      "w": 8,
+      "h": 1
+    },
+    "settings": {
+      "x": 59,
+      "y": 23,
+      "w": 10,
+      "h": 1
+    },
+    "settingsOptions": {},
+    "switcher": null,
+    "switcherFilter": null,
+    "switcherPanel": null,
+    "tasks": {}
+  }
+}
