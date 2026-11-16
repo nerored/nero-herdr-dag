@@ -310,6 +310,10 @@ export class TaskData {
         ? normalizeDescriptors([stateDir], report)
         : resolveTaskStateDirs({ cwd, sessionId, env, onProblem: report });
     this.entries = new Map();
+    // childSessionId -> number of entries in this.entries. receive() checks it
+    // per live payload instead of copying and scanning every record.
+    this.childSessions = new Map();
+    this.indexedEntries = this.entries;
     this.cache = new Map();
     this.live = new Map();
     this.rateHistory = new Map();
@@ -338,12 +342,14 @@ export class TaskData {
     // takes over, start from that record's own history so the stale store's
     // last sample cannot linger in (or alternate through) the visible series.
     const previousSource = this.rateSources.get(task.id);
-    const ownHistory = normalizeRateHistory(task.tokenRateHistory) ?? [];
     const switchingStore = source !== 'live' && previousSource !== undefined &&
       previousSource !== 'live' && previousSource !== source;
-    // Copy before mutating: the stored series is shared with the task that
-    // currently wins a merge, and a losing candidate must not extend it.
-    const prior = [...(switchingStore ? ownHistory : this.rateHistory.get(task.id) ?? ownHistory)];
+    // The stored series is shared with the task that currently wins a merge, so
+    // it is never mutated: a losing candidate must not extend it. Reusing it as
+    // is when no sample is appended keeps the 10Hz sampler allocation free; the
+    // copy happens only on the append path below.
+    let prior = switchingStore ? undefined : this.rateHistory.get(task.id);
+    if (!prior) prior = normalizeRateHistory(task.tokenRateHistory) ?? [];
     if (value === undefined) {
       if (prior.length) task.tokenRateHistory = prior;
       return;
@@ -363,8 +369,10 @@ export class TaskData {
       return;
     }
     const at = advanced || !last ? (observedAt ?? new Date(now).toISOString()) : new Date(now).toISOString();
-    prior.push({ at, rate: value });
-    const history = prior.slice(-32);
+    // One copy for the append, then trim in place: prior may be the shared
+    // stored series and the retained history must stay immutable for losers.
+    const history = [...prior, { at, rate: value }];
+    if (history.length > 32) history.splice(0, history.length - 32);
     task.tokenRateHistory = history;
     this.rateHistory.set(task.id, history);
     this.rateSeen.set(task.id, { at, rate: value, wall: now });
@@ -436,6 +444,42 @@ export class TaskData {
     }
   }
 
+  // Keep the child-session index in step with this.entries. Every write to the
+  // entry map goes through here so refresh/merge cannot desynchronize it; a map
+  // swapped in from outside is re-indexed on first use.
+  storeEntry(map, id, entry) {
+    if (map === this.entries) {
+      const previous = map.get(id);
+      this.ensureChildSessionIndex();
+      // Every entry tallies exactly one under its childSessionId, undefined
+      // included, so the check matches a full scan of the entries.
+      if (previous !== undefined) this.adjustChildSession(previous?.childSessionId, -1);
+      this.adjustChildSession(entry?.childSessionId, 1);
+    }
+    map.set(id, entry);
+  }
+
+  adjustChildSession(session, delta) {
+    const next = (this.childSessions.get(session) ?? 0) + delta;
+    if (next > 0) this.childSessions.set(session, next);
+    else this.childSessions.delete(session);
+  }
+
+  ensureChildSessionIndex() {
+    if (this.indexedEntries === this.entries) return;
+    this.childSessions = new Map();
+    this.indexedEntries = this.entries;
+    for (const [, entry] of this.entries) this.adjustChildSession(entry?.childSessionId, 1);
+  }
+
+  // Exact equivalent of scanning entries for a matching childSessionId,
+  // including the legacy undefined-session membership, without the copy.
+  acceptsSession(session) {
+    if (session === this.sessionId) return true;
+    this.ensureChildSessionIndex();
+    return (this.childSessions.get(session) ?? 0) > 0;
+  }
+
   // Merge one record into a map, selecting a whole record per task id. Fields
   // are only merged when the record comes from the same source; across stores
   // the winner stays intact and the loser becomes variant metadata.
@@ -455,7 +499,7 @@ export class TaskData {
     const previous = map.get(task.id);
     if (!previous) {
       this.rememberRate(candidate.task, raw, source);
-      map.set(task.id, candidate);
+      this.storeEntry(map, task.id, candidate);
       return candidate;
     }
     const order = compareTaskVersions(candidate, previous);
@@ -485,7 +529,7 @@ export class TaskData {
       };
       this.rememberRate(entry.task, raw, source);
       if (previous.variants?.length) entry.variants = [...previous.variants];
-      map.set(task.id, entry);
+      this.storeEntry(map, task.id, entry);
       return entry;
     }
     if (order === 0 && previous.source !== source) {
@@ -517,7 +561,7 @@ export class TaskData {
     if (variants.length) entry.variants = variants.filter((variant, index) =>
       variant?.source && variants.findIndex(candidateVariant => candidateVariant.source === variant.source) === index);
     this.rememberRate(entry.task, raw, source);
-    map.set(task.id, entry);
+    this.storeEntry(map, task.id, entry);
     return entry;
   }
 
@@ -540,7 +584,7 @@ export class TaskData {
   receive(payload) {
     if (this.stopped || !payload || !Array.isArray(payload.tasks)) return false;
     const session = payload.parent_session_id;
-    if (session !== this.sessionId && ![...this.entries.values()].some(entry => entry.childSessionId === session)) return false;
+    if (!this.acceptsSession(session)) return false;
     for (const raw of payload.tasks) {
       if (raw && (raw.parent_session_id === undefined || raw.parent_session_id === session)) this.merge(raw, session, 'live');
     }
@@ -650,6 +694,9 @@ export class TaskData {
       this.mergeEntry(combined, raw, entry.task, entry.source ?? 'live', entry.parentSessionId ?? this.sessionId);
     }
     this.entries = combined;
+    // One pass for the whole new entry map; the index cannot be updated entry
+    // by entry here because refresh never writes through this.entries.
+    this.ensureChildSessionIndex();
     this.sourceStatuses = statuses;
     return this.snapshot();
   }
@@ -692,8 +739,12 @@ export class TaskData {
       }
       index++;
     }
-    while (queue.length) {
-      const parentId = queue.shift();
+    // FIFO cursor instead of Array#shift: each root's payload is appended to the
+    // queue just like before, but shifting a 5000-id array no longer moves every
+    // remaining id.
+    let head = 0;
+    while (head < queue.length) {
+      const parentId = queue[head++];
       const parent = this.entries.get(parentId);
       const matches = mergeChildMatches(
         byParent.get(parentId),

@@ -1046,6 +1046,101 @@ test('snapshot indexes children once and keeps root-first order', async t => {
   assert.ok(tasks.slice(15).every(task => task.parentTaskId?.startsWith('st_index_root')));
 });
 
+test('snapshot keeps FIFO root-first order across interleaved subtrees', async t => {
+  const root = await tempStore(t, 'dag-fifo-order-');
+  const missing = join(root, 'not-created');
+  const data = new TaskData({
+    sessionId, stateDirs: [descriptor(missing, 'agent-project', 'host store')], notify: () => {},
+  });
+  // restore() fixes the entry insertion order; a readable store scan reads in
+  // concurrent batches and cannot pin a sequence.
+  data.restore([
+    { id: 'st_ord_a', description: 'a', status: 'running' },
+    { id: 'st_ord_b', description: 'b', status: 'running' },
+    { id: 'st_ord_c', description: 'c', status: 'running', parentTaskId: 'st_ord_a' },
+    { id: 'st_ord_d', description: 'd', status: 'running', parentTaskId: 'st_ord_b' },
+    { id: 'st_ord_e', description: 'e', status: 'running', parentTaskId: 'st_ord_c' },
+    { id: 'st_ord_f', description: 'f', status: 'running', parentTaskId: 'st_ord_d' },
+  ]);
+  const tasks = await data.refresh();
+  // FIFO: both roots attach before either root's child, then each grandchild
+  // follows its own parent. LIFO would emit d before c; a recursive
+  // depth-first walk would emit e before b.
+  assert.deepEqual(tasks.map(task => task.id),
+    ['st_ord_a', 'st_ord_b', 'st_ord_c', 'st_ord_d', 'st_ord_e', 'st_ord_f']);
+  assert.deepEqual(tasks.map(task => task.parentTaskId ?? null),
+    [null, null, 'st_ord_a', 'st_ord_b', 'st_ord_c', 'st_ord_d']);
+});
+
+test('live payloads from a child session use the entry index until it leaves', async t => {
+  const root = await tempStore(t, 'dag-child-accept-');
+  const ownerOne = 'st_child_owner_one';
+  const ownerTwo = 'st_child_owner_two';
+  const childLive = 'st_child_owned';
+  await seed(root, {
+    [`${ownerOne}.json`]: record(ownerOne, { child_session_id: 'child-live', status: 'running' }),
+    [`${ownerTwo}.json`]: record(ownerTwo, { child_session_id: 'child-live', status: 'running' }),
+    [`${childLive}.json`]: record(childLive, { parent_session_id: 'child-live', parent_task_id: ownerOne }),
+  });
+  const data = new TaskData({ sessionId, stateDirs: [descriptor(root, 'in-project', 'repo store')], notify: () => {} });
+  await data.refresh();
+  const childPayload = id => ({
+    parent_session_id: 'child-live',
+    tasks: [record(id, { parent_session_id: 'child-live', status: 'running' })],
+  });
+  assert.equal(data.receive(childPayload('st_child_live_one')), true);
+  assert.equal(data.entries.has('st_child_live_one'), true);
+
+  // A live merge registers a new child session without a refresh.
+  assert.equal(data.receive({
+    parent_session_id: sessionId,
+    tasks: [record('st_child_parent_two', { child_session_id: 'child-next', status: 'running' })],
+  }), true);
+  assert.equal(data.receive({
+    parent_session_id: 'child-next',
+    tasks: [record('st_child_under_two', { parent_session_id: 'child-next', parent_task_id: 'st_child_parent_two', status: 'running' })],
+  }), true);
+
+  // Two owners counted one session. Removing one still leaves the session owned.
+  await writeFile(join(root, 'tasks', `${ownerOne}.json`), JSON.stringify(record(ownerOne, { status: 'completed' })));
+  await data.refresh();
+  assert.equal(data.receive(childPayload('st_child_live_two')), true);
+
+  // Once the refreshed entries no longer own the session the payload is refused.
+  await writeFile(join(root, 'tasks', `${ownerTwo}.json`), JSON.stringify(record(ownerTwo, { status: 'completed' })));
+  await data.refresh();
+  assert.equal(data.receive(childPayload('st_child_live_three')), false);
+  assert.equal(data.entries.has('st_child_live_three'), false);
+});
+
+test('the sampler reuses the stored rate series when no sample is appended', async t => {
+  const root = await tempStore(t, 'dag-rate-reuse-');
+  const id = 'st_rate_reuse';
+  const data = new TaskData({ sessionId, stateDirs: [descriptor(root, 'in-project', 'repo store')], notify: () => {} });
+  await data.refresh();
+  const tick = Date.now();
+  assert.equal(data.receive(liveTaskPayload(id, { updatedAt: '2026-11-10T08:33:33.772Z' })), true);
+  const series = data.rateHistory.get(id);
+  assert.equal(data.entries.get(id).task.tokenRateHistory, series);
+  assert.deepEqual(series.map(sample => sample.rate), [211]);
+
+  // Inside the sampling interval nothing is appended, so the same array is
+  // reused. A per-tick copy here is the allocation this path must not make.
+  assert.equal(data.sampleRates(tick + 500), false);
+  assert.equal(data.rateHistory.get(id), series);
+  assert.equal(data.entries.get(id).task.tokenRateHistory, series);
+  assert.equal(series.length, 1);
+
+  // Past the interval one sample is appended into a new array; the series the
+  // entry previously held is not mutated.
+  assert.equal(data.sampleRates(tick + 1500), true);
+  const grown = data.rateHistory.get(id);
+  assert.notEqual(grown, series);
+  assert.equal(series.length, 1);
+  assert.deepEqual(grown.map(sample => sample.rate), [211, 211]);
+  assert.equal(data.entries.get(id).task.tokenRateHistory, grown);
+});
+
 test('a deeply missing store cannot break watcher startup', async t => {
   const base = await tempStore(t, 'dag-deep-watch-');
   const root = join(base, 'a', 'b', 'c', 'd', 'e', 'f');
