@@ -9,7 +9,8 @@ import {
 // render <-> diagnosis cycle is deliberate: every binding imported here is a
 // hoisted function declaration, so both load orders initialize before any
 // painter runs.
-import { entityState, isFailureState, modeName } from './render.mjs';
+import { entityState, modeName } from './render.mjs';
+import { isUnsuccessfulState } from './model.mjs';
 
 function errorSourceLine(canvas, x, y, w, entity, palette, language) {
   if (!entity.error || (entity.errorSource === undefined && entity.errorKind === undefined)) return y;
@@ -361,8 +362,9 @@ export function diagnosisSection(canvas, x, y, w, diagnosis, { palette, language
 }
 
 export function diagnosisErrorSection(canvas, x, y, w, entity, diagnosis, palette, language) {
+  if (entityState(entity) === 'paused') return y;
   if (!diagnosis) {
-    const errorText = entity.error ?? (isFailureState(entityState(entity)) ? t(language, 'errorNotRecorded') : undefined);
+    const errorText = entity.error ?? (isUnsuccessfulState(entityState(entity)) ? t(language, 'errorNotRecorded') : undefined);
     if (!errorText) return y;
     y = detailSection(canvas, x, y, w, t(language, 'errorSection'), palette);
     for (const line of wrap(errorText, w - 2)) {

@@ -13,7 +13,7 @@ import {
   runSummarySection, runWarningCount,
 } from './render-summary.mjs';
 import {
-  isFailureState, nodeSubject, renderSubjectBody, shortPath, taskSubject,
+  nodeSubject, renderSubjectBody, shortPath, taskSubject,
 } from './render-subject.mjs';
 import { runSummary } from './run-summary.mjs';
 import { memoNavTasks, memoProgressCounts } from './derived-cache.mjs';
@@ -24,7 +24,7 @@ import { statusLabel, t } from './i18n.mjs';
 import {
   activitySummary, compareNavigationTasks, elapsedLabel, incoming, isActiveRun, linkedTaskIds,
   linkedTaskIdsForRun, modeFor, navTasks as pureNavTasks, nodeActivity, nodeForTask, nodeMap, orphanNavTasks,
-  outgoing, percentFor,
+  outgoing, percentFor, isUnsuccessfulState,
   PROVENANCE_FIELDS, PROVENANCE_KINDS, runStats, TERMINAL,
 } from './model.mjs';
 import { recordTargetFor } from './records.mjs';
@@ -50,7 +50,8 @@ const isViewModel = value => Boolean(value && typeof value === 'object' &&
 // A connected capture older than this is no longer evidence of live work. The
 // threshold is shared with the viewer so direct render calls and `--help`
 // cannot disagree; callers may override it per frame through `ui.staleAfterMs`.
-export { DEFAULT_STALE_AFTER_MS, isFailureState };
+export { DEFAULT_STALE_AFTER_MS };
+export const isFailureState = state => isUnsuccessfulState(state);
 export const displayRunName = run => run?.todoTitle || run?.name || '';
 const THINKING_BODY_LINES = 5;
 // The persisted reply is already bounded (1200 characters). This is only a

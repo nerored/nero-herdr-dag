@@ -17,9 +17,13 @@ export const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'skipped', 
 // Triage buckets, not raw states: the sidebar, graph filter and run summary
 // must agree that an error or lost node is a failure and paused work is
 // blocked. `done` stays completed-only progress.
-const FAILED_STATES = new Set(['failed', 'error', 'lost']);
+export const FAILED_STATES = new Set(['failed', 'error', 'lost']);
+export const UNSUCCESSFUL_STATES = new Set([
+  'failed', 'error', 'cancelled', 'lost', 'interrupted', 'blocked',
+]);
 const BLOCKED_STATES = new Set(['blocked', 'paused']);
 export const isFailedState = state => FAILED_STATES.has(state);
+export const isUnsuccessfulState = state => UNSUCCESSFUL_STATES.has(state);
 export const isBlockedState = state => BLOCKED_STATES.has(state);
 export const ACTIVITY_PHASES = new Set(['waiting', 'text', 'thinking', 'toolArgs', 'tool', 'retry']);
 export const STALL_TOKEN_MS = 30_000;

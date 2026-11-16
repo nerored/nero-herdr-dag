@@ -270,3 +270,17 @@ test('the GAP-9 dead and duplicate symbols are gone', t => {
   for (const spec of GAP9_REMOVED) t.diagnostic(`  ${spec.name} @ ${spec.file} ${spec.kind} removed`);
   t.diagnostic('duplicate lookup: render.linkedNodeForTask removed');
 });
+
+test('failure and diagnosis state vocabulary has one owner', () => {
+  const model = sources.get('src/model.mjs');
+  const diagnosis = sources.get('src/diagnosis.mjs');
+  const subject = sources.get('src/render-subject.mjs');
+  assert.match(model, /export const UNSUCCESSFUL_STATES/);
+  assert.match(model, /export const isUnsuccessfulState/);
+  assert.match(diagnosis, /new Set\(\[\.\.\.UNSUCCESSFUL_STATES, 'paused'\]\)/);
+  assert.doesNotMatch(subject, /function isFailureState|function isUnsuccessfulState|UNSUCCESSFUL_STATES/);
+  assert.equal((model.match(/(?:export )?const FAILED_STATES\s*=/g) ?? []).length, 1);
+  assert.equal((model.match(/(?:export )?const UNSUCCESSFUL_STATES\s*=/g) ?? []).length, 1);
+  assert.equal((model.match(/(?:export )?const isFailedState\s*=/g) ?? []).length, 1);
+  assert.equal((model.match(/(?:export )?const isUnsuccessfulState\s*=/g) ?? []).length, 1);
+});

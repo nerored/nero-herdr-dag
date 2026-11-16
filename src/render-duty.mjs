@@ -11,10 +11,10 @@ import { diagnosisCompactSection } from './render-diagnosis.mjs';
 import {
   metricsSection, retryInfo, runSummarySection, runWarningCount, warningsSection,
 } from './render-summary.mjs';
-import { agentLabel, isFailureState, modelLabel } from './render-subject.mjs';
+import { agentLabel, modelLabel } from './render-subject.mjs';
 import { statusLabel, t } from './i18n.mjs';
 import {
-  activitySummary, elapsedLabel, incoming, nodeActivity, nodeMap, outgoing, runStats,
+  activitySummary, elapsedLabel, incoming, isUnsuccessfulState, nodeActivity, nodeMap, outgoing, runStats,
 } from './model.mjs';
 import {
   displayRunName, isActiveSnapshot, orphanNavTasks, percentInfo, progressBlock, progressCounts,
@@ -100,7 +100,7 @@ function dutyBody(canvas, full, snapshot, ui, {
   let errorMissing = false;
   if (!errorText) {
     errorMissing = true;
-    errorText = isFailureState(status) ? t(language, 'errorNotRecorded') : t(language, 'errorNoneRecorded');
+    errorText = isUnsuccessfulState(status) ? t(language, 'errorNotRecorded') : t(language, 'errorNoneRecorded');
   }
   const runningCount = stats?.counts.running ?? 0;
 

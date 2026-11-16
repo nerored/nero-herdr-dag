@@ -1,6 +1,6 @@
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { normalizeLanguage, statusLabel, t } from './i18n.mjs';
-import { isBlockedState, modeFor, nodeActivity } from './model.mjs';
+import { isBlockedState, modeFor, nodeActivity, UNSUCCESSFUL_STATES } from './model.mjs';
 import { recordEntry, relativeDisplay } from './records.mjs';
 import { absolutePath, safeFileWithin, safeOpenRecordPath } from './safe-path.mjs';
 import { clean } from './text.mjs';
@@ -8,9 +8,7 @@ import { defined } from './normalize.mjs';
 
 // States that stop a subject before its nominal goal. They own a diagnosis
 // card and a copyable evidence bundle; they never expose a retry action.
-export const DIAGNOSIS_STATES = new Set([
-  'failed', 'error', 'cancelled', 'blocked', 'interrupted', 'lost', 'paused',
-]);
+export const DIAGNOSIS_STATES = new Set([...UNSUCCESSFUL_STATES, 'paused']);
 
 export const DIAGNOSIS_ACTIONS = Object.freeze(['c', 'p', 'o']);
 

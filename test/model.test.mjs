@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {
   activitySummary, compareNavigationTasks, deriveRunStatus, elapsedLabel, elapsedMs, findRunningTarget, layers,
   modeFor, nodeActivity, nodeForTask, normalizeChild, normalizeRun, normalizeSnapshot, normalizeTask, orderRuns, runStats,
-  navTasks, orphanNavTasks, standaloneTasks,
+  navTasks, orphanNavTasks, standaloneTasks, FAILED_STATES, UNSUCCESSFUL_STATES,
+  isFailedState, isUnsuccessfulState, STATUSES,
 } from '../src/model.mjs';
 import { messages, statusLabel } from '../src/i18n.mjs';
 import { paletteFor, statusColor, statusIcon } from '../src/theme.mjs';
@@ -1042,6 +1043,34 @@ test('run statistics keep completed progress apart from terminal and triage coun
   assert.equal(stats.counts.interrupted, 1);
   assert.equal(stats.percentKnown, false);
   assert.equal(stats.percent, undefined);
+});
+
+test('failure predicates cover every status and undefined distinctly', () => {
+  const statuses = [...new Set([...STATUSES, ...['skipped']])];
+  for (const state of [...statuses, undefined]) {
+    assert.equal(isFailedState(state), FAILED_STATES.has(state), state ?? 'undefined');
+    assert.equal(isUnsuccessfulState(state), UNSUCCESSFUL_STATES.has(state), state ?? 'undefined');
+  }
+  assert.equal(isFailedState('cancelled'), false);
+  assert.equal(isFailedState('interrupted'), false);
+  assert.equal(isFailedState('blocked'), false);
+  assert.equal(isFailedState('paused'), false);
+  assert.equal(isUnsuccessfulState('paused'), false);
+  assert.deepEqual([...UNSUCCESSFUL_STATES], ['failed', 'error', 'cancelled', 'lost', 'interrupted', 'blocked']);
+});
+
+test('stats triage buckets preserve failed, blocked, and finished semantics', () => {
+  const stats = runStats({ nodes: [
+    { id: 'failed', state: 'failed' },
+    { id: 'cancelled', state: 'cancelled' },
+    { id: 'blocked', state: 'blocked' },
+    { id: 'paused', state: 'paused' },
+    { id: 'completed-a', state: 'completed' },
+    { id: 'completed-b', state: 'completed' },
+  ] });
+  assert.equal(stats.counts.failed, 1);
+  assert.equal(stats.counts.blocked, 2);
+  assert.equal(stats.finished, 4);
 });
 
 test('a run with only terminal states reports finished as the whole total', () => {

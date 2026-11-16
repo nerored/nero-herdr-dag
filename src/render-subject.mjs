@@ -5,6 +5,7 @@ import { diagnosisErrorSection, diagnosisSection, fullReasonSection } from './re
 import { metricsSection, runWarningCount, warningsSection } from './render-summary.mjs';
 import { statusLabel, t } from './i18n.mjs';
 import { statusColor, statusIcon } from './theme.mjs';
+import { isUnsuccessfulState } from './model.mjs';
 import { compactDuration, truncateMiddle, wrap } from './text.mjs';
 
 const ACTIVITY_DETAIL_LINES = 4;
@@ -16,10 +17,6 @@ export function shortPath(value) {
   if (home && value === home) return '~';
   if (home && value.startsWith(`${home}/`)) return `~/${value.slice(home.length + 1)}`;
   return value;
-}
-
-export function isFailureState(state) {
-  return ['failed', 'error', 'cancelled', 'lost', 'interrupted', 'blocked'].includes(state);
 }
 
 export function agentLabel(entity, language) {
@@ -253,7 +250,7 @@ export function renderSubjectBody(canvas, rect, subject, {
       if (y >= bottom) return;
     }
   }
-  if (y < bottom - 1 && (entity.error || isFailureState(subject.state) || subject.diagnosis)) {
+  if (y < bottom - 1 && (entity.error || isUnsuccessfulState(subject.state) || subject.diagnosis)) {
     y = diagnosisErrorSection(canvas, x, y, w, entity, subject.diagnosis, palette, language);
   }
   if (verbose && subject.diagnosis) {

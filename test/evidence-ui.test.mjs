@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeSnapshot } from '../src/model.mjs';
-import { DEFAULT_STALE_AFTER_MS, contrastRatio, pillForeground, renderApp } from '../src/render.mjs';
+import { DEFAULT_STALE_AFTER_MS, contrastRatio, isFailureState, pillForeground, renderApp } from '../src/render.mjs';
+import { isUnsuccessfulState } from '../src/model.mjs';
 import { failedReadPlaceholder } from '../src/viewer.mjs';
 import { createTheme, paletteFor, statusColor } from '../src/theme.mjs';
 import { width as textWidth } from '../src/text.mjs';
@@ -182,6 +183,42 @@ test('failed, cancelled, and blocked details expose reason provenance or not-rec
   }), { focus: 'tasks', selectedTaskId: 'st_ev' });
   assert.equal(hasHeading(detailsLines(blocked), 'ERROR'), true);
   assert.match(blocked.text, /failure reason not recorded/);
+});
+
+test('diagnosis copy reports errors for unsuccessful states but not paused or completed', () => {
+  const renderState = (state) => render(snapshot({
+    task: { status: state, error_message: undefined, failure_kind: undefined, final_response: undefined },
+    node: { state },
+    run: { status: state },
+  }), { focus: 'tasks', selectedTaskId: 'st_ev' });
+  for (const state of ['interrupted', 'cancelled', 'blocked']) {
+    assert.match(renderState(state).text, /ERROR|DIAGNOSIS/, state);
+  }
+  assert.doesNotMatch(renderState('paused').text, /failure reason not recorded/, 'paused');
+  assert.doesNotMatch(renderState('completed').text, /failure reason not recorded/, 'completed');
+});
+
+test('duty copy state witness uses predicate-driven failure output at 70x40', () => {
+  const renderDutyState = state => render(snapshot({
+    task: { status: state, error_message: undefined, failure_kind: undefined, final_response: undefined },
+    node: { state },
+    run: { status: state },
+  }), { focus: 'details', selectedNodeId: 'evidence', selectedTaskId: 'st_ev' }, { width: 70, height: 40 });
+
+  for (const state of ['interrupted', 'cancelled', 'blocked']) {
+    const result = renderDutyState(state);
+    assert.match(result.text, /failure reason not recorded/, state);
+  }
+  for (const state of ['paused', 'completed']) {
+    const result = renderDutyState(state);
+    assert.doesNotMatch(result.text, /failure reason not recorded/, state);
+  }
+});
+
+test('render compatibility alias delegates to the canonical unsuccessful predicate', () => {
+  for (const state of ['failed', 'error', 'cancelled', 'lost', 'interrupted', 'blocked', 'paused', 'completed', undefined]) {
+    assert.equal(isFailureState(state), isUnsuccessfulState(state), state ?? 'undefined');
+  }
 });
 
 test('cache reads, hit rate, and cost render on aligned metric rows', () => {
