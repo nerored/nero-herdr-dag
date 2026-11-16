@@ -249,6 +249,8 @@ src/frame-primitives.mjs  单帧单元格缓冲、面板/药丸/滚动条/详情
 src/graph.mjs             DAG 布局、线网、流动点
 src/i18n.mjs              英文/中文文案表与插值
 src/render.mjs            组装布局、侧栏、图谱与详情外壳，导出 renderApp
+src/render-view.mjs       纯视图辅助：布局几何、列表/指针命中、新鲜度标签、选择与记录解析、导航再导出
+src/render-panels.mjs     共享进度块与空状态/来源健康/来源面板
 src/render-chrome.mjs     header 品牌/面包屑/状态与 footer 图例/提示/设置入口
 src/render-duty.mjs       宽屏 duty 面板与窄屏 RUNS/CELLS/TASKS/DUTY 界面
 src/render-subject.mjs    节点/任务对象构建与宽屏详情正文
@@ -256,6 +258,8 @@ src/render-summary.mjs    指标卡、run 摘要与警告
 src/render-diagnosis.mjs  诊断卡、错误来源与完整原因
 src/render-overlays.mjs   命令面板、切换器、tour、帮助、设置浮层与点击区域失效
 src/view-model.mjs        编排与渲染器接缝：快照/UI 状态/上一帧、选择/焦点/折叠/滚动/指针
+src/viewer-session.mjs    快照生命周期、状态迁移、选择/导航命令与 UI 字段
+src/viewer-input.mjs      按键/鼠标/模态分发与指针命中解析
 src/viewer-selection.mjs  点击、按键、切换器行和 follow 共用的选择 reducer
 src/viewer-keymap.mjs     按键拼写与移动归一化、有序的模态/全局按键表
 src/scroll.mjs            滚动意图、区域命中、滚动条几何与指数缓动
@@ -265,7 +269,9 @@ src/commands.mjs          命令面板条目、标签与查询过滤
 src/cockpit.mjs           图谱过滤、过滤计数、聚焦子图与节点步进、失败/阻塞分类
 src/bounded-cache.mjs     有界 LRU 缓存与去重集合，达到上限时淘汰最久未用项
 src/derived-cache.mjs     按快照/run/task 身份记忆化逐帧派生（navTasks、runStats、runSummary 等）
-src/viewer.mjs            主循环、输入、跟随、平滑滚动、鼠标点击与滚轮、文件监听
+src/viewer.mjs            选项/依赖接线、draw/main、公共 API 与 CLI
+src/viewer-source.mjs     状态文件有界读取、监听安装与退避重试
+src/viewer-runtime.mjs    终端初始化/恢复、帧节奏与定时器、pager、关闭顺序
 src/controller.mjs        事件串行队列、快照写入、pane 生命周期
 src/omo.mjs               OmO agent 目录、project key、主题与明暗外观
 src/config.mjs            语言/主题配置读取与串行原子保存（~/.config/nero-herdr-dag/config.json）、STALE 阈值

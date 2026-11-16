@@ -348,6 +348,12 @@ Modules are grouped by role. Every module in `src/` is listed once below.
 
 - `src/render.mjs` composes the layout, sidebar, graph, and details shell, and
   exports `renderApp`.
+- `src/render-view.mjs` owns the pure view helpers: layout geometry, list and
+  pointer lookups, freshness and age labels, selection and record resolution,
+  and the navigation re-exports. It holds no state, input, or terminal.
+- `src/render-panels.mjs` paints the shared progress block and the empty,
+  source-health, and source panels used by the shell, duty, and subject
+  painters.
 - `src/render-chrome.mjs` paints the header brand, breadcrumb and status, plus
   the footer legend, hints, and settings entry.
 - `src/render-duty.mjs` paints the wide duty pane and the narrow
@@ -366,6 +372,10 @@ Modules are grouped by role. Every module in `src/` is listed once below.
 - `src/view-model.mjs` is the seam between orchestration and the frame
   renderer. It holds the snapshot, UI state, and last frame, and reconciles
   selection, focus, folds, scrolling, and pointer targets.
+- `src/viewer-session.mjs` owns the snapshot lifecycle, state transitions,
+  selection and navigation commands, and the viewer's UI fields.
+- `src/viewer-input.mjs` dispatches keys, mouse reports, and modal actions, and
+  turns pointer hits into selection requests.
 - `src/viewer-selection.mjs` holds the selection reducers shared by clicks,
   keys, switcher rows, and follow updates.
 - `src/viewer-keymap.mjs` normalizes key spellings and movement, and defines
@@ -388,8 +398,12 @@ Modules are grouped by role. Every module in `src/` is listed once below.
 
 **Host and runtime**
 
-- `src/viewer.mjs` runs the watch loop, input dispatch, frame pacing, follow,
-  pager, and CLI.
+- `src/viewer.mjs` wires options and dependencies, draws frames, and exposes
+  the viewer API and CLI.
+- `src/viewer-source.mjs` loads the state file under bounds, installs the
+  watch, and retries a dead watch with backoff.
+- `src/viewer-runtime.mjs` owns terminal setup and restore, frame pacing and
+  timers, the pager, and close ordering.
 - `src/controller.mjs` serializes events into snapshots and manages the Herdr
   pane.
 - `src/omo.mjs` resolves the OmO agent directory, project key, theme, and
@@ -422,10 +436,11 @@ painter draws its own compact duty body and reuses the subject label and
 failure-state helpers, the summary metric and warning sections, and the compact
 diagnosis card, so the two views cannot describe a task differently.
 
-The viewer keeps only orchestration. Snapshot I/O is bounded and validated
-before mapping, the view model reconciles selection, focus, folds, and scroll,
-and the keymap resolves modal and global keys. The watch loop, frame pacing, and
-other side effects stay with the viewer.
+The viewer keeps only wiring: it builds the session, input, source, and runtime
+adapters, then exposes the command surface and CLI. The source adapter reads
+bounded snapshots and owns the watch, the session reconciles selection, focus,
+folds, and scroll, the keymap resolves modal and global keys, and the runtime
+handles the terminal and timers.
 
 ### v3 snapshot
 

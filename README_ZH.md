@@ -273,6 +273,11 @@ OmO 进程                                  Herdr viewer 进程
 **画面组装**
 
 - `src/render.mjs`：组装布局、侧栏、图和详情外壳，并导出 `renderApp`。
+- `src/render-view.mjs`：纯视图辅助函数，负责布局几何、列表与指针命中、
+  新鲜度与时长标签、选择与记录解析，并重新导出导航选择器；不持有状态、
+  输入或终端。
+- `src/render-panels.mjs`：绘制共享进度块，以及外壳、duty 和对象绘制共用的
+  空状态、来源健康与来源面板。
 - `src/render-chrome.mjs`：绘制 header 的品牌、面包屑和状态，以及 footer 的
   图例、提示和设置入口。
 - `src/render-duty.mjs`：绘制宽屏 duty 面板与窄屏 RUNS/CELLS/TASKS/DUTY 界面；
@@ -288,6 +293,10 @@ OmO 进程                                  Herdr viewer 进程
 
 - `src/view-model.mjs`：编排与画面渲染器之间的接缝。持有快照、UI 状态和
   上一帧，负责选择重建、焦点、折叠、滚动和指针目标。
+- `src/viewer-session.mjs`：持有快照生命周期、状态迁移、选择与导航命令，
+  以及 viewer 的 UI 状态字段。
+- `src/viewer-input.mjs`：分发按键、鼠标报文和模态操作，把指针命中转换为
+  选择请求。
 - `src/viewer-selection.mjs`：点击、按键、切换器行和 follow 更新共用的选择
   reducer。
 - `src/viewer-keymap.mjs`：归一化按键拼写和移动，并定义有序的模态/全局按键表。
@@ -307,7 +316,11 @@ OmO 进程                                  Herdr viewer 进程
 
 **宿主与运行时**
 
-- `src/viewer.mjs`：watch 循环、输入分发、帧节奏、follow、pager 和 CLI。
+- `src/viewer.mjs`：连接选项与依赖，绘制帧，并暴露 viewer 公共 API 和 CLI。
+- `src/viewer-source.mjs`：在有界校验下读取状态文件，安装文件监听，并对失效
+  监听做退避重试。
+- `src/viewer-runtime.mjs`：负责终端初始化与恢复、帧节奏与定时器、pager 和
+  关闭顺序。
 - `src/controller.mjs`：事件串行队列、快照写入、Herdr pane 生命周期。
 - `src/omo.mjs`：解析 OmO agent 目录、项目键、主题和明暗外观。
 - `src/config.mjs`：读取并原子保存语言与主题，解析过期阈值。
@@ -331,8 +344,9 @@ OmO 进程                                  Herdr viewer 进程
 紧凑的 duty 正文，复用对象标签与失败状态辅助函数、摘要指标/警告区块和紧凑诊断卡，
 所以两种视图不会对同一个任务给出不同说法。
 
-viewer 只保留编排。快照 I/O 在映射前完成上限校验，view model 负责选择、焦点、
-折叠和滚动，keymap 负责模态与全局按键。watch 循环、帧节奏和其他副作用仍归 viewer。
+viewer 只保留接线：它组装 session、input、source 和 runtime 适配器，再对外提供
+命令接口与 CLI。source 适配器负责有界读取与文件监听，session 负责选择、焦点、
+折叠和滚动，keymap 负责模态与全局按键，runtime 负责终端与定时器。
 
 快照只保存任务字段白名单；prompt、完整输出、完整 final response、transcript
 不会写入快照；详情面板只显示有界、清理后的思考/回复摘录。
