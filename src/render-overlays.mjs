@@ -16,7 +16,6 @@ import { capturedDisplay, modeName, navTasks, scrollOffset } from './render.mjs'
 // uses, because it also replaces the footer hints and the settings entry.
 export function invalidateOverlayHitboxes(hitboxes, { hints = false } = {}) {
   hitboxes.nodes.clear();
-  hitboxes.tasks.clear();
   hitboxes.runs.clear();
   hitboxes.regions.clear();
   hitboxes.scrollbars.clear();

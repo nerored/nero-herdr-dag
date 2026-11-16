@@ -304,7 +304,7 @@ function renderNarrowCellList(canvas, rect, snapshot, ui, { palette, language, f
   return { viewportH: viewport, contentH: nodes.length, offset, maxScroll, bar, region };
 }
 
-function renderNarrowTaskList(canvas, rect, snapshot, ui, { palette, language, focused = false }, hitboxes) {
+function renderNarrowTaskList(canvas, rect, snapshot, ui, { palette, language, focused = false }) {
   const tasks = orphanNavTasks(snapshot);
   narrowListFrame(canvas, rect, t(language, 'tasks'), palette, focused);
   const viewport = Math.max(1, rect.h - 2);
@@ -325,7 +325,6 @@ function renderNarrowTaskList(canvas, rect, snapshot, ui, { palette, language, f
       [fit(task.description, Math.max(8, rect.w - 22)), { fg: selected ? palette.white : palette.text, bold: selected }],
       [` ${fit(suffix, 11)}`, { fg: palette.faint }],
     ], palette, selected ? palette.selection : palette.panel);
-    hitboxes.tasks.set(task.id, { x: rect.x + 1, y: row, w: rect.w - 2, h: 1 });
     row++;
   }
   if (!tasks.length) {
@@ -373,7 +372,7 @@ export function renderNarrowDuty(canvas, rect, snapshot, ui, opts, hitboxes) {
   const tasks = tasksRect
     ? renderNarrowTaskList(canvas, tasksRect, snapshot, ui, {
       ...opts, focused: ui.focus === 'tasks',
-    }, hitboxes)
+    })
     : null;
   const details = renderDuty(canvas, detailsRect, snapshot, ui, opts);
   return { runs, cells, tasks, details, detailsRect };

@@ -865,7 +865,6 @@ function renderSidebar(canvas, rect, snapshot, ui, { time, now, palette, motion,
         ...(task.agent && w >= 34 ? [[` · ${task.agent}`, { fg: palette.dim }]] : []),
       ], palette, bg);
     }
-    hitboxes.tasks.set(task.id, { x: taskGeometry.x, y, w: contentW, h: 2 });
     y += 2;
   }
   drawScrollbar(canvas, bar, palette);

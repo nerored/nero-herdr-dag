@@ -166,13 +166,6 @@
     "switcher": null,
     "switcherFilter": null,
     "switcherPanel": null,
-    "tasks": {
-      "st_plan": {
-        "x": 1,
-        "y": 16,
-        "w": 109,
-        "h": 1
-      }
-    }
+    "tasks": {}
   }
 }

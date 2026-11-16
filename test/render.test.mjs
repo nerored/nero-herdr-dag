@@ -6,7 +6,7 @@ import { normalizeSnapshot, modeFor } from '../src/model.mjs';
 import { diagnosisFor } from '../src/diagnosis.mjs';
 import {
   contrastRatio, dashboardLayout, detailsSubjectKey, navTasks, pillForeground, recordForSelection,
-  renderApp, runListLayout, snapshotFreshness, taskListLayout,
+  renderApp, runListLayout, snapshotFreshness, taskAtPoint, taskListLayout,
 } from '../src/render.mjs';
 import { computeLayout, resetWireRaster, wireRasterStats } from '../src/graph.mjs';
 import { regionAt } from '../src/scroll.mjs';
@@ -68,7 +68,8 @@ test('the three-pane layout exposes navigation, graph, and node details', () => 
   assert.equal(result.layout.mode, 'columns');
   assert.ok(result.hitboxes.nodes.size > 0);
   assert.equal(result.hitboxes.runs.size, 4);
-  assert.ok(result.hitboxes.tasks.size >= 8);
+  assert.equal(result.hitboxes.tasks.size, 0);
+  assert.ok(result.scroll.tasks.contentH >= 8);
 });
 
 test('the sidebar toggle reclaims the left column on wide screens', () => {
@@ -405,14 +406,16 @@ test('navigation tasks scroll by items with a reserved bar column', () => {
     [top.scroll.tasks.bar.x, top.scroll.tasks.bar.y, top.scroll.tasks.bar.h, top.scroll.tasks.bar.w],
     [24, 15, 22, 1],
   );
-  assert.equal(top.hitboxes.tasks.size, 11);
-  assert.deepEqual([...top.hitboxes.tasks.keys()], tasks.slice(0, 11).map(task => task.id));
-  for (const rect of top.hitboxes.tasks.values()) {
-    assert.equal(rect.x, 1);
-    assert.equal(rect.w, 23);
-    assert.equal(rect.x + rect.w, top.scroll.tasks.bar.x);
-    assert.ok(!(24 >= rect.x && 24 < rect.x + rect.w), 'bar column is not clickable');
-  }
+  assert.equal(top.hitboxes.tasks.size, 0);
+  const topGeometry = taskListLayout(top.layout.sidebar, snapshot, fullList);
+  assert.deepEqual(topGeometry.visible.map(task => task.id), tasks.slice(0, 11).map(task => task.id));
+  assert.equal(topGeometry.x, 1);
+  assert.equal(topGeometry.contentW, 23);
+  assert.equal(topGeometry.x + topGeometry.contentW, top.scroll.tasks.bar.x);
+  assert.equal(
+    taskAtPoint(top.layout.sidebar, snapshot, fullList, 24, topGeometry.tasksY), undefined,
+    'bar column is not clickable',
+  );
   assert.equal(top.canvas.cells[top.scroll.tasks.bar.y][24].ch, '█');
   assert.equal(top.canvas.cells[top.scroll.tasks.bar.y][25].ch, '│');
 
@@ -420,8 +423,11 @@ test('navigation tasks scroll by items with a reserved bar column', () => {
     width: 120, height: 40, time: 0, now, palette, theme,
   });
   assert.equal(bottom.scroll.tasks.offset, 32);
-  assert.equal(bottom.hitboxes.tasks.size, 11);
-  assert.deepEqual([...bottom.hitboxes.tasks.keys()], tasks.slice(32).map(task => task.id));
+  assert.equal(bottom.hitboxes.tasks.size, 0);
+  assert.deepEqual(
+    taskListLayout(bottom.layout.sidebar, snapshot, { ...fullList, tasksScroll: 33 }).visible.map(task => task.id),
+    tasks.slice(32).map(task => task.id),
+  );
   const bottomBar = bottom.scroll.tasks.bar;
   assert.equal(bottomBar.thumbTop + bottomBar.thumbH, bottomBar.y + bottomBar.h);
 
@@ -431,7 +437,10 @@ test('navigation tasks scroll by items with a reserved bar column', () => {
   assert.equal(small.scroll.tasks.viewportH, 9);
   assert.equal(small.scroll.tasks.maxScroll, 34);
   assert.equal(small.scroll.tasks.offset, 34);
-  assert.deepEqual([...small.hitboxes.tasks.keys()], tasks.slice(34).map(task => task.id));
+  assert.deepEqual(
+    taskListLayout(small.layout.sidebar, snapshot, { ...fullList, tasksScroll: 35 }).visible.map(task => task.id),
+    tasks.slice(34).map(task => task.id),
+  );
   assert.equal(small.scroll.tasks.bar.thumbTop, 31);
   assert.equal(small.scroll.tasks.bar.thumbH, 2);
 
@@ -449,7 +458,12 @@ test('navigation tasks scroll by items with a reserved bar column', () => {
   assert.equal(fit.scroll.tasks.contentH, 3);
   assert.equal(fit.scroll.tasks.maxScroll, 0);
   assert.equal(fit.scroll.tasks.bar, null);
-  assert.equal(fit.hitboxes.tasks.size, 3);
+  assert.equal(fit.hitboxes.tasks.size, 0);
+  assert.deepEqual(
+    taskListLayout(fit.layout.sidebar, few, { ...ui, completedCollapsed: false, selectedTaskId: roots[0].id })
+      .visible.map(task => task.id),
+    navTasks(few).map(task => task.id),
+  );
 });
 
 test('details measure scrollable content and clip above the viewport', () => {
@@ -1024,8 +1038,12 @@ test('NaN and string scroll offsets fall back to a finite top-of-list frame', ()
   assert.equal(result.scroll.graph.offset, 0);
   assert.equal(result.scroll.tasks.offset, 0);
   assert.equal(result.scroll.details.offset, 0);
-  assert.equal(result.hitboxes.tasks.size, 11);
-  assert.ok(result.hitboxes.tasks.has(navTasks(snapshot)[0].id));
+  assert.equal(result.hitboxes.tasks.size, 0);
+  assert.equal(
+    taskListLayout(result.layout.sidebar, snapshot, { ...ui, taskScope: 'all', completedCollapsed: false })
+      .visible[0]?.id,
+    navTasks(snapshot)[0].id,
+  );
   for (const rect of result.hitboxes.nodes.values()) {
     for (const value of [rect.x, rect.y, rect.w, rect.h]) {
       assert.ok(Number.isFinite(value), 'node hitbox stays finite');

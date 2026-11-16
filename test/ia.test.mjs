@@ -117,7 +117,8 @@ test('duty is one panel below 112 with no graph or sidebar hitboxes', () => {
     assert.equal(result.layout.sidebar, null);
     assert.deepEqual([...result.hitboxes.regions.keys()], ['runs', 'cells', 'tasks', 'details']);
     assert.ok(result.hitboxes.nodes.size > 0);
-    assert.ok(result.hitboxes.tasks.size > 0);
+    assert.equal(result.hitboxes.tasks.size, 0);
+    assert.ok(result.scroll.tasks.contentH > 0);
     assert.match(result.text, /CURRENT NODE/);
     assert.doesNotMatch(result.text, /DUTY/);
     assert.doesNotMatch(result.text, /╭─ GRAPH/);
@@ -146,7 +147,8 @@ test('narrow duty paints scrollable runs, cells, and orphan tasks above the sele
   assert.deepEqual([...result.hitboxes.regions.keys()], ['runs', 'cells', 'tasks', 'details']);
   assert.ok(result.hitboxes.runs.size > 0);
   assert.ok(result.hitboxes.nodes.size > 0);
-  assert.ok(result.hitboxes.tasks.size > 0);
+  assert.equal(result.hitboxes.tasks.size, 0);
+  assert.ok(result.scroll.tasks.contentH > 0);
   assert.ok(result.scroll.runs.viewportH > 0);
   assert.ok(result.scroll.cells.viewportH > 0);
   assert.ok(result.scroll.tasks.viewportH > 0);

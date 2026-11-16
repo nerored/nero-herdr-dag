@@ -7,7 +7,7 @@ import {
   applyFocus, applyFocusRequest, attachFrame, buildViewModel, hitTargetAt, reconcile, selectNode,
   selectRun, selectTask, settleScroll, toggleFold,
 } from '../src/view-model.mjs';
-import { renderApp } from '../src/render.mjs';
+import { renderApp, taskListLayout } from '../src/render.mjs';
 import { selectNode as selectNodeUi, selectRunById, selectRunOverview, selectTaskHit } from '../src/viewer-selection.mjs';
 import {
   compareFrame, FIXED_NOW, FIXED_TIME, FRAME_HEIGHTS, FRAME_LANGUAGES, FRAME_SURFACES, FRAME_WIDTHS,
@@ -148,9 +148,13 @@ test('hitTargetAt resolves painted subjects and refuses a missing subject', () =
   const vm = buildViewModel(snapshot, fixtureUi());
   const frame = attachFrame(vm, renderApp(vm, frameOptions(120, 40)));
 
-  const taskRect = frame.hitboxes.tasks.get('st_api');
-  assert.ok(taskRect, 'the task row is painted');
-  assert.deepEqual(hitTargetAt(vm, taskRect.x + 1, taskRect.y), { kind: 'task', id: 'st_api' });
+  assert.equal(frame.hitboxes.tasks.size, 0);
+  const taskGeometry = taskListLayout(frame.layout.sidebar, snapshot, vm.ui);
+  const taskRow = taskGeometry.visible.findIndex(task => task.id === 'st_api');
+  assert.ok(taskRow >= 0, 'the task row is painted');
+  const taskX = taskGeometry.x + 1;
+  const taskY = taskGeometry.tasksY + taskRow * 2;
+  assert.deepEqual(hitTargetAt(vm, taskX, taskY), { kind: 'task', id: 'st_api' });
 
   const nodeRect = frame.hitboxes.nodes.get('api');
   assert.ok(nodeRect, 'the graph node is painted');
@@ -183,7 +187,7 @@ test('hitTargetAt resolves painted subjects and refuses a missing subject', () =
   reconcile(vm, { snapshot: reduced });
   assert.equal(selectRun(vm, 'run_build'), false);
   assert.deepEqual(selectTask(vm, 'st_api'), { handled: false, linked: undefined });
-  const stale = hitTargetAt(vm, taskRect.x + 1, taskRect.y);
+  const stale = hitTargetAt(vm, taskX, taskY);
   assert.ok(!stale || stale.id !== 'st_api', 'the stale task id never wins the pointer');
   assert.equal(hitTargetAt(vm, nodeRect.x, nodeRect.y), null, 'the removed node cell is empty');
 });

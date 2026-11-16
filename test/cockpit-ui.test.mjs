@@ -129,13 +129,15 @@ test('task scope and completed collapse shrink the navigation list', () => {
   });
   assert.match(node.text, /TASKS\s+4\s+· run/);
   assert.match(node.text, /✓1/);
-  assert.equal(node.hitboxes.tasks.size, 3);
+  assert.equal(node.hitboxes.tasks.size, 0);
+  assert.equal(node.scroll.tasks.contentH, 3);
 
   const expanded = render({
     runOverview: false, selectedNodeId: 'c', selectedTaskId: 't_c', focus: 'graph',
     completedCollapsed: false,
   });
-  assert.equal(expanded.hitboxes.tasks.size, 4);
+  assert.equal(expanded.hitboxes.tasks.size, 0);
+  assert.equal(expanded.scroll.tasks.contentH, 4);
 });
 
 test('graph focus keeps only the selected node and its direct neighbors', () => {

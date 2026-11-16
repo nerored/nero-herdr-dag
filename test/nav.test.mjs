@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nodeForTask, normalizeSnapshot, standaloneTasks } from '../src/model.mjs';
-import { navTasks, renderApp } from '../src/render.mjs';
+import { navTasks, renderApp, taskListLayout } from '../src/render.mjs';
 import { commandItems, filterCommands } from '../src/commands.mjs';
 import { messages, t } from '../src/i18n.mjs';
 import {
@@ -161,8 +161,9 @@ test('the navigation panel renders tasks that belong to DAG nodes', () => {
   });
   assert.match(result.text, /Linked task/);
   assert.match(result.text, /TASK · st_linked/);
-  assert.ok(result.hitboxes.tasks.has('st_linked'));
-  assert.ok(!result.hitboxes.tasks.has('st_child'));
+  assert.equal(result.hitboxes.tasks.size, 0);
+  const geometry = taskListLayout(result.layout.sidebar, snapshot, ui);
+  assert.deepEqual(geometry.visible.map(task => task.id), ['st_linked']);
 });
 
 test('a selected task survives a snapshot with no runs', () => {

@@ -211,15 +211,15 @@ test('a stale task hitbox is ignored instead of selecting the old subject', () =
   const ui = baseUi({ selectedTaskId: 'st_beta', selectedNodeId: 'a0', completedCollapsed: false, taskScope: 'all' });
 
   const painted = renderApp(withAlpha, ui, renderOptions);
-  const staleRect = painted.hitboxes.tasks.get('st_alpha');
-  assert.ok(staleRect, 'the first frame paints the row that is about to disappear');
+  const paintedGeometry = taskListLayout(painted.layout.sidebar, withAlpha, ui);
+  const staleRect = { x: paintedGeometry.x, y: paintedGeometry.tasksY, w: paintedGeometry.contentW, h: 2 };
+  assert.equal(paintedGeometry.visible[0]?.id, 'st_alpha', 'the first frame paints the row that is about to disappear');
+  assert.equal(painted.hitboxes.tasks.size, 0, 'task rows are geometry, not hitboxes');
 
   const nextFrame = renderApp(withoutAlpha, ui, renderOptions);
-  const freshId = [...nextFrame.hitboxes.tasks].find(([, rect]) =>
-    staleRect.x >= rect.x && staleRect.x < rect.x + rect.w &&
-    staleRect.y >= rect.y && staleRect.y < rect.y + rect.h)?.[0];
-  assert.equal(freshId, 'st_beta', 'the stale coordinates now point at a different task');
-  assert.equal(nextFrame.hitboxes.tasks.has('st_alpha'), false);
+  const freshTask = taskAtPoint(nextFrame.layout.sidebar, withoutAlpha, ui, staleRect.x + 1, staleRect.y);
+  assert.equal(freshTask?.id, 'st_beta', 'the stale coordinates now point at a different task');
+  assert.equal(nextFrame.hitboxes.tasks.size, 0, 'the next frame still emits no task hitboxes');
 
   const stale = selectTaskHit(ui, withoutAlpha, 'st_alpha');
   assert.deepEqual(stale, { handled: false, linked: undefined });
@@ -228,7 +228,7 @@ test('a stale task hitbox is ignored instead of selecting the old subject', () =
   assert.equal(ui.selectedTaskUnlinked, false);
 
   // Clicking the id actually painted at those coordinates still works.
-  const fresh = selectTaskHit(ui, withoutAlpha, freshId);
+  const fresh = selectTaskHit(ui, withoutAlpha, freshTask.id);
   assert.equal(fresh.handled, true);
   assert.equal(ui.selectedTaskId, 'st_beta');
 });
@@ -309,19 +309,17 @@ test('a reordered row resolves the task under the pointer from the current snaps
 
   const ui = baseUi({ selectedTaskId: 'st_alpha', selectedNodeId: 'a0', completedCollapsed: false, taskScope: 'all' });
   const painted = renderApp(before, ui, renderOptions);
-  const oldAlphaRect = painted.hitboxes.tasks.get('st_alpha');
-  assert.ok(oldAlphaRect, 'the first frame paints Alpha at the row about to move');
-
-  // The pure helper agrees with the painted rows.
   const geometry = taskListLayout(painted.layout.sidebar, before, ui);
+  const oldAlphaRect = { x: geometry.x, y: geometry.tasksY, w: geometry.contentW, h: 2 };
+  assert.equal(geometry.visible[0]?.id, 'st_alpha', 'the first frame paints Alpha at the row about to move');
+  assert.equal(painted.hitboxes.tasks.size, 0, 'task rows are geometry, not hitboxes');
+
+  // The pure helper agrees with the painted rows and resolves each row.
   assert.deepEqual(geometry.visible.slice(0, 2).map(task => task.id), ['st_alpha', 'st_beta']);
-  for (const [id, rect] of painted.hitboxes.tasks) {
-    const row = geometry.visible.find(task => task.id === id);
-    assert.ok(row, `${id} is a visible row`);
-    assert.equal(rect.x, geometry.x);
-    assert.equal(rect.w, geometry.contentW);
+  for (const [index, task] of geometry.visible.entries()) {
+    const rowY = geometry.tasksY + index * 2;
+    assert.equal(taskAtPoint(painted.layout.sidebar, before, ui, geometry.x + 1, rowY)?.id, task.id);
   }
-  assert.equal(oldAlphaRect.y, geometry.tasksY);
 
   // Both ids survive the reorder; only their rows swap. Resolving the click
   // from the old hitbox id would still select Alpha under Beta's pixels.
@@ -330,10 +328,8 @@ test('a reordered row resolves the task under the pointer from the current snaps
   assert.equal(oldIdClick.handled, true);
 
   const nextFrame = renderApp(afterSwap, ui, renderOptions);
-  const freshId = [...nextFrame.hitboxes.tasks].find(([, rect]) =>
-    oldAlphaRect.x >= rect.x && oldAlphaRect.x < rect.x + rect.w &&
-    oldAlphaRect.y >= rect.y && oldAlphaRect.y < rect.y + rect.h)?.[0];
-  assert.equal(freshId, 'st_beta', 'the current frame paints Beta under the old Alpha rect');
+  const freshTask = taskAtPoint(nextFrame.layout.sidebar, afterSwap, ui, oldAlphaRect.x + 1, oldAlphaRect.y);
+  assert.equal(freshTask?.id, 'st_beta', 'the current frame paints Beta under the old Alpha rect');
 
   // The click path uses the current snapshot and current row geometry.
   const resolved = taskAtPoint(painted.layout.sidebar, afterSwap, ui, oldAlphaRect.x, oldAlphaRect.y);
@@ -410,22 +406,23 @@ test('F-31 a split mouse report does not dispatch its digits as keys', async () 
   viewer.handleKey('3', { sequence: '3', name: '3' });
   assert.equal(viewer.ui.focus, 'details');
 
-  const target = [...viewer.lastRender.hitboxes.tasks].find(([id, rect]) =>
-    id !== viewer.ui.selectedTaskId && /[123]/.test(`${rect.x + 1}${rect.y + 1}`));
+  const geometry = taskListLayout(viewer.lastRender.layout.sidebar, viewer.snapshot, viewer.ui);
+  assert.ok(geometry, 'the sidebar task list is painted');
+  const target = geometry.visible
+    .map((task, index) => ({ task, x: geometry.x + 1, y: geometry.tasksY + index * 2 + 1 }))
+    .find(entry => entry.task.id !== viewer.ui.selectedTaskId && /[123]/.test(`${entry.x}${entry.y}`));
   assert.ok(target, 'a sidebar task row carrying a duty digit is painted');
-  const [targetId, rect] = target;
-  const x = rect.x + 1;
-  const y = rect.y + 1;
+  const { task: targetTask, x, y } = target;
 
   const partial = `${ESC}[<0;${x};`;
   viewer.onRawInput(partial);
   // readline emits the fragment as one CSI key plus one key per byte.
   for (const key of ['\x1b[<', ...partial.slice(3)]) viewer.handleKey(key, { sequence: key });
   assert.equal(viewer.ui.focus, 'details', 'fragment digits must not move focus');
-  assert.notEqual(viewer.ui.selectedTaskId, targetId, 'the click has not happened yet');
+  assert.notEqual(viewer.ui.selectedTaskId, targetTask.id, 'the click has not happened yet');
 
   viewer.onRawInput(`${y}M`);
-  assert.equal(viewer.ui.selectedTaskId, targetId, 'the completed report is applied once');
+  assert.equal(viewer.ui.selectedTaskId, targetTask.id, 'the completed report is applied once');
 });
 
 test('F-122 motion reports never select or dismiss a modal', async () => {

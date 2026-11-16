@@ -141,20 +141,7 @@
     "switcher": null,
     "switcherFilter": null,
     "switcherPanel": null,
-    "tasks": {
-      "st_api": {
-        "x": 1,
-        "y": 11,
-        "w": 24,
-        "h": 2
-      },
-      "st_tests": {
-        "x": 1,
-        "y": 13,
-        "w": 24,
-        "h": 2
-      }
-    },
+    "tasks": {},
     "tasksToggle": {
       "x": 1,
       "y": 10,

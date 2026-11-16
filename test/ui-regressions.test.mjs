@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { DemoEngine } from '../src/demo.mjs';
 import { computeLayout } from '../src/graph.mjs';
 import { normalizeSnapshot } from '../src/model.mjs';
-import { renderApp } from '../src/render.mjs';
+import { renderApp, taskListLayout } from '../src/render.mjs';
 import { keyboardScrollTarget } from '../src/scroll.mjs';
 import { width as textWidth } from '../src/text.mjs';
 import { baseUi as makeBaseUi, createTestViewer, themeFor, withTestTimeout } from './helpers.mjs';
@@ -332,10 +332,15 @@ function progressBarRow(rows, labelPattern) {
   return barRow;
 }
 
-function taskBarCells(result) {
-  const rect = result.hitboxes.tasks.get('st_api');
-  assert.ok(rect, 'the task row is hitboxed');
-  return result.canvas.cells[rect.y + 1].slice(rect.x + 2, rect.x + 11)
+function taskBarCells(result, overrides = {}) {
+  assert.equal(result.hitboxes.tasks.size, 0);
+  const geometry = taskListLayout(
+    result.layout.sidebar, oneNode('running', undefined), { ...baseUi, ...overrides },
+  );
+  const row = geometry.visible.findIndex(task => task.id === 'st_api');
+  assert.ok(row >= 0, 'the task row is painted');
+  const y = geometry.tasksY + row * 2 + 1;
+  return result.canvas.cells[y].slice(geometry.x + 2, geometry.x + 11)
     .map(cell => cell.ch).join('');
 }
 
@@ -377,13 +382,13 @@ test('running tasks with an unrecorded percent paint an indeterminate bar at 54 
 test('the task list row shows the indeterminate sweep without a numeric percent', () => {
   for (const motion of [true, false]) {
     const first = renderUnknown('running', { motion }, { width: 120, height: 40, time: 0 });
-    const firstBar = taskBarCells(first);
+    const firstBar = taskBarCells(first, { motion });
     assert.match(firstBar, /█/);
     assert.match(firstBar, /─/);
     assert.doesNotMatch(first.text, /\b0%|\b100%/);
     const laterBar = taskBarCells(renderUnknown('running', { motion }, {
       width: 120, height: 40, time: 1000,
-    }));
+    }), { motion });
     if (motion) assert.notEqual(laterBar, firstBar);
     else assert.equal(laterBar, firstBar);
   }
