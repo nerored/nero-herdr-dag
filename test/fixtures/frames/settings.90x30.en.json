@@ -15,22 +15,22 @@
     "│   ✓ intake 100%                                                                       █│",
     "│   ● build-api 62%  ╔═ SETTINGS ═══════════════════════════════════╗                   ░│",
     "╰────────────────────║                                              ║────────────────────╯",
+    "╭─ TASKS ────────────║                                              ║────────────────────╮",
+    "│   ● Execute plan to║    Theme: system                             ║                    │",
+    "│                    ║  ▸ Animation: OFF (this session)             ║                    │",
+    "╰────────────────────║    Language: English                         ║────────────────────╯",
     "╭─ RUN · build pipeli║                                              ║─────────── Running ╮",
-    "│                    ║    Theme: system                             ║                    │",
-    "│  ● RUNNING   —  att║  ▸ Animation: OFF (this session)             ║                   █│",
-    "│ build pipeline · ru║    Language: English                         ║                   █│",
-    "│ build pipeline · 1/║                                              ║                   █│",
-    "│ ███████████████████║                                              ║────────────── 54% █│",
-    "│                    ║                                              ║                   █│",
-    "│ error none recorded║  ↑↓ select · Enter change · Esc close        ║                   █│",
-    "│ agent not recorded ╚══════════════════════════════════════════════╝                   █│",
+    "│                    ║                                              ║                    │",
+    "│  ● RUNNING   —  att║                                              ║                   █│",
+    "│ build pipeline · ru║  ↑↓ select · Enter change · Esc close        ║                   █│",
+    "│ build pipeline · 1/╚══════════════════════════════════════════════╝                   █│",
+    "│ ████████████████████████████████████████████───────────────────────────────────── 54% █│",
+    "│                                                                                       ░│",
+    "│ error none recorded                                                                   ░│",
+    "│ agent not recorded · model not recorded                                               ░│",
     "│ e details · v switch · s settings · ? help                                            ░│",
     "│ RUN SUMMARY ──────────────────────────────────────────────────────────────────────────░│",
     "│ × 0 failed · ◌ 0 blocked                                                              ░│",
-    "│ ● 1 running · ✓ 1 done                                                                ░│",
-    "│ ▸ 1 all · 2 ×0 · 3 ◌0 · 4 ●1 · 5 path                                                 ░│",
-    "│ EFFICIENCY                                                                            ░│",
-    "│ tokens   12.3k in / 6.8k out 1/3                                                      ░│",
     "╰────────────────────────────────────────────────────────────────────────────────────────╯",
     "──────────────────────────────────────────────────────────────────────────────────────────",
     " ●run ✓done ×fail ◌wait ? Help m select x clear  z focus · n/N … ● OFF  12fps  ⚙ SETTINGS "
@@ -125,6 +125,13 @@
     "switcher": null,
     "switcherFilter": null,
     "switcherPanel": null,
-    "tasks": {}
+    "tasks": {
+      "st_plan": {
+        "x": 1,
+        "y": 12,
+        "w": 88,
+        "h": 1
+      }
+    }
   }
 }

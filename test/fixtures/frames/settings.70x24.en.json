@@ -13,18 +13,18 @@
     "╭─ CELLS · ╔═ SETTINGS ═══════════════════════════════════╗──────────╮",
     "│   ✓ intak║                                              ║         █│",
     "╰──────────║                                              ║──────────╯",
-    "╭─ RUN · bu║    Theme: system                             ║─ Running ╮",
-    "│          ║  ▸ Animation: OFF (this session)             ║          │",
-    "│  ● RUNNIN║    Language: English                         ║         █│",
-    "│ build pip║                                              ║         █│",
-    "│ build pip║                                              ║         █│",
-    "│ █████████║                                              ║──── 54% █│",
-    "│          ║  ↑↓ select · Enter change · Esc close        ║         ░│",
-    "│ error non╚══════════════════════════════════════════════╝         ░│",
+    "╭─ TASKS ──║    Theme: system                             ║──────────╮",
+    "│   ● Execu║  ▸ Animation: OFF (this session)             ║          │",
+    "╰──────────║    Language: English                         ║──────────╯",
+    "╭─ RUN · bu║                                              ║─ Running ╮",
+    "│          ║                                              ║          │",
+    "│  ● RUNNIN║                                              ║         █│",
+    "│ build pip║  ↑↓ select · Enter change · Esc close        ║         ░│",
+    "│ build pip╚══════════════════════════════════════════════╝         ░│",
+    "│ █████████████████████████████████──────────────────────────── 54% ░│",
+    "│                                                                   ░│",
+    "│ error none recorded                                               ░│",
     "│ agent not recorded · model not recorded                           ░│",
-    "│ e details · v switch · s settings · ? help                        ░│",
-    "│ RUN SUMMARY ──────────────────────────────────────────────────────░│",
-    "│ × 0 failed · ◌ 0 blocked                                          ░│",
     "╰────────────────────────────────────────────────────────────────────╯",
     "──────────────────────────────────────────────────────────────────────",
     " ●run ✓done ×fail ◌wait ? Help m select x clear  z… ● OFF  ⚙ SETTINGS "
@@ -107,6 +107,13 @@
     "switcher": null,
     "switcherFilter": null,
     "switcherPanel": null,
-    "tasks": {}
+    "tasks": {
+      "st_plan": {
+        "x": 1,
+        "y": 10,
+        "w": 68,
+        "h": 1
+      }
+    }
   }
 }

@@ -20,8 +20,9 @@ import { diagnosisFor } from './diagnosis.mjs';
 import { computeLayout, drawGraph, nodeScrollTarget, spinnerFrame } from './graph.mjs';
 import { statusLabel, t } from './i18n.mjs';
 import {
-  activitySummary, compareNavigationTasks, elapsedLabel, incoming, isActiveRun, modeFor, nodeActivity,
-  nodeForTask, nodeMap, outgoing, percentFor, PROVENANCE_FIELDS, PROVENANCE_KINDS, runStats, TERMINAL,
+  activitySummary, compareNavigationTasks, elapsedLabel, incoming, isActiveRun, linkedTaskIds, modeFor,
+  nodeActivity, nodeForTask, nodeMap, outgoing, percentFor, PROVENANCE_FIELDS, PROVENANCE_KINDS,
+  runStats, TERMINAL,
 } from './model.mjs';
 import { recordTargetFor } from './records.mjs';
 import { scrollbarGeometry } from './scroll.mjs';
@@ -60,6 +61,14 @@ export function navTasks(snapshot) {
   return (snapshot?.tasks ?? [])
     .filter(task => !task.parentTaskId)
     .sort(compareNavigationTasks);
+}
+
+// Navigation tasks that no loaded run links to a node. The narrow duty pane
+// paints this list because the wide task sidebar is not available there; a
+// task-only snapshot is the whole surface, not an empty workflow.
+export function orphanNavTasks(snapshot) {
+  const linked = linkedTaskIds(snapshot ?? { runs: [] });
+  return navTasks(snapshot).filter(task => !linked.has(task.id));
 }
 
 // Caller-supplied scroll offsets are untrusted input: NaN, numeric strings,
@@ -1576,14 +1585,17 @@ export function renderApp(viewOrSnapshot, uiOrOptions, options = {}) {
     if (narrow) {
       addRegion('runs', narrow.runs.region);
       addRegion('cells', narrow.cells.region);
+      if (narrow.tasks?.region) addRegion('tasks', narrow.tasks.region);
       addRegion('details', narrow.detailsRect);
       if (narrow.runs.bar) hitboxes.scrollbars.set('runs', narrow.runs.bar);
       if (narrow.cells.bar) hitboxes.scrollbars.set('cells', narrow.cells.bar);
+      if (narrow.tasks?.bar) hitboxes.scrollbars.set('tasks', narrow.tasks.bar);
     } else {
       addRegion('details', layout.details);
     }
     if (graph.bar) hitboxes.scrollbars.set('graph', graph.bar);
     if (taskScroll?.bar) hitboxes.scrollbars.set('tasks', taskScroll.bar);
+    if (narrow?.tasks?.bar) hitboxes.scrollbars.set('tasks', narrow.tasks.bar);
     if (detailsScroll.bar) hitboxes.scrollbars.set('details', detailsScroll.bar);
   }
   return {
@@ -1602,7 +1614,7 @@ export function renderApp(viewOrSnapshot, uiOrOptions, options = {}) {
         maxScroll: graph.maxScroll,
         bar: graph.bar ?? null,
       },
-      tasks: taskScroll ?? { viewportH: 0, contentH: 0, offset: 0, maxScroll: 0, bar: null },
+      tasks: narrow?.tasks ?? taskScroll ?? { viewportH: 0, contentH: 0, offset: 0, maxScroll: 0, bar: null },
       runs: narrow?.runs ?? { viewportH: 0, contentH: 0, offset: 0, maxScroll: 0, bar: null },
       cells: narrow?.cells ?? { viewportH: 0, contentH: 0, offset: 0, maxScroll: 0, bar: null },
       details: detailsScroll,

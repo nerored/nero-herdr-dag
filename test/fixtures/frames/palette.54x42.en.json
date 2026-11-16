@@ -21,13 +21,13 @@
     "│ ║   Filter graph: failed                         ║ │",
     "│ ║   Filter graph: blocked                        ║ │",
     "╰─║   Filter graph: running                        ║─╯",
-    "╭─║   Highlight the critical path                  ║ ╮",
+    "╭─║   Highlight the critical path                  ║─╮",
     "│ ║   Show all graph nodes                         ║ │",
-    "│ ║   Focus selected node                          ║█│",
-    "│ ║   Toggle task scope                            ║█│",
-    "│ ║   Toggle completed tasks                       ║█│",
-    "│ ║   Toggle verbose details                       ║█│",
-    "│ ║   Start the tour                               ║█│",
+    "│ ║   Focus selected node                          ║ │",
+    "│ ║   Toggle task scope                            ║ │",
+    "╰─║   Toggle completed tasks                       ║─╯",
+    "╭─║   Toggle verbose details                       ║ ╮",
+    "│ ║   Start the tour                               ║ │",
     "│ ║   Undo clear completed                         ║█│",
     "│ ║   HELP · KEY BINDINGS                          ║█│",
     "│ ║   SETTINGS                                     ║█│",
@@ -36,12 +36,12 @@
     "│ ║                                                ║█│",
     "│ ║  ↑↓ move · Enter run · :/Esc close             ║█│",
     "│ ╚════════════════════════════════════════════════╝█│",
-    "│ tokens   12.3k in / 6.8k out 1/3                  █│",
-    "│                                                   █│",
-    "│ TIME                                              █│",
-    "│ wall     3m 0s (busy 2m 40s)                      ░│",
-    "│ critical intake → build-api (2m 40s)              ░│",
-    "│ parallel max 1 · avg 0.9 2/3                      ░│",
+    "│ RUN SUMMARY ──────────────────────────────────────█│",
+    "│ × 0 failed · ◌ 0 blocked                          ░│",
+    "│ ● 1 running · ✓ 1 done                            ░│",
+    "│ ▸ 1 all · 2 ×0 · 3 ◌0 · 4 ●1 · 5 path             ░│",
+    "│ EFFICIENCY                                        ░│",
+    "│ tokens   12.3k in / 6.8k out 1/3                  ░│",
     "│                                                   ░│",
     "╰────────────────────────────────────────────────────╯",
     "──────────────────────────────────────────────────────",
@@ -182,24 +182,30 @@
       },
       "details": {
         "x": 0,
-        "y": 17,
+        "y": 22,
         "w": 54,
-        "h": 23
+        "h": 18
       },
       "runs": {
         "x": 1,
         "y": 4,
         "w": 52,
         "h": 5
+      },
+      "tasks": {
+        "x": 1,
+        "y": 18,
+        "w": 52,
+        "h": 3
       }
     },
     "runs": {},
     "scrollbars": {
       "details": {
         "x": 52,
-        "y": 19,
+        "y": 24,
         "w": 1,
-        "h": 20
+        "h": 15
       }
     },
     "selectHint": {

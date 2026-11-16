@@ -90,7 +90,11 @@ export function focusForStructural(focus, structural, scrollInfo) {
   const painted = region => (scrollInfo?.[region]?.viewportH ?? 0) > 0;
   const measured = hasPaintedMetrics(scrollInfo);
   if (structural === 'duty') {
-    const next = focus === 'runs' || focus === 'cells' || focus === 'details' ? focus : 'details';
+    // TASKS exists only when the renderer painted orphan rows; the measured
+    // check below sends an inherited task focus back to the duty body when the
+    // region is absent, while an unmeasured frame keeps the requested focus.
+    const next = focus === 'runs' || focus === 'cells' || focus === 'tasks' || focus === 'details'
+      ? focus : 'details';
     return measured && next !== 'details' && !painted(next) ? 'details' : next;
   }
   if (structural === 'investigation') {

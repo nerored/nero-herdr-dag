@@ -77,17 +77,17 @@ test('hidden task and graph offsets survive expansion and resize', () => {
   assert.deepEqual(kept, { graph: 7, tasks: 5, details: 2 });
 
   const folded = new Set(['api']);
-  const duty = render({ detailsScroll: 2, folded }, { width: 54, height: 20 });
+  const duty = render({ detailsScroll: 2, folded }, { width: 54, height: 32 });
   assert.equal(duty.layout.layout, 'duty');
   assert.equal(duty.scroll.details.offset, 2);
   assert.equal(duty.selectedNode.id, 'api');
-  const resized = render({ detailsScroll: 2, folded }, { width: 72, height: 24 });
+  const resized = render({ detailsScroll: 2, folded }, { width: 72, height: 32 });
   assert.equal(resized.layout.layout, 'duty');
   assert.equal(resized.scroll.details.offset, 2);
   assert.equal(resized.detailsKey, duty.detailsKey);
   const expanded = render({
     detailsScroll: 2, folded, expanded: true, focus: 'details', lastFocus: 'graph',
-  }, { width: 54, height: 20 });
+  }, { width: 54, height: 32 });
   assert.equal(expanded.layout.layout, 'expanded');
   assert.equal(expanded.detailsKey, duty.detailsKey);
   assert.equal(expanded.scroll.details.offset, 2);
@@ -115,9 +115,9 @@ test('duty is one panel below 112 with no graph or sidebar hitboxes', () => {
     assert.equal(result.layout.layout, 'duty');
     assert.equal(result.layout.graph, null);
     assert.equal(result.layout.sidebar, null);
-    assert.deepEqual([...result.hitboxes.regions.keys()], ['runs', 'cells', 'details']);
+    assert.deepEqual([...result.hitboxes.regions.keys()], ['runs', 'cells', 'tasks', 'details']);
     assert.ok(result.hitboxes.nodes.size > 0);
-    assert.equal(result.hitboxes.tasks.size, 0);
+    assert.ok(result.hitboxes.tasks.size > 0);
     assert.match(result.text, /CURRENT NODE/);
     assert.doesNotMatch(result.text, /DUTY/);
     assert.doesNotMatch(result.text, /╭─ GRAPH/);
@@ -141,15 +141,18 @@ test('duty focus states mark the painted pane without color', () => {
   assert.match(unfocused.text, /│ ▸ ● build-api/);
 });
 
-test('narrow duty paints scrollable runs and cells above the selected details', () => {
-  const result = render({}, { width: 54, height: 24 });
-  assert.deepEqual([...result.hitboxes.regions.keys()], ['runs', 'cells', 'details']);
+test('narrow duty paints scrollable runs, cells, and orphan tasks above the selected details', () => {
+  const result = render({}, { width: 54, height: 42 });
+  assert.deepEqual([...result.hitboxes.regions.keys()], ['runs', 'cells', 'tasks', 'details']);
   assert.ok(result.hitboxes.runs.size > 0);
   assert.ok(result.hitboxes.nodes.size > 0);
+  assert.ok(result.hitboxes.tasks.size > 0);
   assert.ok(result.scroll.runs.viewportH > 0);
   assert.ok(result.scroll.cells.viewportH > 0);
+  assert.ok(result.scroll.tasks.viewportH > 0);
   assert.match(result.text, /RUNS/);
   assert.match(result.text, /CELLS/);
+  assert.match(result.text, /TASKS/);
   assert.match(result.text, /METRICS/);
   assert.ok(result.scroll.details.maxScroll > 0);
 });
@@ -166,14 +169,15 @@ test('tier 1 survives at 54x12 and compact tier 2 appears at 54x20', () => {
   assert.equal(tiny.scroll.details.viewportH, 4);
 
   const compact = render({}, { width: 54, height: 20 });
-  assert.match(compact.text, /integration review · 2\/9 done · 3 running/);
+  assert.match(compact.text, /progress 2\/9 · 27%/);
   assert.match(compact.text, /CELLS/);
+  assert.match(compact.text, /TASKS/);
   assert.ok(compact.hitboxes.runs.size > 0);
   assert.ok(compact.hitboxes.nodes.size > 0);
   assert.doesNotMatch(compact.text, /THINKING/);
   assert.doesNotMatch(compact.text, /REPLY/);
 
-  const full = render({}, { width: 72, height: 32 });
+  const full = render({}, { width: 54, height: 42 });
   assert.match(full.text, /tokens\s+5\.1k in \/ 1\.2k out/);
   assert.match(full.text, /turns\s+3/);
   assert.match(full.text, /tools\s+6/);
@@ -359,9 +363,9 @@ test('switcher selection pins runs, jumps linked tasks, and rejects stale ids', 
 });
 
 test('Chinese duty stays 54 columns and counts CJK cells as two', () => {
-  const result = render({ language: 'zh' }, { width: 54, height: 20 });
+  const result = render({ language: 'zh' }, { width: 54, height: 42 });
   const lines = frameLines(result);
-  assert.equal(lines.length, 20);
+  assert.equal(lines.length, 42);
   for (const line of lines) assert.equal(textWidth(line), 54, `width ${textWidth(line)}`);
   assert.match(result.text, /当前节点/);
   assert.doesNotMatch(result.text, /任务面板/);

@@ -317,14 +317,14 @@ test('wheel regions cover exactly the three panes and exclude chrome', () => {
   }
 });
 
-test('duty exposes runs, cells, and details scroll regions', () => {
+test('duty exposes runs, cells, orphan tasks, and details scroll regions', () => {
   const result = renderApp(snapshot, { ...ui, focus: 'tasks' }, {
     width: 70, height: 24, time: 0, now, palette, theme,
   });
   const regions = result.hitboxes.regions;
-  assert.deepEqual([...regions.keys()], ['runs', 'cells', 'details']);
-  assert.equal(result.scroll.tasks.viewportH, 0);
-  assert.equal(result.scroll.tasks.bar, null);
+  assert.deepEqual([...regions.keys()], ['runs', 'cells', 'tasks', 'details']);
+  assert.ok(result.scroll.tasks.viewportH > 0);
+  assert.ok(result.scroll.tasks.bar);
   assert.equal(result.scroll.graph.viewportH, 0);
   const detailsRegion = regions.get('details');
   assert.ok(detailsRegion);

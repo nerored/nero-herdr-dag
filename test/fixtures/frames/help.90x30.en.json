@@ -15,22 +15,22 @@
     "│   ✓ intak║  VIEW                                                            ║         █│",
     "│   ● build║  Click               select node, task, or run                   ║         ░│",
     "╰──────────║  m                   release mouse tracking for Herdr drag-sel…  ║──────────╯",
-    "╭─ RUN · bu║  Mouse wheel         scroll one page                             ║─ Running ╮",
-    "│          ║  ← / →               switch run                                  ║          │",
-    "│  ● RUNNIN║  Space / Enter       fold or unfold selected node                ║         █│",
-    "│ build pip║  d                   toggle verbose details (wide layouts) · r…  ║         █│",
-    "│ build pip║  e / Esc             expand details · Backspace returns to the…  ║         █│",
-    "│ █████████║  v / /               open finder (runs/nodes/tasks)              ║──── 54% █│",
-    "│          ║  f                   toggle auto-follow                          ║         █│",
-    "│ error non║  S                   toggle sidebar on wide layouts              ║         █│",
-    "│ agent not║  ACTIONS                                                         ║         █│",
-    "│ e details║  t                   toggle task scope (run/all)                 ║         ░│",
-    "│ RUN SUMMA║  T                   collapse / expand completed tasks           ║─────────░│",
-    "│ × 0 faile║  1–5                 graph filter: all/failed/blocked/running/…  ║         ░│",
-    "│ ● 1 runni║  1 / 2 / 3           focus runs / cells / current node (narrow…  ║         ░│",
-    "│ ▸ 1 all ·║  z                   focus selected node and neighbors           ║         ░│",
-    "│ EFFICIENC║  n / N               previous / next node                        ║         ░│",
-    "│ tokens   ║  Data: LIVE · controller · 2026-11-16T12:00:00Z                  ║         ░│",
+    "╭─ TASKS ──║  Mouse wheel         scroll one page                             ║──────────╮",
+    "│   ● Execu║  ← / →               switch run                                  ║          │",
+    "│          ║  Space / Enter       fold or unfold selected node                ║          │",
+    "╰──────────║  d                   toggle verbose details (wide layouts) · r…  ║──────────╯",
+    "╭─ RUN · bu║  e / Esc             expand details · Backspace returns to the…  ║─ Running ╮",
+    "│          ║  v / /               open finder (runs/nodes/tasks)              ║          │",
+    "│  ● RUNNIN║  f                   toggle auto-follow                          ║         █│",
+    "│ build pip║  S                   toggle sidebar on wide layouts              ║         █│",
+    "│ build pip║  ACTIONS                                                         ║         █│",
+    "│ █████████║  t                   toggle task scope (run/all)                 ║──── 54% █│",
+    "│          ║  T                   collapse / expand completed tasks           ║         ░│",
+    "│ error non║  1–5                 graph filter: all/failed/blocked/running/…  ║         ░│",
+    "│ agent not║  1 / 2 / 3           focus runs / cells / current node (narrow…  ║         ░│",
+    "│ e details║  z                   focus selected node and neighbors           ║         ░│",
+    "│ RUN SUMMA║  n / N               previous / next node                        ║─────────░│",
+    "│ × 0 faile║  Data: LIVE · controller · 2026-11-16T12:00:00Z                  ║         ░│",
     "╰──────────╚══════════════════════════════════════════════════════════════════╝──────────╯",
     "──────────────────────────────────────────────────────────────────────────────────────────",
     " ●run ✓done ×fail ◌wait ? Help m select x clear  z focus · n/N … ● OFF  12fps  ⚙ SETTINGS "
@@ -111,6 +111,13 @@
     "switcher": null,
     "switcherFilter": null,
     "switcherPanel": null,
-    "tasks": {}
+    "tasks": {
+      "st_plan": {
+        "x": 1,
+        "y": 12,
+        "w": 88,
+        "h": 1
+      }
+    }
   }
 }

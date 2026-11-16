@@ -13,11 +13,11 @@
     "╭─║  g / G  Home/End     jump the focused region to top/bottom     ║─╮",
     "│ ║  Tab / Shift-Tab     select next / previous cell               ║█│",
     "╰─║  VIEW                                                          ║─╯",
-    "╭─║  Click               select node, task, or run                 ║ ╮",
+    "╭─║  Click               select node, task, or run                 ║─╮",
     "│ ║  m                   release mouse tracking for Herdr drag-s…  ║ │",
-    "│ ║  Mouse wheel         scroll one page                           ║█│",
-    "│ ║  ← / →               switch run                                ║█│",
-    "│ ║  Space / Enter       fold or unfold selected node              ║█│",
+    "╰─║  Mouse wheel         scroll one page                           ║─╯",
+    "╭─║  ← / →               switch run                                ║ ╮",
+    "│ ║  Space / Enter       fold or unfold selected node              ║ │",
     "│ ║  d                   toggle verbose details (wide layouts) ·…  ║█│",
     "│ ║  e / Esc             expand details · Backspace returns to t…  ║░│",
     "│ ║  v / /               open finder (runs/nodes/tasks)            ║░│",
@@ -93,6 +93,13 @@
     "switcher": null,
     "switcherFilter": null,
     "switcherPanel": null,
-    "tasks": {}
+    "tasks": {
+      "st_plan": {
+        "x": 1,
+        "y": 10,
+        "w": 68,
+        "h": 1
+      }
+    }
   }
 }

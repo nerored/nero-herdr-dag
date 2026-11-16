@@ -17,7 +17,7 @@ import {
   activitySummary, elapsedLabel, incoming, nodeActivity, nodeMap, outgoing, runStats,
 } from './model.mjs';
 import {
-  displayRunName, isActiveSnapshot, percentInfo, progressBlock, progressCounts,
+  displayRunName, isActiveSnapshot, orphanNavTasks, percentInfo, progressBlock, progressCounts,
   renderEmptyState, resolveSelection, scrollOffset, selectionResolution, sourceHealthSection,
   summaryTime,
 } from './render.mjs';
@@ -304,26 +304,79 @@ function renderNarrowCellList(canvas, rect, snapshot, ui, { palette, language, f
   return { viewportH: viewport, contentH: nodes.length, offset, maxScroll, bar, region };
 }
 
+function renderNarrowTaskList(canvas, rect, snapshot, ui, { palette, language, focused = false }, hitboxes) {
+  const tasks = orphanNavTasks(snapshot);
+  narrowListFrame(canvas, rect, t(language, 'tasks'), palette, focused);
+  const viewport = Math.max(1, rect.h - 2);
+  const maxScroll = Math.max(0, tasks.length - viewport);
+  const offset = scrollOffset(ui.tasksScroll, maxScroll);
+  const region = { x: rect.x + 1, y: rect.y + 1, w: Math.max(1, rect.w - 2), h: viewport };
+  let row = rect.y + 1;
+  for (const task of tasks.slice(offset, offset + viewport)) {
+    if (row >= rect.y + rect.h - 1) break;
+    const selected = task.id === ui.selectedTaskId;
+    if (selected) canvas.fill(rect.x + 1, row, rect.w - 2, 1, { bg: palette.selection, fg: palette.text });
+    const status = task.status ?? 'pending';
+    const progress = percentInfo(task, language);
+    const suffix = progress.known ? progress.label : statusLabel(language, status);
+    rich(canvas, rect.x + 2, row, Math.max(1, rect.w - 4), [
+      [`${selected ? '▸' : ' '} `, { fg: selected ? palette.accent : palette.faint, bold: selected }],
+      [`${statusIcon(status)} `, { fg: statusColor(palette, status), bold: true }],
+      [fit(task.description, Math.max(8, rect.w - 22)), { fg: selected ? palette.white : palette.text, bold: selected }],
+      [` ${fit(suffix, 11)}`, { fg: palette.faint }],
+    ], palette, selected ? palette.selection : palette.panel);
+    hitboxes.tasks.set(task.id, { x: rect.x + 1, y: row, w: rect.w - 2, h: 1 });
+    row++;
+  }
+  if (!tasks.length) {
+    rich(canvas, rect.x + 2, rect.y + 1, rect.w - 4, [[t(language, 'noWorkflow'), { fg: palette.faint }]], palette, palette.panel);
+  }
+  const barGeometry = scrollbarGeometry({ y: rect.y + 1, trackHeight: viewport, viewport, content: tasks.length, offset });
+  const bar = barGeometry ? { x: rect.x + rect.w - 2, w: 1, ...barGeometry } : null;
+  if (bar) drawScrollbar(canvas, bar, palette);
+  return { viewportH: viewport, contentH: tasks.length, offset, maxScroll, bar, region };
+}
+
 export function renderNarrowDuty(canvas, rect, snapshot, ui, opts, hitboxes) {
   const h = Math.max(6, rect.h);
+  // Orphan tasks are invisible in the wide sidebar-free duty layout. Paint
+  // them beside RUNS/CELLS whenever they exist; a task-only capture has no run
+  // row to anchor the eyebrow, so an empty TASKS frame is still painted.
+  const hasOrphans = orphanNavTasks(snapshot).length > 0;
+  const paintTasks = hasOrphans || (snapshot?.runs?.length ?? 0) === 0;
   let runsH = h >= 16 ? clamp(Math.floor(h * 0.19), 3, 7) : 3;
   let cellsH = h >= 16 ? clamp(Math.floor(h * 0.19), 3, 7) : 3;
-  if (runsH + cellsH + 3 > h) {
+  let tasksH = paintTasks ? (h >= 16 ? clamp(Math.floor(h * 0.16), 3, 6) : 3) : 0;
+  if (!paintTasks && runsH + cellsH + 3 > h) {
     runsH = 2;
     cellsH = 2;
   }
-  const detailsH = Math.max(2, h - runsH - cellsH);
+  // Keep the duty body readable on short terminals: shrink the TASKS list
+  // first, then RUNS/CELLS, but never below the existing two-row floor.
+  while (paintTasks && runsH + cellsH + tasksH + 4 > h && tasksH > 2) tasksH--;
+  while (paintTasks && runsH + cellsH + tasksH + 4 > h && runsH > 2) runsH--;
+  while (paintTasks && runsH + cellsH + tasksH + 4 > h && cellsH > 2) cellsH--;
+  const tasksPainted = tasksH > 0;
+  const detailsH = Math.max(2, h - runsH - cellsH - tasksH);
   const runsRect = { ...rect, h: runsH };
   const cellsRect = { ...rect, y: rect.y + runsH, h: cellsH };
-  const detailsRect = { ...rect, y: rect.y + runsH + cellsH, h: detailsH };
+  const tasksRect = tasksPainted
+    ? { ...rect, y: rect.y + runsH + cellsH, h: tasksH }
+    : null;
+  const detailsRect = { ...rect, y: rect.y + runsH + cellsH + tasksH, h: detailsH };
   const runs = renderNarrowRunList(canvas, runsRect, snapshot, ui, {
     ...opts, focused: ui.focus === 'runs',
   }, hitboxes);
   const cells = renderNarrowCellList(canvas, cellsRect, snapshot, ui, {
     ...opts, focused: ui.focus === 'cells',
   }, hitboxes);
+  const tasks = tasksRect
+    ? renderNarrowTaskList(canvas, tasksRect, snapshot, ui, {
+      ...opts, focused: ui.focus === 'tasks',
+    }, hitboxes)
+    : null;
   const details = renderDuty(canvas, detailsRect, snapshot, ui, opts);
-  return { runs, cells, details, detailsRect };
+  return { runs, cells, tasks, details, detailsRect };
 }
 
 export function renderDuty(canvas, rect, snapshot, ui, { now, time, motion = true, palette, language, freshness, buffers }) {

@@ -15,22 +15,22 @@
     "│   ✓ intake ║   Filter graph: failed                                       ║           █│",
     "│   ● build-a║   Filter graph: blocked                                      ║           ░│",
     "╰────────────║   Filter graph: running                                      ║────────────╯",
-    "╭─ RUN · buil║   Highlight the critical path                                ║─── Running ╮",
-    "│            ║   Show all graph nodes                                       ║            │",
-    "│  ● RUNNING ║   Focus selected node                                        ║           █│",
-    "│ build pipel║   Toggle task scope                                          ║           █│",
-    "│ build pipel║   Toggle completed tasks                                     ║           █│",
-    "│ ███████████║   Toggle verbose details                                     ║────── 54% █│",
-    "│            ║   Start the tour                                             ║           █│",
-    "│ error none ║   Undo clear completed                                       ║           █│",
-    "│ agent not r║   HELP · KEY BINDINGS                                        ║           █│",
-    "│ e details ·║   SETTINGS                                                   ║           ░│",
-    "│ RUN SUMMARY║   quit (close Help first)                                    ║───────────░│",
-    "│ × 0 failed ║                                                              ║           ░│",
-    "│ ● 1 running║                                                              ║           ░│",
-    "│ ▸ 1 all · 2║  ↑↓ move · Enter run · :/Esc close                           ║           ░│",
-    "│ EFFICIENCY ╚══════════════════════════════════════════════════════════════╝           ░│",
-    "│ tokens   12.3k in / 6.8k out 1/3                                                      ░│",
+    "╭─ TASKS ────║   Highlight the critical path                                ║────────────╮",
+    "│   ● Execute║   Show all graph nodes                                       ║            │",
+    "│            ║   Focus selected node                                        ║            │",
+    "╰────────────║   Toggle task scope                                          ║────────────╯",
+    "╭─ RUN · buil║   Toggle completed tasks                                     ║─── Running ╮",
+    "│            ║   Toggle verbose details                                     ║            │",
+    "│  ● RUNNING ║   Start the tour                                             ║           █│",
+    "│ build pipel║   Undo clear completed                                       ║           █│",
+    "│ build pipel║   HELP · KEY BINDINGS                                        ║           █│",
+    "│ ███████████║   SETTINGS                                                   ║────── 54% █│",
+    "│            ║   quit (close Help first)                                    ║           ░│",
+    "│ error none ║                                                              ║           ░│",
+    "│ agent not r║                                                              ║           ░│",
+    "│ e details ·║  ↑↓ move · Enter run · :/Esc close                           ║           ░│",
+    "│ RUN SUMMARY╚══════════════════════════════════════════════════════════════╝───────────░│",
+    "│ × 0 failed · ◌ 0 blocked                                                              ░│",
     "╰────────────────────────────────────────────────────────────────────────────────────────╯",
     "──────────────────────────────────────────────────────────────────────────────────────────",
     " ●run ✓done ×fail ◌wait ? Help m select x clear  z focus · n/N … ● OFF  12fps  ⚙ SETTINGS "
@@ -170,13 +170,19 @@
       },
       "details": {
         "x": 0,
-        "y": 11,
+        "y": 15,
         "w": 90,
-        "h": 17
+        "h": 13
       },
       "runs": {
         "x": 1,
         "y": 4,
+        "w": 88,
+        "h": 2
+      },
+      "tasks": {
+        "x": 1,
+        "y": 12,
         "w": 88,
         "h": 2
       }
@@ -191,9 +197,9 @@
       },
       "details": {
         "x": 88,
-        "y": 13,
+        "y": 17,
         "w": 1,
-        "h": 14
+        "h": 10
       }
     },
     "selectHint": {

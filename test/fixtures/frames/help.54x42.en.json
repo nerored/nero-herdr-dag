@@ -21,13 +21,13 @@
     "│ ║  ← / →               switch run                ║ │",
     "│ ║  Space / Enter       fold or unfold selected…  ║ │",
     "╰─║  d                   toggle verbose details …  ║─╯",
-    "╭─║  e / Esc             expand details · Backsp…  ║ ╮",
+    "╭─║  e / Esc             expand details · Backsp…  ║─╮",
     "│ ║  v / /               open finder (runs/nodes…  ║ │",
-    "│ ║  f                   toggle auto-follow        ║█│",
-    "│ ║  S                   toggle sidebar on wide …  ║█│",
-    "│ ║  ACTIONS                                       ║█│",
-    "│ ║  t                   toggle task scope (run/…  ║█│",
-    "│ ║  T                   collapse / expand compl…  ║█│",
+    "│ ║  f                   toggle auto-follow        ║ │",
+    "│ ║  S                   toggle sidebar on wide …  ║ │",
+    "╰─║  ACTIONS                                       ║─╯",
+    "╭─║  t                   toggle task scope (run/…  ║ ╮",
+    "│ ║  T                   collapse / expand compl…  ║ │",
     "│ ║  1–5                 graph filter: all/faile…  ║█│",
     "│ ║  1 / 2 / 3           focus runs / cells / cu…  ║█│",
     "│ ║  z                   focus selected node and…  ║█│",
@@ -37,8 +37,8 @@
     "│ ║  x / X / u           x clears · X restores ·…  ║█│",
     "│ ║  s                   open settings             ║█│",
     "│ ║  r                   restart demo cycle        ║█│",
-    "│ ║  SYSTEM                                        ║█│",
-    "│ ║  :                   open the command palette  ║█│",
+    "│ ║  SYSTEM                                        ║░│",
+    "│ ║  :                   open the command palette  ║░│",
     "│ ║  ? / Esc             close this help           ║░│",
     "│ ║  q                   quit (close Help first)   ║░│",
     "│ ║  Data: LIVE · controller · 2026-11-16T12:00:…  ║░│",
@@ -129,6 +129,13 @@
     "switcher": null,
     "switcherFilter": null,
     "switcherPanel": null,
-    "tasks": {}
+    "tasks": {
+      "st_plan": {
+        "x": 1,
+        "y": 18,
+        "w": 52,
+        "h": 1
+      }
+    }
   }
 }

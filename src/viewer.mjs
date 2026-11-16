@@ -17,7 +17,7 @@ import { createFrameBuffers } from './frame-primitives.mjs';
 import { nextNodeId } from './cockpit.mjs';
 import { commandItems, filterCommands } from './commands.mjs';
 import { languageLabel, normalizeLanguage, t } from './i18n.mjs';
-import { findRunningTarget, isActiveRun, nodeForTask, normalizeSnapshot } from './model.mjs';
+import { findRunningTarget, isActiveRun, linkedTaskIds, nodeForTask, normalizeSnapshot } from './model.mjs';
 import {
   detailsSubjectKey, dashboardLayout, diagnosisForSelection, navTasks, recordForSelection,
   renderApp, snapshotFreshness, switcherView,
@@ -30,7 +30,7 @@ import { extractMouse, mouseTrackingSequence, wheelDirectionFromButton } from '.
 import {
   GLOBAL_KEYMAP, MODAL_ORDER, PALETTE_KEYMAP, SETTINGS_KEYMAP, SWITCHER_KEYMAP, TOUR_KEYMAP,
   applyHelpScroll, dutyFocusForKey, helpKeyAction, helpScrollMetrics, isEscapeKey, keyToken,
-  matchingKeys, resolveKey,
+  matchingKeys, movementKey, resolveKey,
 } from './viewer-keymap.mjs';
 import { keyboardScrollTarget, regionAt } from './scroll.mjs';
 import {
@@ -387,7 +387,7 @@ export function scrollRegionForFocus(focus, structural, scrollInfo = {}) {
     if (focus === 'tasks') return (scrollInfo.tasks?.viewportH ?? 0) > 0 ? 'tasks' : 'graph';
     return 'graph';
   }
-  if (focus === 'runs' || focus === 'cells') {
+  if (focus === 'runs' || focus === 'cells' || focus === 'tasks') {
     return (scrollInfo[focus]?.viewportH ?? 0) > 0 ? focus : 'details';
   }
   return 'details';
@@ -699,6 +699,28 @@ export async function createViewer(options = {}, deps = {}) {
     const current = Math.max(0, tasks.findIndex(task => task.id === ui.selectedTaskId));
     const index = (current + direction + tasks.length) % tasks.length;
     selectTaskById(tasks[index].id);
+  }
+
+  // The TASKS list is navTasks minus every task a node in any run owns. This
+  // mirrors the renderer's list without widening the public frame API that the
+  // architecture test pins.
+  function orphanTasks() {
+    const linked = linkedTaskIds(snapshot ?? { runs: [] });
+    return navTasks(snapshot ?? { runs: [], tasks: [] }).filter(task => !linked.has(task.id));
+  }
+
+  // Up/down in the duty TASKS list selects the orphan row under the cursor
+  // instead of scrolling an invisible list; the painted list is the source of
+  // row order, so a linked task can never become the selection here.
+  function stepDutyTask(direction) {
+    const tasks = orphanTasks();
+    if (!tasks.length) return false;
+    const current = tasks.findIndex(task => task.id === ui.selectedTaskId);
+    const index = current < 0
+      ? (direction < 0 ? tasks.length - 1 : 0)
+      : (current + direction + tasks.length) % tasks.length;
+    selectTaskById(tasks[index].id);
+    return true;
   }
 
   function stepGraphNode(direction) {
@@ -1020,6 +1042,16 @@ export async function createViewer(options = {}, deps = {}) {
       expanded: ui.expanded, sidebar: sidebarEnabled(),
     });
     const scrollInfo = vm.frame?.scroll ?? {};
+    // The duty TASKS list is a selection list, not a scroll window. Move the
+    // orphan-task subject on up/down before the generic scroll fallback; when
+    // the region is not painted, focusForStructural has already sent the key
+    // to the duty body.
+    const movement = movementKey(key, pressed);
+    if (structural === 'duty' && ui.focus === 'tasks' && (movement === 'up' || movement === 'down') &&
+      (scrollInfo.tasks?.viewportH ?? 0) > 0) {
+      stepDutyTask(movement === 'down' ? 1 : -1);
+      return true;
+    }
     // Page size only needs the graph's larger step; every other painted region
     // uses half its viewport inside keyboardScrollIntent.
     const pageSize = scrollRegionForFocus(ui.focus, structural, scrollInfo) === 'graph'
@@ -1055,7 +1087,9 @@ export async function createViewer(options = {}, deps = {}) {
 
   function revealTaskSelection() {
     if (ui.focus !== 'tasks' || !snapshot) return;
-    const tasks = navTasks(snapshot);
+    const tasks = vm.frame?.layout?.layout === 'duty'
+      ? orphanTasks()
+      : navTasks(snapshot);
     const index = tasks.findIndex(task => task.id === ui.selectedTaskId);
     if (index < 0) return;
     const viewportRows = vm.frame?.scroll?.tasks?.viewportH ?? 0;

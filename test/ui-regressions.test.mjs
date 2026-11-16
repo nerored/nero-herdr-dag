@@ -505,17 +505,23 @@ test('a legacy v2 explicit percent renders numerically through the CLI', () => {
   }
 });
 
-test('1/2/3 request RUNS, CELLS, and DUTY with a structural fallback', () => {
+test('1/2/3/4 request RUNS, CELLS, DUTY, and TASKS with a structural fallback', () => {
   assert.equal(dutyFocusForKey('1'), 'runs');
   assert.equal(dutyFocusForKey('2'), 'cells');
   assert.equal(dutyFocusForKey('3'), 'details');
-  assert.equal(dutyFocusForKey('4'), undefined);
+  assert.equal(dutyFocusForKey('4'), 'tasks');
 
   assert.equal(focusForStructural('runs', 'duty'), 'runs');
   assert.equal(focusForStructural('cells', 'duty'), 'cells');
   assert.equal(focusForStructural('details', 'duty'), 'details');
   assert.equal(focusForStructural('graph', 'duty'), 'details', 'unpainted graph falls to duty');
-  assert.equal(focusForStructural('tasks', 'duty'), 'details', 'unpainted tasks fall to duty');
+  assert.equal(focusForStructural('tasks', 'duty'), 'tasks', 'unmeasured TASKS keeps the requested focus');
+  assert.equal(focusForStructural('tasks', 'duty', {
+    tasks: { viewportH: 0 }, details: { viewportH: 10 },
+  }), 'details', 'measured unpainted TASKS falls to duty');
+  assert.equal(focusForStructural('tasks', 'duty', {
+    tasks: { viewportH: 2 }, details: { viewportH: 10 },
+  }), 'tasks', 'painted TASKS keeps focus');
   assert.equal(focusForStructural('runs', 'investigation'), 'tasks');
   assert.equal(focusForStructural('cells', 'investigation'), 'graph');
   assert.equal(focusForStructural('details', 'investigation'), 'details');
@@ -524,7 +530,7 @@ test('1/2/3 request RUNS, CELLS, and DUTY with a structural fallback', () => {
   assert.equal(applyFocusRequest(ui, 'graph', 'duty'), 'details');
   assert.equal(ui.lastFocus, 'graph');
   applyFocusRequest(ui, 'tasks', 'duty');
-  assert.equal(ui.focus, 'details');
+  assert.equal(ui.focus, 'tasks');
   assert.equal(ui.lastFocus, 'tasks');
   assert.equal(applyFocusRequest(ui, 'runs', 'duty'), 'runs');
   assert.equal(applyFocusRequest(ui, 'cells', 'duty'), 'cells');

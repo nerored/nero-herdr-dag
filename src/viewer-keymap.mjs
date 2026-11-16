@@ -72,11 +72,14 @@ export function movementKey(key, pressed) {
 // Shared edge vocabulary
 // ---------------------------------------------------------------------------
 
-// N3 duty focus contract. 1/2/3 request the RUNS, CELLS, and DUTY regions; the
-// structural class decides which focus value is actually meaningful. The
-// renderer paints runs/cells/details focus in duty, while investigation falls
-// back to the panes that are painted there (tasks/graph/details).
-export const DUTY_FOCUS_KEYS = Object.freeze({ '1': 'runs', '2': 'cells', '3': 'details' });
+// N3 duty focus contract. 1/2/3 request the RUNS, CELLS, and DUTY regions;
+// 4 requests the TASKS list of orphan navigation tasks. The structural class
+// decides which focus value is actually meaningful. The renderer paints
+// runs/cells/tasks/details focus in duty, while investigation falls back to the
+// panes that are painted there (tasks/graph/details).
+export const DUTY_FOCUS_KEYS = Object.freeze({
+  '1': 'runs', '2': 'cells', '3': 'details', '4': 'tasks',
+});
 
 export function dutyFocusForKey(key) {
   return DUTY_FOCUS_KEYS[key];

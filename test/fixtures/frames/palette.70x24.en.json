@@ -13,18 +13,18 @@
     "╭─ ║   Filter graph: failed                                       ║──╮",
     "│  ║   Filter graph: blocked                                      ║ █│",
     "╰──║   Filter graph: running                                      ║──╯",
-    "╭─ ║   Highlight the critical path                                ║g ╮",
+    "╭─ ║   Highlight the critical path                                ║──╮",
     "│  ║   Show all graph nodes                                       ║  │",
-    "│  ║   Focus selected node                                        ║ █│",
-    "│ b║   Toggle task scope                                          ║ █│",
-    "│ b║   Toggle completed tasks                                     ║ █│",
-    "│ █║   Toggle verbose details                                     ║ █│",
-    "│  ║   Start the tour                                             ║ ░│",
-    "│ e║   Undo clear completed                                       ║ ░│",
-    "│ a║   HELP · KEY BINDINGS                                        ║ ░│",
-    "│ e║   SETTINGS                                                   ║ ░│",
-    "│ R║   quit (close Help first)                                    ║─░│",
-    "│ ×║  ↑↓ move · Enter run · :/Esc close                           ║ ░│",
+    "╰──║   Focus selected node                                        ║──╯",
+    "╭─ ║   Toggle task scope                                          ║g ╮",
+    "│  ║   Toggle completed tasks                                     ║  │",
+    "│  ║   Toggle verbose details                                     ║ █│",
+    "│ b║   Start the tour                                             ║ ░│",
+    "│ b║   Undo clear completed                                       ║ ░│",
+    "│ █║   HELP · KEY BINDINGS                                        ║ ░│",
+    "│  ║   SETTINGS                                                   ║ ░│",
+    "│ e║   quit (close Help first)                                    ║ ░│",
+    "│ a║  ↑↓ move · Enter run · :/Esc close                           ║ ░│",
     "╰──╚══════════════════════════════════════════════════════════════╝──╯",
     "──────────────────────────────────────────────────────────────────────",
     " ●run ✓done ×fail ◌wait ? Help m select x clear  z… ● OFF  ⚙ SETTINGS "
@@ -164,13 +164,19 @@
       },
       "details": {
         "x": 0,
-        "y": 9,
+        "y": 12,
         "w": 70,
-        "h": 13
+        "h": 10
       },
       "runs": {
         "x": 1,
         "y": 4,
+        "w": 68,
+        "h": 1
+      },
+      "tasks": {
+        "x": 1,
+        "y": 10,
         "w": 68,
         "h": 1
       }
@@ -185,9 +191,9 @@
       },
       "details": {
         "x": 68,
-        "y": 11,
+        "y": 14,
         "w": 1,
-        "h": 10
+        "h": 7
       },
       "runs": {
         "x": 68,
