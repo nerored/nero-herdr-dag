@@ -193,15 +193,31 @@ test('a cycle is reported inside the graph instead of throwing', () => {
   assert.match(result.text, /cycle/i);
 });
 
-test('a precomputed graph layout renders the same frame', () => {
+test('a precomputed graph layout is painted instead of recomputed', () => {
   const first = renderApp(snapshot, ui, {
     width: 140, height: 42, time: 1000, now, palette, theme,
   });
-  const second = renderApp(snapshot, ui, {
-    width: 140, height: 42, time: 1000, now, palette, theme,
-    graphLayout: first.graph.layout,
+  assert.ok(first.graph.layout);
+  // Shift every cached box right without changing the node set. A renderer
+  // that silently recomputes would put the boxes back at their computed x, so
+  // the shifted hitboxes prove the supplied geometry is the one painted.
+  const boxes = new Map([...first.graph.layout.boxes].map(([id, box]) => [
+    id, { ...box, x: box.x + 4 },
+  ]));
+  const cached = { ...first.graph.layout, boxes };
+  const reused = renderApp(snapshot, ui, {
+    width: 140, height: 42, time: 1000, now, palette, theme, graphLayout: cached,
   });
-  assert.equal(second.text, first.text);
+  assert.ok(first.hitboxes.nodes.size > 0, 'the fixture paints clickable nodes');
+  for (const [id, rect] of first.hitboxes.nodes) {
+    const moved = reused.hitboxes.nodes.get(id);
+    assert.ok(moved, `${id} stays clickable through the cached layout`);
+    assert.equal(moved.x, rect.x + 4, `${id} keeps the cached x offset`);
+    assert.equal(moved.y, rect.y, `${id} keeps the cached y`);
+    assert.equal(moved.w, rect.w, `${id} keeps the cached width`);
+    assert.equal(moved.h, rect.h, `${id} keeps the cached height`);
+  }
+  assert.notEqual(reused.text, first.text, 'the cached geometry is what gets painted');
 });
 
 test('default-color page surfaces keep the terminal background transparent', () => {

@@ -359,8 +359,22 @@ test('fixed sections are atomic across short panel heights', () => {
     activity: { phase: 'text', text: 'running typecheck', since: now - 1000, lastAt: now },
     tokenRate: [2, 4, 8, 16],
   });
+  const frames = new Map();
   for (let height = 24; height <= 50; height++) {
-    const lines = detailsLines(render(snapshot, {}, { height }));
+    frames.set(height, detailsLines(render(snapshot, {}, { height })));
+  }
+  // Existence first: a frame range that never painted the fixed sections would
+  // satisfy every "no partial block" assertion below without testing anything.
+  for (const heading of ['THINKING', 'ACTIVITY']) {
+    const heights = [...frames.keys()].filter(height => hasHeading(frames.get(height), heading));
+    assert.ok(heights.length > 0, `${heading} is painted at some short height`);
+    assert.ok(hasHeading(frames.get(50), heading), `${heading} survives the tallest short panel`);
+    // Growing the panel may reveal a fixed block but must never hide one.
+    heights.forEach((height, index) => {
+      assert.equal(height, heights[0] + index, `${heading} stays visible from ${heights[0]}`);
+    });
+  }
+  for (const [height, lines] of frames) {
     for (const heading of ['THINKING', 'ACTIVITY']) {
       if (!hasHeading(lines, heading)) continue;
       const index = headingIndex(lines, heading);
@@ -369,6 +383,12 @@ test('fixed sections are atomic across short panel heights', () => {
       for (const other of knownHeadings) {
         assert.ok(!next.includes(other), `${heading} partial block before ${other} at height ${height}`);
       }
+    }
+    if (hasHeading(lines, 'THINKING') && hasHeading(lines, 'ACTIVITY')) {
+      assert.ok(
+        headingIndex(lines, 'THINKING') < headingIndex(lines, 'ACTIVITY'),
+        `THINKING precedes ACTIVITY at height ${height}`,
+      );
     }
   }
 });
