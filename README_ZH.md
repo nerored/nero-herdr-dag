@@ -88,28 +88,39 @@ kernel 检查、反例搜索、解析例外集估计、归纳步骤、独立评�
 | 按键 | 作用 |
 | --- | --- |
 | `↑/↓`、`j/k` | 当前聚焦区域向上/向下滚动一行 |
-| `Tab` / `Shift-Tab` | 选择下一个/上一个 cell |
-| 鼠标点击 | 选中节点、任务或 run |
-| `m` | 释放鼠标跟踪，交给 Herdr 拖选/复制；再按一次恢复 viewer 鼠标操作 |
-| `x` / `X` | 从当前视图隐藏已结束（完成或失败）的运行和任务 / 恢复它们 |
-| 鼠标滚轮 | 向上/向下滚动一页 |
-| `←/→` | 切换 run |
-| `Space` / `Enter` | 折叠/展开当前节点 |
-| `d` | 在宽屏或展开详情中切换详细模式；窄屏任务面板保持紧凑 |
-| `t` | 聚焦任务详情；窄屏下打开切换器 |
-| `1` / `2` / `3` | 窄屏下聚焦 RUNS / CELLS / 当前节点面板 |
-| `e` / `Esc` | 聚焦详情 / 返回画布 |
+| `PageUp` / `PageDown`（`PgUp` / `PgDn`） | 当前聚焦区域翻一页：图谱按视口高度减 4 行，其他区域翻半个视口。帮助层内翻一页 |
+| `g` / `G`、`Home` / `End` | 当前聚焦区域跳到顶部/底部 |
+| `Tab` / `Shift-Tab` | 选择下一个/上一个图谱节点或任务 |
+| 鼠标点击 | 选中节点、任务或运行 |
+| `m` | 开关鼠标捕获。释放后由 Herdr 接管拖选和复制；再按一次恢复 viewer 鼠标操作 |
+| 鼠标滚轮 | 滚动指针所在区域（图谱：视口高度减 4 行；其他区域：半个视口）。查找器打开时移动选中项，帮助打开时翻页 |
+| `←` / `→` | 切换运行 |
+| `Space` / `Enter` | 折叠或展开选中节点。详情聚焦时 `Enter` 折叠或展开当前段落；导览中 Space 或 Enter 进入下一步 |
+| `d` | 在宽屏或展开布局切换详细模式；duty 布局只显示提示 |
+| `e` / `Esc` | `e` 展开详情。`Esc` 清除图谱过滤/聚焦，两者都没有时收起已展开的详情 |
+| `v` 或 `/` | 打开查找（运行/节点/任务）。输入过滤，`↑/↓` 或 `j/k` 移动，`PageUp/PageDown`、`Home/End` 跳转，`Backspace` 删除，`Ctrl-U` 清空，Enter 选中，`Esc` 或 `v` 关闭 |
+| `:` | 打开命令面板。输入过滤，Enter 执行命令，`Esc` 或 `:` 关闭。面板包含“开始导览”和“打开运行汇总” |
 | `f` | 开关自动跟随 |
-| `s` | 打开设置（主题、动画、语言） |
-| `S` | 宽屏下开关侧栏 |
-| `g` / `G`、`Home` / `End` | 当前聚焦区域滚到顶部/底部 |
-| `PageUp/PageDown` | 当前聚焦区域翻半页 |
-| `r` | 重启动演示周期 |
-| `?` / `Esc` | 打开/关闭详细帮助；footer 的 `? 帮助` 可点击。帮助可用 `↑/↓`、`PageUp/PageDown`、`g/G`、`Home/End` 滚动 |
-| `q`、`Ctrl+C`、`Ctrl+D` | 退出 |
+| `s` | 打开设置（主题、动画、语言）。`↑/↓` 或 Tab 移动，Enter 修改，`Esc` 关闭 |
+| `S` | 宽屏（112 列及以上）开关侧栏；更窄时显示提示 |
+| `t` | 宽屏 investigation 布局且侧栏可见时切换任务范围（运行/全部）；其他布局打开查找 |
+| `T` | 折叠或展开任务列表中的已完成任务 |
+| `1-5` | 打开运行汇总时过滤图谱：全部、失败、阻塞、运行中、关键路径 |
+| `1` / `2` / `3` | 窄屏 duty 布局下聚焦 RUNS、CELLS 或当前节点面板 |
+| `z` | 聚焦选中节点及其直接邻居；再按一次清除聚焦 |
+| `n` / `N` | 图谱或 cells 面板聚焦时按图谱顺序选择下一个/上一个节点 |
+| `[` / `]` | 详情聚焦时切换到上一个/下一个详情段落。`Enter` 折叠或展开当前段落 |
+| `x` / `X` / `u` | `x` 从当前视图隐藏不在五分钟最近窗口内的已结束运行和根任务；`X` 恢复全部隐藏项；`u` 撤销上一次隐藏 |
+| `c` / `p` / `o` | 复制诊断、复制产物路径，或用 pager 打开记录。当前选中项需要有诊断或记录 |
+| `Backspace` | 从详情返回运行汇总；在查找器或命令面板中删除一个字符 |
+| `r` | 重开演示周期（仅 demo 模式） |
+| `?` / `Esc` | 打开或关闭帮助。帮助接管键盘，可用 `↑/↓`、`PageUp/PageDown`、`g/G`、`Home/End` 滚动 |
+| `q`、`Ctrl+C`、`Ctrl+D` | 退出。先关闭帮助 |
 
 footer 保留图例（`●运行 ✓完成 ×失败 ◌等待`），后面是可点击的 `? 帮助`、`m 选区`、`x 清除` 提示，`⚙ 设置` 始终在最右侧。54-69 列时图例收缩为 `● ✓ × ◌`，两个操作名称仍然显示；窄于 54 列时只保留按键。帮助打开时由它接管键盘：后台按键被阻止，按 `?`、`Esc` 或左键关闭。
-设置统一收在弹窗中：主题、动画、语言。主题和语言会保存；动画在持久化之前明确标注为“本会话”。隐藏已结束项只影响当前视图，`X` 可恢复，不会删除快照或记录文件。
+设置统一收在一个弹窗中：主题、动画、语言。主题和语言会保存到
+`config.json`；动画仅对本次 viewer 会话生效，弹窗中标注为“本会话”。
+隐藏已结束项只影响当前视图，`X` 恢复全部隐藏项，`u` 撤销上一次隐藏，不会删除快照或记录文件。
 在 Herdr 中按 `m` 后即可原生拖选；默认 `copy_on_select = true` 时松开鼠标即复制。
 
 ## 安装为 OmO 扩展
@@ -178,12 +189,24 @@ Herdr 的 ratio 是原 pane 的占比，所以原 pane 保留三分之二，嵌�
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
-| `OMO_HERDR_DAG_STUDIO_STATE_DIR` | `~/.omo/agent/herdr-dag-studio` | 快照、pane 记录、视图偏好 |
-| `OMO_HERDR_DAG_STUDIO_TASK_STATE_DIR` | `~/.omo/agent/projects/<project-key>/senpi-task` | OmO agent 任务存储根目录；仅读取当前会话带标记的 `.omo/senpi-task`，不读取其他仓库的 store |
-| `OMO_HERDR_DAG_STUDIO_RUNTIME` | 探测到的 Bun 1.4+ / Node 24+ | viewer 运行时；兼容旧变量 `OMO_HERDR_DAG_STUDIO_NODE` |
-| `OMO_HERDR_DAG_STUDIO_RETENTION_DAYS` | `14` | 过期快照清理；`0` 关闭 |
-| `OMO_HERDR_DAG_STUDIO_STALE_MS` | `60000` | 快照年龄超过该毫秒数即标记 `▲ STALE`；无效或非正值使用默认值 |
-| `NERO_HERDR_DAG_CONFIG_DIR` | `~/.config/nero-herdr-dag` | 覆盖界面配置目录（语言保存在 `config.json`） |
+| `OMO_HERDR_DAG_STUDIO_STATE_DIR` | `<agent-dir>/herdr-dag-studio`（默认 `~/.omo/agent/herdr-dag-studio`） | 快照、pane 记录和视图偏好目录。空值会原样保留 |
+| `OMO_HERDR_DAG_STUDIO_TASK_STATE_DIRS` | 未设置 | 以平台路径分隔符分隔的任务存储根目录（POSIX 为 `:`，Windows 为 `;`）。设置后覆盖 `..._TASK_STATE_DIR` 和自动发现。每项会去除首尾空白、展开 `~`、去掉末尾分隔符 |
+| `OMO_HERDR_DAG_STUDIO_TASK_STATE_DIR` | 未设置 | 单个显式任务存储根目录，仅在 `..._TASK_STATE_DIRS` 为空时使用。两者都未设置时，controller 会发现当前项目带标记的 `.omo/senpi-task`、会话存储，以及宿主项目存储 `~/.omo/agent/projects/<project-key>/senpi-task` |
+| `OMO_HERDR_DAG_STUDIO_RUNTIME` | 探测 Bun 1.4+ 或 Node 24+ | 显式 viewer 运行时。`OMO_HERDR_DAG_STUDIO_NODE` 是兼容别名；`RUNTIME` 优先 |
+| `OMO_HERDR_DAG_STUDIO_NODE` | 未设置 | `..._RUNTIME` 的兼容别名 |
+| `OMO_HERDR_DAG_STUDIO_OMO_SETTINGS` | `<agent-dir>/settings.json` | 读取初始主题的 OmO 设置文件；优先于 `NERO_` 别名 |
+| `NERO_HERDR_DAG_OMO_SETTINGS` | 未设置 | `..._OMO_SETTINGS` 的兼容别名 |
+| `NERO_HERDR_DAG_CONFIG_DIR` | `~/.config/nero-herdr-dag` | 界面配置目录。`config.json` 保存语言和主题 |
+| `OMO_HERDR_DAG_STUDIO_STALE_MS` | `60000` | 连接快照超过该毫秒数标记 `▲ STALE`。空值、非数字或非正值使用默认值 |
+| `OMO_HERDR_DAG_STUDIO_RETENTION_DAYS` | `14` | 快照保留天数。`0`、负数或无效值关闭清理 |
+| `OMO_CODING_AGENT_DIR` | `~/.omo/agent` | OmO agent 目录。优先于 `SENPI_` 别名；也是默认状态和任务存储路径的基准 |
+| `SENPI_CODING_AGENT_DIR` | `~/.omo/agent` | `OMO_CODING_AGENT_DIR` 的兼容别名 |
+| `HERDR_ENV` | 未设置 | 必须正好为 `1`，扩展才会激活 |
+| `HERDR_PANE_ID` | 未设置 | 源 Herdr pane id。激活和 pane key 都需要 |
+| `HERDR_SOCKET_PATH` | 未设置 | Herdr socket 路径。必须存在才能激活 |
+| `HERDR_BIN_PATH` | 未设置 | 显式 `herdr` 可执行文件。未设置或不可执行时搜索 `PATH` |
+| `PATH` | 进程 `PATH` | 用于搜索 `herdr` 和 pager 可执行文件 |
+| `PAGER` | 先用 `less -R`，再用 `more` | `o` 打开诊断记录时使用的 pager。只接受一个可执行文件加只读白名单内的参数（less、more、most、pg、lv、bat、batcat、cat） |
 
 连接状态的快照超过 `OMO_HERDR_DAG_STUDIO_STALE_MS` 后，header 和来源区块会显示
 `▲ STALE`，已用时间冻结在采集时刻而不再增长；窄于 48 列时 header 保留紧凑年龄
@@ -191,6 +214,9 @@ Herdr 的 ratio 是原 pane 的占比，所以原 pane 保留三分之二，嵌�
 扫描时间和错误；重试次数会标明来源（`derived from turns`、`recorded from failed turns`
 或 `not recorded`）；token 速率区分为 `(instant)`、`(average (lifetime))`、`(constant)`、
 `(tick-sampled)` 和 `(history)`。
+
+viewer 也会遵守 `NO_COLOR`，并根据 `TERM`、`COLORTERM`、`COLORFGBG`、`WT_SESSION`
+判断颜色能力。这些是终端变量，不属于 studio 设置；`--no-color` 可强制纯文本输出。
 
 语言也可以按 `s` 修改，或点击 footer 最右侧的 `⚙ 设置`。workflow 提供的标签、任务描述和日志
 保持原样，只翻译界面固定文案。

@@ -122,25 +122,34 @@ bun src/viewer.mjs --demo --scenario late
 | Key | Action |
 | --- | --- |
 | `↑/↓`, `j/k` | Scroll the focused region one line |
-| `Tab` / `Shift-Tab` | Select next/previous cell |
-| Click | Select a node, task, or run |
-| `m` | Release mouse tracking for Herdr drag-select/copy; press again to restore viewer mouse controls |
-| `x` / `X` | Hide finished runs and tasks (completed or failed) from this view / restore them |
-| Mouse wheel | Scroll the focused region: the graph by its viewport height minus 4 rows, other regions by half a viewport |
-| `←/→` | Switch run |
-| `Space` / `Enter` | Fold/unfold the selected graph node |
-| `d` | Toggle verbose details on wide or expanded layouts; duty stays compact |
-| `t` | Focus task details; opens the switcher on narrow layouts |
-| `1` / `2` / `3` | Focus RUNS / CELLS / the current node panel on narrow layouts |
-| `e` / `Esc` | Focus details / return to the graph |
-| `f` | Toggle auto-follow |
-| `s` | Open settings (theme, animation, language) |
-| `S` | Toggle sidebar on wide layouts |
+| `PageUp` / `PageDown` (`PgUp` / `PgDn`) | Scroll the focused region one page: the graph moves by its viewport height minus 4 rows, other regions by half a viewport. In Help, one page |
 | `g` / `G`, `Home` / `End` | Jump the focused region to top/bottom |
-| `PageUp/PageDown` | Scroll the focused region by the same per-region step as the mouse wheel |
-| `r` | Restart the demo cycle |
-| `?` / `Esc` | Open/close detailed help; the footer `? Help` is clickable. Help scrolls with `↑/↓`, `PgUp/PageDown`, `g/G`, and `Home/End` |
-| `q`, `Ctrl+C`, `Ctrl+D` | Quit |
+| `Tab` / `Shift-Tab` | Select the next/previous graph node or task |
+| Click | Select a node, task, or run |
+| `m` | Toggle mouse capture. Released, Herdr handles drag-select and copy; press again to restore viewer mouse controls |
+| Mouse wheel | Scroll the region under the pointer (graph: viewport height minus 4 rows; other regions: half a viewport). While the finder is open it moves the selection, and while Help is open it pages Help |
+| `←` / `→` | Switch run |
+| `Space` / `Enter` | Fold or unfold the selected graph node. While details are focused, `Enter` collapses or expands the current section; in the tour, Space or Enter advances the step |
+| `d` | Toggle verbose details on wide or expanded layouts; duty layouts show a toast instead |
+| `e` / `Esc` | `e` expands details. `Esc` clears a graph filter/focus, or collapses the expanded details when neither is active |
+| `v` or `/` | Open the finder for runs, nodes, and tasks. Type to filter, `↑/↓` or `j/k` to move, `PageUp/PageDown` and `Home/End` to jump, `Backspace` to delete, `Ctrl-U` to clear, Enter to select, and `Esc` or `v` to close |
+| `:` | Open the command palette. Type to filter, Enter runs the command, `Esc` or `:` closes it. The palette includes Start tour and Open run summary |
+| `f` | Toggle auto-follow |
+| `s` | Open settings (theme, animation, language). `↑/↓` or Tab moves, Enter changes, `Esc` closes |
+| `S` | Toggle the sidebar on wide layouts (112 columns or more); narrower terminals show a toast |
+| `t` | Toggle task scope between run and all on the investigation layout with the sidebar visible; other layouts open the finder |
+| `T` | Collapse or expand completed tasks in the task list |
+| `1-5` | With a run summary open, filter the graph to all, failed, blocked, running, or critical path |
+| `1` / `2` / `3` | In the narrow duty layout, focus RUNS, CELLS, or the current node panel |
+| `z` | Focus the selected node and its direct neighbors; press again to clear the focus |
+| `n` / `N` | Select the next/previous node in graph order while the graph or cells pane has focus |
+| `[` / `]` | Previous/next details section while details are focused. `Enter` collapses or expands the current section |
+| `x` / `X` / `u` | `x` hides finished runs and root tasks outside the five-minute recent window from this view; `X` restores every hidden item; `u` undoes the last hide |
+| `c` / `p` / `o` | Copy the diagnosis bundle, copy artifact paths, or open the record in the pager. The current selection needs a diagnosis or record |
+| `Backspace` | Return from details to the run summary; in the finder or palette it deletes one character |
+| `r` | Restart the demo cycle (demo mode only) |
+| `?` / `Esc` | Open or close Help. Help takes the keyboard and scrolls with `↑/↓`, `PageUp/PageDown`, `g/G`, and `Home/End` |
+| `q`, `Ctrl+C`, `Ctrl+D` | Quit. Close Help first |
 
 The footer keeps the legend (`●run ✓done ×fail ◌wait`), followed by the
 clickable `? Help`, `m select`, and `x clear` hints, with `⚙ Settings` at the far
@@ -148,10 +157,10 @@ right. At 54-69 columns the legend collapses to `● ✓ × ◌` and both action
 names stay visible; below 54 columns the footer keeps only the keys. While Help
 is open it owns the keyboard: background actions are
 blocked and `?`, `Esc`, or a left click closes it. Settings are grouped in one
-popup: Theme, Animation, and Language. Theme and Language persist; Animation is
-labeled `this session` until it is persisted. Hiding finished items (completed
-or failed) is view-only; `X` restores them and no snapshot or record file is
-deleted. In Herdr, `m` is the path to native text
+popup: Theme, Animation, and Language. Theme and Language persist in
+`config.json`; Animation is session-only and the popup labels it `this session`.
+Hiding finished items is view-only; `X` restores every hidden item, `u` undoes
+the last hide, and no snapshot or record file is deleted. In Herdr, `m` is the path to native text
 selection; with the default `copy_on_select = true`, releasing the drag copies
 the selection.
 
@@ -243,12 +252,24 @@ viewer stays closed until `/dag-studio` is run.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `OMO_HERDR_DAG_STUDIO_STATE_DIR` | `~/.omo/agent/herdr-dag-studio` | Snapshot, pane record, and view-preference directory |
-| `OMO_HERDR_DAG_STUDIO_TASK_STATE_DIR` | `~/.omo/agent/projects/<project-key>/senpi-task` | OmO agent task store root (`tasks/`, `dag/runs/`); the current session's marked `.omo/senpi-task` store is read, never another repository's store |
-| `OMO_HERDR_DAG_STUDIO_RUNTIME` | probed Bun 1.4+ / Node 24+ | Explicit viewer runtime; legacy `OMO_HERDR_DAG_STUDIO_NODE` is also accepted |
-| `OMO_HERDR_DAG_STUDIO_RETENTION_DAYS` | `14` | Snapshot retention; `0` or invalid disables pruning |
-| `OMO_HERDR_DAG_STUDIO_STALE_MS` | `60000` | Capture age in ms before a connected snapshot is marked `▲ STALE`; invalid or non-positive values use the default |
-| `NERO_HERDR_DAG_CONFIG_DIR` | `~/.config/nero-herdr-dag` | Override the UI config directory (the language is stored in `config.json`) |
+| `OMO_HERDR_DAG_STUDIO_STATE_DIR` | `<agent-dir>/herdr-dag-studio` (`~/.omo/agent/herdr-dag-studio` by default) | Snapshot, pane-record, and view-preference directory. An empty value is kept as written |
+| `OMO_HERDR_DAG_STUDIO_TASK_STATE_DIRS` | unset | Task store roots separated by the platform path delimiter (`:` on POSIX, `;` on Windows). When set, it overrides `..._TASK_STATE_DIR` and automatic discovery. Each item is trimmed, `~` is expanded, and a trailing separator is removed |
+| `OMO_HERDR_DAG_STUDIO_TASK_STATE_DIR` | unset | One explicit task store root, used only when `..._TASK_STATE_DIRS` is empty. With neither set, the controller discovers the current project's marked `.omo/senpi-task`, the session store, and the host project store `~/.omo/agent/projects/<project-key>/senpi-task` |
+| `OMO_HERDR_DAG_STUDIO_RUNTIME` | probed Bun 1.4+ or Node 24+ | Explicit viewer runtime. `OMO_HERDR_DAG_STUDIO_NODE` is a compatibility alias; `RUNTIME` wins |
+| `OMO_HERDR_DAG_STUDIO_NODE` | unset | Compatibility alias for `..._RUNTIME` |
+| `OMO_HERDR_DAG_STUDIO_OMO_SETTINGS` | `<agent-dir>/settings.json` | OmO settings file read for the initial theme. It wins over the `NERO_` alias |
+| `NERO_HERDR_DAG_OMO_SETTINGS` | unset | Compatibility alias for `..._OMO_SETTINGS` |
+| `NERO_HERDR_DAG_CONFIG_DIR` | `~/.config/nero-herdr-dag` | UI config directory. `config.json` stores language and theme |
+| `OMO_HERDR_DAG_STUDIO_STALE_MS` | `60000` | Capture age in ms before a connected snapshot is marked `▲ STALE`. Empty, non-numeric, or non-positive values use the default |
+| `OMO_HERDR_DAG_STUDIO_RETENTION_DAYS` | `14` | Snapshot retention. `0`, negative, or invalid values disable pruning |
+| `OMO_CODING_AGENT_DIR` | `~/.omo/agent` | OmO agent directory. It wins over the `SENPI_` alias and anchors the default state and task store paths |
+| `SENPI_CODING_AGENT_DIR` | `~/.omo/agent` | Compatibility alias for `OMO_CODING_AGENT_DIR` |
+| `HERDR_ENV` | unset | Must be exactly `1` for the extension to activate |
+| `HERDR_PANE_ID` | unset | Source Herdr pane id. Required for activation and the pane key |
+| `HERDR_SOCKET_PATH` | unset | Herdr socket path. It must exist for activation |
+| `HERDR_BIN_PATH` | unset | Explicit `herdr` executable. When unset or not executable, the viewer searches `PATH` |
+| `PATH` | process `PATH` | Searched for `herdr` and for the pager executable |
+| `PAGER` | `less -R`, then `more` | Pager used by `o` to open a diagnosis record. Only one executable plus flags from a read-only allowlist (less, more, most, pg, lv, bat, batcat, cat) is accepted |
 
 A connected capture older than `OMO_HERDR_DAG_STUDIO_STALE_MS` renders
 `▲ STALE` in the header and the source section, and its elapsed clock stops at
@@ -258,6 +279,10 @@ as a compact unit (`8h`). An unreadable source store stays visible under
 their provenance (`derived from turns`, `recorded from failed turns`, or
 `not recorded`); token rates distinguish `(instant)`, `(average (lifetime))`,
 `(constant)`, `(tick-sampled)`, and `(history)`.
+
+The viewer also respects `NO_COLOR` and detects color support from `TERM`,
+`COLORTERM`, `COLORFGBG`, and `WT_SESSION`. These are terminal variables, not
+studio settings; `--no-color` forces plain output.
 
 The language can also be changed with `s`, or from the `⚙ SETTINGS` button at the
 far right of the footer.
