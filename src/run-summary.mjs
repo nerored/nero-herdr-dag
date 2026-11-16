@@ -21,31 +21,70 @@ function nodeWindow(node, clock) {
   return undefined;
 }
 
+// The ready frontier used to be a sorted array re-sorted after every release.
+// A binary min-heap keeps the same lexicographic pop order (the old default
+// sort comparator) at O(log n) per push instead of O(n log n) per edge.
+function heapPush(heap, value) {
+  heap.push(value);
+  let index = heap.length - 1;
+  while (index > 0) {
+    const parent = (index - 1) >> 1;
+    if (heap[parent] <= heap[index]) break;
+    const swap = heap[parent];
+    heap[parent] = heap[index];
+    heap[index] = swap;
+    index = parent;
+  }
+}
+
+function heapPop(heap) {
+  const top = heap[0];
+  const last = heap.pop();
+  if (!heap.length) return top;
+  heap[0] = last;
+  let index = 0;
+  for (;;) {
+    const left = index * 2 + 1;
+    if (left >= heap.length) break;
+    const right = left + 1;
+    const child = right < heap.length && heap[right] < heap[left] ? right : left;
+    if (heap[index] <= heap[child]) break;
+    const swap = heap[index];
+    heap[index] = heap[child];
+    heap[child] = swap;
+    index = child;
+  }
+  return top;
+}
+
 function maxOverlap(intervals) {
-  const events = [];
-  for (const [start, end] of intervals) events.push([start, 1], [end, -1]);
-  // End events sort before start events at the same millisecond: a task that
-  // just finished is not concurrent with one that just started.
-  events.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  let current = 0;
+  // Intervals arrive sorted by start, so one pass over them is enough. A
+  // min-heap of active end times closes finished windows: an end at the same
+  // millisecond as a start closes first, so touching windows are not
+  // concurrent. This avoids rebuilding and re-sorting a 2n event list.
+  const ends = [];
   let max = 0;
-  for (const [, delta] of events) {
-    current += delta;
-    if (current > max) max = current;
+  for (const [start, end] of intervals) {
+    while (ends.length && ends[0] <= start) heapPop(ends);
+    heapPush(ends, end);
+    if (ends.length > max) max = ends.length;
   }
   return max;
 }
 
-function criticalPath(run, nodes, clock) {
+function criticalPath(run, nodes, windowsById) {
   const byId = new Map(nodes.map(node => [node.id, node]));
   const duration = new Map();
   const timed = new Map();
+  let anyTimed = false;
   for (const node of nodes) {
-    const window = nodeWindow(node, clock);
+    const window = windowsById.get(node.id);
+    const hasWindow = Boolean(window);
     duration.set(node.id, window ? window.end - window.start : 0);
-    timed.set(node.id, Boolean(window));
+    timed.set(node.id, hasWindow);
+    if (hasWindow) anyTimed = true;
   }
-  if (![...timed.values()].some(Boolean)) return undefined;
+  if (!anyTimed) return undefined;
 
   const indegree = new Map(nodes.map(node => [node.id, 0]));
   const outgoing = new Map(nodes.map(node => [node.id, []]));
@@ -55,13 +94,16 @@ function criticalPath(run, nodes, clock) {
     indegree.set(edge.to, indegree.get(edge.to) + 1);
   }
 
-  const queue = nodes.filter(node => indegree.get(node.id) === 0).map(node => node.id).sort();
+  const queue = [];
+  for (const node of nodes) {
+    if (indegree.get(node.id) === 0) heapPush(queue, node.id);
+  }
   const distance = new Map(nodes.map(node => [node.id, duration.get(node.id) ?? 0]));
   const steps = new Map(nodes.map(node => [node.id, 1]));
   const previous = new Map();
   const order = [];
   while (queue.length) {
-    const id = queue.shift();
+    const id = heapPop(queue);
     order.push(id);
     for (const next of outgoing.get(id)) {
       const candidate = distance.get(id) + (duration.get(next) ?? 0);
@@ -73,10 +115,7 @@ function criticalPath(run, nodes, clock) {
         previous.set(next, id);
       }
       indegree.set(next, indegree.get(next) - 1);
-      if (indegree.get(next) === 0) {
-        queue.push(next);
-        queue.sort();
-      }
+      if (indegree.get(next) === 0) heapPush(queue, next);
     }
   }
   // A cycle has no honest critical path; the graph renderer reports the cycle.
@@ -95,9 +134,10 @@ function criticalPath(run, nodes, clock) {
 
   const path = [];
   for (let id = best?.id; id !== undefined; id = previous.get(id)) {
-    path.unshift(id);
+    path.push(id);
     if (path.length > nodes.length) break;
   }
+  path.reverse();
   return {
     path: {
       nodeIds: path,
@@ -135,6 +175,7 @@ function computeRunSummary(run, clock) {
   let tools = 0;
   let toolsSeen = 0;
   const windows = [];
+  const windowsById = new Map();
 
   for (const node of nodes) {
     // Token in/out are only a complete pair when both were recorded; a node
@@ -180,7 +221,10 @@ function computeRunSummary(run, clock) {
       toolsSeen++;
     }
 
+    // One window per node feeds totals, overlap and the critical path; the
+    // clock-sensitive computation never runs twice for the same node.
     const window = nodeWindow(node, clock);
+    windowsById.set(node.id, window);
     if (window) windows.push(window);
   }
 
@@ -242,7 +286,7 @@ function computeRunSummary(run, clock) {
     }
   }
 
-  const critical = criticalPath(run, nodes, clock);
+  const critical = criticalPath(run, nodes, windowsById);
   if (critical?.path) result.critical = critical.path;
   if (critical?.cycle) result.criticalCycle = true;
   return result;

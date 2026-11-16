@@ -144,6 +144,22 @@ test('a running node ends at the supplied clock; saved runs pass the capture tim
   assert.equal(captured.busyMs, 1_500);
 });
 
+test('node windows are computed once and shared with the critical path', () => {
+  let starts = 0;
+  let ends = 0;
+  const timed = {
+    id: 'a',
+    label: 'a',
+    state: 'completed',
+    get startedAt() { starts++; return at(T0); },
+    get completedAt() { ends++; return at(T0 + 1_000); },
+  };
+  const summary = runSummary(run([timed]));
+  assert.equal(starts, 1, 'the start time is read once, not again inside the critical path');
+  assert.equal(ends, 1, 'the end time is read once, not again inside the critical path');
+  assert.equal(summary.critical.ms, 1_000);
+});
+
 test('a terminal node without an end time contributes no duration', () => {
   const summary = runSummary(run([
     node('a', { state: 'failed', startedAt: at(T0 + 1_000) }),
@@ -162,6 +178,20 @@ test('parallel overlap ignores intervals that merely touch', () => {
   assert.equal(summary.busyMs, 2_000);
 });
 
+test('parallel overlap counts nested and same-start intervals', () => {
+  const summary = runSummary(run([
+    node('a', { startedAt: at(T0), completedAt: at(T0 + 5_000) }),
+    node('b', { startedAt: at(T0 + 100), completedAt: at(T0 + 4_000) }),
+    node('c', { startedAt: at(T0 + 200), completedAt: at(T0 + 3_000) }),
+    node('d', { startedAt: at(T0 + 2_500), completedAt: at(T0 + 2_600) }),
+    node('e', { startedAt: at(T0 + 5_000), completedAt: at(T0 + 6_000) }),
+  ]));
+  // a, b, c and d are live together at 2.5s; e starts exactly when a ends, so
+  // the touching boundary must not add a sixth concurrent window.
+  assert.equal(summary.parallel.max, 4);
+  assert.equal(summary.busyMs, 6_000);
+});
+
 test('the critical path follows the DAG and prefers fewer nodes on a tie', () => {
   const chain = runSummary(run([
     node('a', { startedAt: at(T0), completedAt: at(T0 + 1_000) }),
@@ -171,6 +201,38 @@ test('the critical path follows the DAG and prefers fewer nodes on a tie', () =>
   assert.equal(chain.critical.ms, 2_000);
   // The isolated node reaches the same total with one node instead of two.
   assert.deepEqual(chain.critical.nodeIds, ['c']);
+});
+
+test('equal distance and step ties pick the smallest node id', () => {
+  // The documented tie-break is (distance, steps, node id). All three nodes
+  // reach 1s in one step, so the id decides regardless of array order.
+  const summary = runSummary(run([
+    node('z', { startedAt: at(T0), completedAt: at(T0 + 1_000) }),
+    node('m', { startedAt: at(T0), completedAt: at(T0 + 1_000) }),
+    node('a', { startedAt: at(T0), completedAt: at(T0 + 1_000) }),
+  ]));
+  assert.deepEqual(summary.critical.nodeIds, ['a']);
+  assert.equal(summary.critical.ms, 1_000);
+});
+
+test('a 1000-node fan-out keeps the documented critical path and overlap', () => {
+  const nodes = [node('root', { startedAt: at(T0), completedAt: at(T0 + 1_000) })];
+  for (let index = 0; index < 999; index++) {
+    const id = `f${String(index).padStart(4, '0')}`;
+    nodes.push(node(id, {
+      startedAt: at(T0 + 1_000),
+      completedAt: at(T0 + 1_000 + ((index * 37) % 400)),
+    }));
+  }
+  const summary = runSummary(run(nodes, {
+    edges: nodes.slice(1).map(item => ({ from: 'root', to: item.id })),
+  }));
+  // 37 is coprime with 400, so index 227 is the unique longest leaf (399ms).
+  assert.deepEqual(summary.critical.nodeIds, ['root', 'f0227']);
+  assert.equal(summary.critical.ms, 1_399);
+  // Three zero-duration leaves never overlap; the other 996 start together
+  // while root's window has already closed at the same millisecond.
+  assert.equal(summary.parallel.max, 996);
 });
 
 test('a cyclic run reports no critical path instead of inventing one', () => {
