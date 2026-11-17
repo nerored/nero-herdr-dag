@@ -90,7 +90,9 @@ The run is completed from 138–160s, then the cycle restarts. Three static runs
 (`Goldbach proof attempt`, `docs polish`, `release audit`) add a failed proof
 campaign plus completed and failed/error examples. Standalone tasks show
 running, completed, pending, paused, and failed statuses. Subtasks are attached
-to API, test, docs, and Goldbach tasks.
+to API, test, docs, and Goldbach tasks. The viewer groups those standalone
+tasks into an `UNATTACHED TASKS` run; `demo/snapshot.json` itself still holds
+the four producer runs.
 
 ### Goldbach proof attempt
 
@@ -490,6 +492,34 @@ from the records behind each value.
 Only an explicit field whitelist is persisted for tasks. Prompts, full output,
 full final responses, and transcripts are never copied into snapshots. The
 detail panel includes only bounded, sanitized reasoning and reply excerpts.
+
+### Virtual orphan run
+
+Standalone root tasks that no run node links to stay in the TASKS list. The
+viewer also groups them into one view-only run named `orphan:tasks` (`#2`,
+`#3`, and so on when a real run already uses that id). The group is appended
+after every real run, so real run indexes and the default selection don't move.
+
+That run belongs to the visible session only. The viewer builds it after hidden
+items are filtered: `viewer.snapshot` and the painted frame include it, while
+`viewer.fullSnapshot`, the state file, and the v1/v2/v3 snapshot contract stay
+raw. `--once` paints the visible snapshot, so it shows the group too. No CLI
+flag, saved field, or public viewer key is added.
+
+Selecting the group paints a flat graph: one display node per member, zero
+edges, and no synthetic root. Membership and run stats use every member even
+when the graph paints the first 4,096 display nodes; the rest are reported as
+omitted. The run and its switcher row use the localized `UNATTACHED TASKS`
+label (`未归属任务` in Chinese), and the wide TASKS scope is labelled
+`unattached` and lists the full membership, not just the painted nodes.
+
+Graph focus on a display node inspects that task, but the group never owns it.
+TASKS selection stays unlinked (`no node`) after focus moves to RUNS or CELLS,
+folds are disabled for the group, and no fold key for `orphan:tasks` is written
+to the view sidecar. Hiding finished items never stores the virtual run id; the
+group is rebuilt from the member tasks that remain visible. With no visible
+orphan tasks the session snapshot is the raw snapshot and the frame is
+unchanged.
 
 ## Performance
 

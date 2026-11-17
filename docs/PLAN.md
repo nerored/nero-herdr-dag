@@ -229,6 +229,31 @@ viewer 同时接受参考插件的 v1 和 v2：缺省字段由 `model.normalizeS
 
 viewer 解析 `generatedAt` 的顺序是：`generatedAt`、`updatedAt`、`generated_at`、`provenance.capturedAt`，最后只在已连接的 live 快照上取当前时间。viewer 会根据记录推导每个字段的来源（`recorded`、`derived`、`simulated`、`unavailable` 或 `unknown`）。
 
+### 视图专用孤立任务 run
+
+`src/orphan-run.mjs` 在会话可见快照边界生成一个只用于显示的 run，id 为
+`orphan:tasks`（与真实 run 冲突时追加 `#2`、`#3`），并排在所有真实 run 之后。
+它收集没有被任何可见 run 节点关联的根任务；隐藏项先过滤，真实 run 的索引和
+默认选择不变。
+
+边界固定为两层：`viewer.snapshot` 和绘制帧包含该 run，`viewer.fullSnapshot`、
+状态文件、v1/v2/v3 快照、CLI 参数与公开 viewer 键保持原样。`--once` 与 `--pane`
+使用同一份可见快照，因此输出包含该分组。没有可见孤立任务时，可见快照与原始
+快照是同一个对象，帧与直接渲染一致。
+
+该 run 的图谱是扁平且零边的：每个成员一个显示节点，节点 id 等于任务 id，状态
+取自任务状态，证据从任务继承，绝不生成合成根节点或依赖边。显示节点上限为
+4,096；完整成员、`memberTaskIds`、统计和 TASKS 范围不受上限影响，溢出数量通过
+`omittedNodes` 单独报告。run 名称、徽标、切换器行和 TASKS 范围都使用本地化文案
+（英文 `UNATTACHED TASKS` / `unattached`，中文 `未归属任务` / `未归属`）。
+
+选择该 run 会显示 run 概览和扁平图；点击显示节点只把该节点作为查看对象，不会
+让任务变成已关联。TASKS 选择保持未关联（`no node`），即使焦点移到 RUNS 或
+CELLS。虚拟节点不可折叠，恢复视图时也会丢弃该 run id 的旧折叠键；清除和隐藏
+只作用于成员任务，不写入虚拟 run id。
+
+演示数据的原始快照仍为 4 个 run；运行中的 demo 在可见快照末尾增加未归属分组。
+
 ## 7. 模块地图
 
 ```text

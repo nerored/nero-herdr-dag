@@ -64,7 +64,8 @@ bun run make-demo
 - `test-coverage + security-review + write-docs → verify-evidence → release`
 - 另外三个静态 run：`Goldbach proof attempt`（失败）、`docs polish`（全部完成）、
   `release audit`（失败 + 取消）
-- 独立任务：运行中、已完成、等待中、暂停中、失败
+- 独立任务：运行中、已完成、等待中、暂停中、失败；viewer 会把它们归入
+  `未归属任务` run，而 `demo/snapshot.json` 本身仍是 4 个生产者 run
 - API / 测试 / 文档 / Goldbach 任务带子任务
 
 默认从周期第 32 秒开始，因此一启动就能看到多个并行节点。
@@ -352,6 +353,30 @@ viewer 只保留接线：它组装 session、input、source 和 runtime 适配�
 
 快照只保存任务字段白名单；prompt、完整输出、完整 final response、transcript
 不会写入快照；详情面板只显示有界、清理后的思考/回复摘录。
+
+### 视图专用孤立任务 run
+
+没有被任何 run 节点关联的根任务仍会出现在 TASKS 列表里，viewer 还会把它们
+归入一个只属于当前视图的 run，id 为 `orphan:tasks`（真实 run 已占用该 id 时
+依次使用 `#2`、`#3`）。该 run 追加在所有真实 run 之后，真实 run 的索引和
+默认选中项不会移动。
+
+这个 run 只存在于可见会话。viewer 先过滤隐藏项，再生成它：`viewer.snapshot`
+和实际绘制的帧包含该 run，`viewer.fullSnapshot`、状态文件以及 v1/v2/v3
+快照协议保持原始内容。`--once` 绘制的是可见快照，因此也会出现该分组。
+没有新增 CLI 参数、持久化字段或公开 viewer 键。
+
+选中该分组时，图谱是扁平的：每个成员一个显示节点，零条边，也没有合成的根
+节点。成员和 run 统计始终使用全部成员，即使图谱只绘制前 4,096 个显示节点；
+其余节点会标为省略。该 run 及其切换器行使用本地化标签 `未归属任务`（英文为
+`UNATTACHED TASKS`），宽屏 TASKS 范围标为 `未归属`，并列出全部成员，而不只是
+已绘制的节点。
+
+图谱节点获得焦点时显示对应任务的详情，但该分组从不拥有任务。焦点移到 RUNS
+或 CELLS 后，TASKS 选择仍保持未关联（`no node`）；该分组禁止折叠，也不会把
+`orphan:tasks` 的折叠键写进视图 sidecar。隐藏已结束项时不会写入虚拟 run id，
+分组会根据仍可见的成员任务重建。没有可见孤立任务时，会话快照就是原始快照，
+帧保持不变。
 
 ## 性能
 
