@@ -1,5 +1,6 @@
 import { readJson, writeJson } from './storage.mjs';
 import { isVirtualRun, navTasks, nodeForTask, runStats, TERMINAL } from './model.mjs';
+import { t } from './i18n.mjs';
 
 // Keep terminal work visible for five minutes after it finishes. The x clear
 // action hides only finished subjects older than this window, and never hides
@@ -239,7 +240,7 @@ export function preserveScrolls(offsets = {}, { visible = {}, limits = {} } = {}
 // row order stable while a live snapshot changes; values refresh by key and a
 // removed subject disappears. Keys not seen when the switcher opened append at
 // the end of their group instead of silently becoming unreachable.
-export function switcherItems(snapshot, frozenKeys, { preferRunId, tasks } = {}) {
+export function switcherItems(snapshot, frozenKeys, { preferRunId, tasks, language = snapshot?.language } = {}) {
   const runs = snapshot?.runs ?? [];
   const taskList = tasks ?? navTasks(snapshot);
   const fresh = [];
@@ -249,12 +250,12 @@ export function switcherItems(snapshot, frozenKeys, { preferRunId, tasks } = {})
       key: `run:${run.id}`,
       kind: 'run',
       id: run.id,
-      label: run.todoTitle || run.name,
+      label: isVirtualRun(run) ? t(language, 'virtualRunLabel') : run.todoTitle || run.name,
       status: run.status,
       detail: stats.percentKnown
         ? `${stats.done}/${stats.total} · ${stats.percent}%`
         : `${stats.done}/${stats.total} · ${stats.counts.running ?? 0} running`,
-      search: ['run', run.id, run.name, run.todoTitle, run.status,
+      search: ['run', run.id, isVirtualRun(run) ? t(language, 'virtualRunLabel') : run.name, run.todoTitle, run.status,
         ...(run.nodes ?? []).flatMap(node => [node.id, node.label, node.taskId ?? '']),
       ].filter(Boolean).join(' '),
     });

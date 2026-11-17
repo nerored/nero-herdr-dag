@@ -634,7 +634,10 @@ export function nodeMap(run) {
 }
 
 function computeRunStats(run) {
-  const total = run.nodes.length;
+  const nodes = isVirtualRun(run) && Array.isArray(run.virtual?.members)
+    ? run.virtual.members
+    : run.nodes;
+  const total = nodes.length;
   const counts = {
     running: 0, completed: 0, failed: 0, blocked: 0, paused: 0, pending: 0,
     scheduled: 0, cancelled: 0, skipped: 0, error: 0, interrupted: 0, lost: 0,
@@ -644,11 +647,12 @@ function computeRunStats(run) {
   let finished = 0;
   let failed = 0;
   let blocked = 0;
-  for (const node of run.nodes) {
-    counts[node.state] = (counts[node.state] ?? 0) + 1;
-    if (TERMINAL.has(node.state)) finished += 1;
-    if (isFailedState(node.state)) failed += 1;
-    if (isBlockedState(node.state)) blocked += 1;
+  for (const node of nodes) {
+    const state = node.state ?? node.status;
+    counts[state] = (counts[state] ?? 0) + 1;
+    if (TERMINAL.has(state)) finished += 1;
+    if (isFailedState(state)) failed += 1;
+    if (isBlockedState(state)) blocked += 1;
     if (Number.isFinite(node.percent)) sum += node.percent;
     else percentKnown = false;
   }

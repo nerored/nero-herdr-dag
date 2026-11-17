@@ -17,7 +17,9 @@ function nodeWindow(node, clock) {
   if (start === undefined) return undefined;
   const done = time(node?.completedAt);
   if (done !== undefined) return { start, end: Math.max(start, done) };
-  if (node?.state === 'running') return { start, end: Math.max(start, clock) };
+  if (node?.state === 'running' || node?.status === 'running') {
+    return { start, end: Math.max(start, clock) };
+  }
   return undefined;
 }
 
@@ -149,6 +151,14 @@ function criticalPath(run, nodes, windowsById) {
 }
 
 export function runSummary(run, { now = Date.now() } = {}) {
+  if (run?.virtual?.kind === 'orphans' && run.edges?.length === 0 && run.virtual.stats) {
+    const members = run.virtual.members ?? [];
+    const summary = computeRunSummary({ ...run, nodes: members, edges: [] }, now);
+    delete summary.critical;
+    delete summary.criticalCycle;
+    delete summary.parallel;
+    return summary;
+  }
   const clock = Number.isFinite(now) ? now : Date.now();
   return memoRunSummary(run, clock, () => computeRunSummary(run, clock));
 }

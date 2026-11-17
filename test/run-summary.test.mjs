@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import { runSummary } from '../src/run-summary.mjs';
 import { summaryRows } from '../src/render-summary.mjs';
 import { paletteAt } from '../src/theme.mjs';
+import { buildOrphanRun } from '../src/orphan-run.mjs';
+import { runStats } from '../src/model.mjs';
 
 const T0 = Date.parse('2026-11-11T12:00:00.000Z');
 const at = ms => new Date(ms).toISOString();
@@ -21,6 +23,46 @@ const run = (nodes, overrides = {}) => ({
   nodes,
   edges: [],
   ...overrides,
+});
+
+test('virtual stats use all members and edge-free summaries omit graph metrics', () => {
+  const tasks = Array.from({ length: 5000 }, (_, index) => ({
+    id: `task-${index}`,
+    description: `task-${index}`,
+    status: index < 1200 ? 'completed' : 'pending',
+    percent: index < 1200 ? 100 : undefined,
+  }));
+  const virtual = buildOrphanRun({ runs: [], tasks });
+  assert.equal(virtual.nodes.length, 4096);
+  assert.equal(runStats(virtual).total, 5000);
+  assert.equal(virtual.virtual.stats.total, 5000);
+  assert.equal(runSummary(virtual).nodes, 5000);
+  assert.equal(runSummary(virtual).critical, undefined);
+  assert.equal(runSummary(virtual).parallel, undefined);
+});
+
+test('virtual edge-free summaries retain efficiency and live time metrics', () => {
+  const virtual = buildOrphanRun({ runs: [], tasks: [
+    {
+      id: 'metric-task', description: 'metric-task', status: 'running', percent: 50,
+      tokensIn: 10, tokensOut: 5, turns: 2, toolCalls: 3, costUsd: 0.02,
+      costStatus: 'reported', startedAt: at(T0),
+    },
+    {
+      id: 'second-task', description: 'second-task', status: 'running', percent: 25,
+      startedAt: at(T0),
+    },
+  ] });
+  const summary = runSummary(virtual, { now: T0 + 2_000 });
+  assert.deepEqual(summary.tokens, { in: 10, out: 5, seen: 1, total: 2 });
+  assert.deepEqual(summary.turns, { value: 2, seen: 1, total: 2 });
+  assert.deepEqual(summary.tools, { value: 3, seen: 1, total: 2 });
+  assert.deepEqual(summary.cost, { usd: 0.02, seen: 1, total: 2, lowerBound: true });
+  assert.equal(summary.wallMs, 2_000);
+  assert.equal(summary.busyMs, 2_000);
+  assert.deepEqual(summary.timed, { seen: 2, total: 2 });
+  assert.equal(summary.critical, undefined);
+  assert.equal(summary.parallel, undefined);
 });
 
 test('an empty run has no fabricated metrics', () => {

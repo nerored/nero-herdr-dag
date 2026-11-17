@@ -460,6 +460,7 @@ export function createViewerSession({
     const items = switcherItems(snapshot, null, {
       preferRunId: run?.id,
       tasks: navTasks(snapshot),
+      language: ui.language,
     });
     const active = (preferredNodeKey
       ? items.find(item => item.key === preferredNodeKey)

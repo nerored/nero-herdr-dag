@@ -16,12 +16,27 @@ import {
   frameSnapshot, frameUi, loadFrameFixture, renderFixtureFrame, serializeFrame,
 } from './frame-fixtures.mjs';
 import { baseUi, themeFor } from './helpers.mjs';
+import { switcherItems, filterSwitcher } from '../src/view-state.mjs';
+import { displayRunName } from '../src/render-view.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const { palette, theme } = themeFor(0);
 
 const frameOptions = (width, height = FRAME_HEIGHTS[width]) => ({
   width, height, time: FIXED_TIME, now: FIXED_NOW, palette, theme,
+});
+
+test('virtual run label and switcher search are localized without changing real order', () => {
+  const real = { id: 'real', name: 'Real run', todoTitle: 'Real run', status: 'completed', nodes: [], edges: [] };
+  const virtual = { id: 'orphan:tasks', name: 'orphan:tasks', status: 'pending', nodes: [], edges: [], virtual: { kind: 'orphans', stats: { total: 1, done: 0, percentKnown: false, counts: {} } } };
+  const snapshot = { language: 'en', runs: [real, virtual], tasks: [] };
+  assert.equal(displayRunName(virtual, 'en'), 'UNATTACHED TASKS');
+  assert.equal(displayRunName(virtual, 'zh'), '未归属任务');
+  const items = switcherItems(snapshot, null, { language: 'zh' });
+  assert.deepEqual(items.filter(item => item.kind === 'run').map(item => item.id), ['real', 'orphan:tasks']);
+  const virtualItem = items.find(item => item.id === 'orphan:tasks');
+  assert.equal(virtualItem.label, '未归属任务');
+  assert.equal(filterSwitcher(items, '未归属任务')[0].id, 'orphan:tasks');
 });
 
 const selectionState = ui => ({

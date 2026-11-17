@@ -6,6 +6,7 @@ export const languages = [
 const en = {
   navigation: 'NAVIGATION',
   runs: 'RUNS',
+  virtualRunLabel: 'UNATTACHED TASKS',
   cells: 'CELLS',
   noCells: 'no cells',
   taskOverview: 'TASK OVERVIEW',
@@ -407,6 +408,7 @@ const en = {
 const zh = {
   navigation: '导航',
   runs: '运行',
+  virtualRunLabel: '未归属任务',
   cells: '节点',
   noCells: '暂无节点',
   taskOverview: '任务概览',

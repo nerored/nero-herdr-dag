@@ -170,6 +170,7 @@ export function switcherView(snapshot, ui) {
   const all = switcherItems(snapshot, ui?.switcher?.frozenKeys, {
     preferRunId: run?.id,
     tasks: navTasks(snapshot),
+    language: ui?.language,
   });
   const items = filterSwitcher(all, ui?.switcher?.query);
   return { items, activeKey: reconcileSwitcher(items, ui?.switcher?.activeKey) };

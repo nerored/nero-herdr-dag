@@ -24,7 +24,9 @@ export const FOOTER_H = 2;
 // cannot disagree; callers may override it per frame through `ui.staleAfterMs`.
 export { DEFAULT_STALE_AFTER_MS };
 export const isFailureState = state => isUnsuccessfulState(state);
-export const displayRunName = run => run?.todoTitle || run?.name || '';
+export const displayRunName = (run, language = 'en') => isVirtualRun(run)
+  ? t(language, 'virtualRunLabel')
+  : run?.todoTitle || run?.name || '';
 
 // Tasks shown in the navigation panel. Unlike standaloneTasks(), linked tasks
 // are included: in real OmO sessions every root task may belong to a DAG node,

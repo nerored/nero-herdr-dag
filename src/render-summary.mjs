@@ -410,16 +410,17 @@ export function summaryRows(run, stats, {
     }
   }
 
-  if (summary.critical) {
+  const suppressGraphMetrics = run?.virtual?.kind === 'orphans' && run.edges?.length === 0;
+  if (!suppressGraphMetrics && summary.critical) {
     const suffix = ` (${summary.critical.partial ? '≥' : ''}${compactDuration(summary.critical.ms, language)})`;
     const lines = wrapSummaryPath(summary.critical.labels, suffix, valueW);
     row(t(language, 'criticalPath'), [[lines[0], { fg: palette.accent }]]);
     for (const extra of lines.slice(1)) row('', [[extra, faint]]);
-  } else if (summary.criticalCycle) {
+  } else if (!suppressGraphMetrics && summary.criticalCycle) {
     row(t(language, 'criticalPath'), [['—', faint], [` ${t(language, 'cycle')}`, faint]]);
   }
 
-  if (summary.parallel) {
+  if (!suppressGraphMetrics && summary.parallel) {
     const parts = [[`max ${summary.parallel.max} · avg ${summary.parallel.avg.toFixed(1)}`, faint]];
     const cov = summary.timed.seen < summary.timed.total
       ? [[` ${t(language, 'coverage', { seen: summary.timed.seen, total: summary.timed.total })}`, faint]]

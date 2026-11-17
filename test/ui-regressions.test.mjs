@@ -506,7 +506,7 @@ test('a legacy v2 explicit percent renders numerically through the CLI', () => {
   try {
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /87%/);
-    assert.match(run.stdout, /orphan:tasks/, 'the unlinked task is grouped for display');
+    assert.match(run.stdout, /UNATTACHED TASKS/, 'the unlinked task is grouped for display');
     assert.doesNotMatch(run.stdout, /87% \(derived\)/, 'the selected real run keeps its recorded percent');
   } finally {
     rmSync(dir, { recursive: true, force: true });

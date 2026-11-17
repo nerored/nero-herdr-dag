@@ -134,6 +134,11 @@ test('translations interpolate values and fall back to English', () => {
   assert.equal(t('zh', 'missing.key'), 'missing.key');
 });
 
+test('virtual run labels are localized', () => {
+  assert.equal(t('en', 'virtualRunLabel'), 'UNATTACHED TASKS');
+  assert.equal(t('zh', 'virtualRunLabel'), '未归属任务');
+});
+
 test('language and status identifiers normalize predictably', () => {
   assert.equal(normalizeLanguage('zh'), 'zh');
   assert.equal(normalizeLanguage('zh-cn'), 'zh');
