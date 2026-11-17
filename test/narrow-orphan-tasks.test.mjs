@@ -327,6 +327,73 @@ test('a virtual-only TASKS scope never leaks back onto a real run', async () => 
   assert.match(realTasksLine, /TASKS\s+1 · run/);
 });
 
+test('switching from a real linked task to the virtual run never carries it into TASKS', async () => {
+  for (const [width, height] of [[70, 24], [120, 40]]) {
+    const viewer = await sessionViewer({ width, height });
+    viewer.acceptSnapshot(mixedSessionRaw(), { silent: true });
+    viewer.draw();
+
+    assert.equal(viewer.ui.selectedRunId, 'run_live');
+    assert.equal(viewer.ui.selectedTaskId, 'st_linked');
+    assert.equal(viewer.ui.selectedTaskUnlinked, false);
+    assert.equal(viewer.ui.selectedNodeId, 'api');
+
+    press(viewer, '\x1b[C', 'right');
+    viewer.draw();
+    const virtual = viewer.snapshot.runs.find(isVirtualRun);
+    assert.ok(virtual);
+    assert.equal(viewer.ui.selectedRunId, virtual.id);
+    assert.equal(viewer.ui.selectedNodeId, 'st_orphan_a', 'the explicit virtual node subject survives');
+    assert.equal(viewer.ui.selectedTaskId, undefined, 'the real task breadcrumb leaves with the real run');
+    assert.equal(viewer.ui.selectedTaskUnlinked, false, 'no task subject is synthesized');
+    assert.doesNotMatch(viewer.lastRender.text, /TASK · st_linked|Linked task/);
+    assert.equal(viewer.lastRender.detailsKey, 'node:orphan:tasks:st_orphan_a');
+
+    press(viewer, '4', '4');
+    viewer.draw();
+    assert.equal(viewer.ui.focus, 'tasks');
+    assert.equal(viewer.ui.selectedTaskId, undefined);
+    assert.equal(viewer.ui.selectedTaskUnlinked, false);
+    assert.ok(viewer.lastRender.scroll.tasks.viewportH > 0, 'the unattached TASKS list is painted');
+    assert.match(viewer.lastRender.text, width >= 112 ? /TASKS\s+2 · unattached/ : /TASKS · unattached/);
+    assert.doesNotMatch(viewer.lastRender.text, /TASK · st_linked|Linked task/);
+    assert.doesNotMatch(viewer.lastRender.detailsKey ?? '', /^task:/);
+    if (width >= 112) {
+      const geometry = taskListLayout(viewer.lastRender.layout.sidebar, viewer.snapshot, viewer.ui);
+      assert.equal(geometry.scope, 'unattached');
+      assert.deepEqual(geometry.tasks.map(task => task.id), ['st_orphan_a', 'st_orphan_b']);
+    }
+
+    press(viewer, '\x1b[B', 'down');
+    viewer.draw();
+    if (width < 112) {
+      assert.equal(viewer.ui.selectedTaskId, 'st_orphan_a');
+      assert.equal(viewer.ui.selectedTaskUnlinked, true);
+      assert.equal(viewer.ui.selectedNodeId, undefined);
+      assert.equal(viewer.lastRender.detailsKey, 'task:st_orphan_a');
+      assert.match(viewer.lastRender.text, /TASKS · unattached/);
+    } else {
+      // The investigation sidebar scrolls on Down; it must never resurrect the
+      // foreign real task while doing so.
+      assert.equal(viewer.ui.selectedTaskId, undefined);
+      assert.equal(viewer.ui.selectedTaskUnlinked, false);
+      assert.equal(viewer.lastRender.detailsKey, 'run:orphan:tasks');
+    }
+    assert.doesNotMatch(viewer.lastRender.text, /TASK · st_linked|Linked task/);
+
+    press(viewer, '\x1b[D', 'left');
+    viewer.draw();
+    assert.equal(viewer.ui.selectedRunId, 'run_live');
+    assert.equal(viewer.ui.selectedTaskId, 'st_linked', 'the real run restores its linked task subject');
+    assert.equal(viewer.ui.selectedTaskUnlinked, false);
+    assert.equal(viewer.ui.selectedNodeId, 'api');
+    press(viewer, '4', '4');
+    viewer.draw();
+    assert.equal(viewer.lastRender.detailsKey, 'task:st_linked');
+    assert.match(viewer.lastRender.text, /TASK · st_linked/);
+  }
+});
+
 test('mixed linked and orphan tasks keep viewer 4/down order in canonical parity', async () => {
   const snapshot = normalizeSnapshot({
     version: 3,

@@ -1,5 +1,5 @@
 import { nodeScrollTarget } from './graph.mjs';
-import { isVirtualRun, nodeForTask } from './model.mjs';
+import { isVirtualRun, linkedTaskIdsForRun, nodeForTask } from './model.mjs';
 import { navTasks, taskAtPoint } from './render-view.mjs';
 import { clamp } from './text.mjs';
 import { reconcileRunSelection, syncFoldedRun } from './view-state.mjs';
@@ -34,6 +34,20 @@ export function alignTaskSelection(ui, state, taskId) {
   ui.selectedNodeId = linked.node.id;
   ui.selectedTaskUnlinked = false;
   return linked;
+}
+
+// A virtual run is a display projection: its TASKS scope is exactly
+// virtual.memberTaskIds and it owns no producer task. A task breadcrumb carried
+// across a real-run switch (or left behind after membership shrank) must not
+// survive there, or details paints a foreign producer task beside
+// TASKS · unattached. An explicit virtual node subject is left untouched; the
+// UI then resolves the node (or the run) instead of the foreign task.
+function dropForeignVirtualTask(ui, run) {
+  if (!isVirtualRun(run) || ui.selectedTaskId === undefined) return false;
+  if (linkedTaskIdsForRun(run).has(ui.selectedTaskId)) return false;
+  ui.selectedTaskId = undefined;
+  ui.selectedTaskUnlinked = false;
+  return true;
 }
 
 // Pure reconciliation used before every draw and on snapshot acceptance. It
@@ -81,6 +95,10 @@ export function ensureSelectionState(ui, state) {
     syncFoldedRun(ui, state.runs[ui.runIndex]?.id);
     return;
   }
+  // Membership is the virtual run's TASKS scope. Drop a producer task that a
+  // previous real-run selection left in the breadcrumb before the generic
+  // navigation-list check (which would keep it, because it still exists).
+  dropForeignVirtualTask(ui, state.runs[ui.runIndex]);
   const tasks = navTasks(state);
   if (!tasks.some(task => task.id === ui.selectedTaskId)) {
     // A node click can name a task the host store did not accept (the live
@@ -163,8 +181,11 @@ export function setNodeSubject(ui, state, nodeId, {
   }
   // A virtual node is a display projection, not producer ownership. It can
   // become the node subject (graph/cells focus), but it never adopts the task
-  // or clears the unlinked flag that keeps the TASKS row honest.
+  // or clears the unlinked flag that keeps the TASKS row honest. A task that
+  // belongs to a real run is also dropped here, so a run switch cannot paint
+  // it under the virtual group's unattached TASKS list.
   const virtual = isVirtualRun(run);
+  dropForeignVirtualTask(ui, run);
   ui.selectedNodeId = node?.id;
   ui.runOverview = false;
   if (syncTask && !virtual) ui.selectedTaskId = node?.taskId;
@@ -246,12 +267,23 @@ export function selectRunById(ui, state, runId, scrollInfo = {}) {
   const index = state.runs.findIndex(run => run.id === runId);
   if (index < 0) return false;
   const run = state.runs[index];
+  const leavingVirtual = isVirtualRun(state.runs[ui.runIndex]) && !isVirtualRun(run);
   ui.graphFilter = 'all';
   ui.graphFocus = undefined;
   const node = run.nodes.find(candidate => candidate.state === 'running') ?? run.nodes[0];
   // Run selection moves the node subject but keeps the task breadcrumb, which
-  // matches the shipped run frame.
+  // matches the shipped run frame. That breadcrumb is only a producer identity
+  // for real runs: an orphan task selected inside the virtual group would
+  // otherwise cross over as a falsely linked subject. Leaving the virtual group
+  // re-homes to the destination run's node task (or lets reconciliation pick
+  // its replacement task) instead of carrying the orphan breadcrumb.
   setNodeSubject(ui, state, node?.id, { runId: run.id, syncTask: false });
+  if (leavingVirtual) {
+    // Re-home to the destination run's node task when it has one; otherwise
+    // reconciliation picks the destination's replacement task.
+    ui.selectedTaskId = node?.taskId;
+    ui.selectedTaskUnlinked = false;
+  }
   ui.graphScroll = 0;
   ui.graphScrollTarget = 0;
   ui.cellsScroll = 0;
