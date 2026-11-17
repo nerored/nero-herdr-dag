@@ -4,8 +4,9 @@ import {
   activitySummary, compareNavigationTasks, deriveRunStatus, elapsedLabel, elapsedMs, findRunningTarget, layers,
   modeFor, nodeActivity, nodeForTask, normalizeChild, normalizeRun, normalizeSnapshot, normalizeTask, orderRuns, runStats,
   navTasks, orphanNavTasks, standaloneTasks, FAILED_STATES, UNSUCCESSFUL_STATES,
-  isFailedState, isUnsuccessfulState, STATUSES,
+  isFailedState, isUnsuccessfulState, isVirtualRun, linkedTaskIdsForRun, STATUSES,
 } from '../src/model.mjs';
+import { withOrphanRun } from '../src/orphan-run.mjs';
 import { messages, statusLabel } from '../src/i18n.mjs';
 import { paletteFor, statusColor, statusIcon } from '../src/theme.mjs';
 import { DemoEngine } from '../src/demo.mjs';
@@ -464,6 +465,70 @@ test('standalone tasks exclude linked and child tasks, and follow prefers execut
   assert.equal(index.taskId, 'st_api');
   const standaloneTarget = findRunningTarget({ ...snapshot, runs: [] }, { kind: 'task', taskId: 'st_index' });
   assert.equal(standaloneTarget.taskId, 'st_index');
+});
+
+const virtualScopeSnapshot = () => normalizeSnapshot({
+  version: 3, mode: 'live', connected: true, sessionId: 'virtual-scope',
+  runs: [{
+    id: 'run_real', name: 'real', status: 'running',
+    nodes: [{ id: 'n', state: 'running', task_id: 'st_linked' }], edges: [],
+  }],
+  tasks: [
+    { id: 'st_linked', description: 'Linked', status: 'running' },
+    { id: 'st_orphan_a', description: 'Orphan A', status: 'running' },
+    { id: 'st_orphan_b', description: 'Orphan B', status: 'pending' },
+  ],
+});
+
+test('the virtual display exposes full member scope while nodeForTask stays producer-only', () => {
+  const visible = withOrphanRun(virtualScopeSnapshot());
+  const virtual = visible.runs.find(isVirtualRun);
+  assert.ok(virtual);
+  assert.deepEqual(virtual.virtual.memberTaskIds, ['st_orphan_a', 'st_orphan_b']);
+
+  // TASKS selection and the orphan list must never learn a producer owner
+  // from the display group.
+  assert.equal(nodeForTask(visible, 'st_orphan_a'), undefined);
+  const explicit = nodeForTask(visible, 'st_orphan_a', { includeVirtual: true });
+  assert.equal(explicit.run.id, virtual.id);
+  assert.equal(explicit.node.id, 'st_orphan_a');
+
+  // The wide TASKS scope is the full membership, even when the graph display
+  // caps its node list.
+  assert.deepEqual([...linkedTaskIdsForRun(virtual)], ['st_orphan_a', 'st_orphan_b']);
+  assert.equal(linkedTaskIdsForRun(visible.runs[0]).has('st_linked'), true);
+  assert.equal(linkedTaskIdsForRun(visible.runs[0]).has('st_orphan_a'), false);
+  const capped = {
+    id: 'orphan:tasks', nodes: [{ id: 'a', taskId: 'a' }], edges: [],
+    virtual: { kind: 'orphans', memberTaskIds: ['a', 'b', 'c'] },
+  };
+  assert.deepEqual([...linkedTaskIdsForRun(capped)], ['a', 'b', 'c']);
+});
+
+test('follow skips virtual nodes and still targets the standalone task', () => {
+  const raw = normalizeSnapshot({
+    version: 3, mode: 'live', connected: true, sessionId: 'virtual-follow',
+    runs: [{
+      id: 'run_real', name: 'real', status: 'pending',
+      nodes: [{ id: 'n', state: 'pending', task_id: 'st_linked' }], edges: [],
+    }],
+    tasks: [
+      { id: 'st_linked', description: 'Linked', status: 'running' },
+      { id: 'st_orphan_run', description: 'Orphan running', status: 'running' },
+    ],
+  });
+  const visible = withOrphanRun(raw);
+  const virtual = visible.runs.find(isVirtualRun);
+  assert.ok(virtual);
+  const target = findRunningTarget(visible);
+  assert.deepEqual(target, { kind: 'task', taskId: 'st_orphan_run' });
+  // A previous virtual node target transfers to the task that mirrors it.
+  assert.deepEqual(
+    findRunningTarget(visible, {
+      kind: 'node', runId: virtual.id, nodeId: 'st_orphan_run', taskId: 'st_orphan_run',
+    }),
+    { kind: 'task', taskId: 'st_orphan_run' },
+  );
 });
 
 test('activity summary exposes phases, tails, and stall thresholds', () => {

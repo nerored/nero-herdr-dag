@@ -7,6 +7,8 @@ import {
   applyFocus, applyFocusRequest, attachFrame, buildViewModel, hitTargetAt, reconcile, selectNode,
   selectRun, selectTask, settleScroll, toggleFold,
 } from '../src/view-model.mjs';
+import { normalizeSnapshot } from '../src/model.mjs';
+import { withOrphanRun } from '../src/orphan-run.mjs';
 import { renderApp, taskListLayout } from '../src/render.mjs';
 import { selectNode as selectNodeUi, selectRunById, selectRunOverview, selectTaskHit } from '../src/viewer-selection.mjs';
 import {
@@ -141,6 +143,37 @@ test('toggleFold moves only the selected graph node and reports the write policy
 
   const unfocused = buildViewModel(snapshot, fixtureUi({ focus: 'tasks' }));
   assert.equal(toggleFold(unfocused), false, 'a non-graph focus never folds');
+});
+
+test('a virtual run is never foldable and reports no write', () => {
+  const snapshot = withOrphanRun(normalizeSnapshot({
+    version: 3, mode: 'live', connected: true, sessionId: 'virtual-fold',
+    runs: [{
+      id: 'run_real', status: 'running',
+      nodes: [{ id: 'n', state: 'running', task_id: 'st_linked' }], edges: [],
+    }],
+    tasks: [
+      { id: 'st_linked', description: 'Linked', status: 'running' },
+      { id: 'st_orphan', description: 'Orphan', status: 'running' },
+    ],
+  }));
+  const virtual = snapshot.runs.find(run => run.virtual?.kind === 'orphans');
+  assert.ok(virtual);
+  const vm = buildViewModel(snapshot, fixtureUi({
+    runIndex: snapshot.runs.indexOf(virtual),
+    selectedRunId: virtual.id,
+    selectedTaskId: 'st_orphan',
+    selectedTaskUnlinked: true,
+    selectedNodeId: 'st_orphan',
+    focus: 'graph',
+    folded: new Set(),
+    foldedRunId: virtual.id,
+    foldedByRun: new Map(),
+  }));
+  const writes = [];
+  assert.equal(toggleFold(vm, { persist: (...args) => writes.push(args) }), false);
+  assert.equal(vm.ui.folded.size, 0, 'the virtual node never enters the folded set');
+  assert.deepEqual(writes, [], 'no view-side fold write is reported');
 });
 
 test('hitTargetAt resolves painted subjects and refuses a missing subject', () => {

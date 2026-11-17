@@ -1,5 +1,5 @@
 import { readJson, writeJson } from './storage.mjs';
-import { navTasks, nodeForTask, runStats, TERMINAL } from './model.mjs';
+import { isVirtualRun, navTasks, nodeForTask, runStats, TERMINAL } from './model.mjs';
 
 // Keep terminal work visible for five minutes after it finishes. The x clear
 // action hides only finished subjects older than this window, and never hides
@@ -42,7 +42,10 @@ export function completedItems(state, { now = Date.now(), recentMs = CLEAR_RECEN
     return at === undefined || at < cutoff;
   };
   return {
-    runs: (state?.runs ?? []).filter(expired),
+    // Clear works on producer subjects. A virtual run is recomposed from the
+    // tasks that survive; hiding its ID would fabricate a hidden producer run
+    // and could never be matched back to the projection.
+    runs: (state?.runs ?? []).filter(run => !isVirtualRun(run) && expired(run)),
     tasks: (state?.tasks ?? []).filter(task => !task.parentTaskId && expired(task)),
   };
 }
@@ -56,6 +59,12 @@ export function hiddenSnapshot(state, { runIds = new Set(), taskIds = new Set() 
   const taskById = new Map((state.tasks ?? []).map(task => [task.id, task]));
   for (const run of state.runs ?? []) {
     if (!hiddenRuns.has(run.id)) continue;
+    // A virtual run is display-only. The only honest form of hiding it is
+    // hiding its member tasks; the projection then rebuilds from the rest.
+    if (isVirtualRun(run)) {
+      for (const id of run.virtual?.memberTaskIds ?? []) linked.add(id);
+      continue;
+    }
     for (const node of run.nodes ?? []) {
       if (!node.taskId) continue;
       // A cleared run takes its finished tasks with it; a queued/blocked/
@@ -111,14 +120,26 @@ export function syncFoldedRun(ui, runId) {
 
 export function reconcileRunSelection(runs, { runIndex = 0, selectedRunId } = {}) {
   const known = selectedRunId ? runs.findIndex(run => run.id === selectedRunId) : -1;
-  const index = known >= 0
+  let index = known >= 0
     ? known
     : Math.min(Math.max(runIndex, 0), Math.max(0, runs.length - 1));
+  // A vanished real selection falls back by index; with the virtual group
+  // appended last, that index can point at the display-only run and silently
+  // switch the subject. Keep an implicit fallback on a producer run; an
+  // explicit virtual id (known >= 0) or an orphan-only snapshot still selects
+  // the group.
+  if (known < 0 && isVirtualRun(runs[index])) {
+    let lastReal = -1;
+    for (let i = 0; i < runs.length; i += 1) if (!isVirtualRun(runs[i])) lastReal = i;
+    if (lastReal >= 0) index = Math.min(index, lastReal);
+  }
   return { index, selectedRunId: runs[index]?.id };
 }
 
+// Fresh-run auto-selection is producer work. Appending the virtual group to
+// the visible snapshot must never count as a new run that steals the subject.
 export function newlyObservedRun(runs, previousRunIds) {
-  return runs.find(run => !previousRunIds.has(run.id));
+  return runs.find(run => !isVirtualRun(run) && !previousRunIds.has(run.id));
 }
 
 export function followTargetForRun(run) {

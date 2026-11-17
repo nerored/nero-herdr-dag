@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeSnapshot, isVirtualRun } from '../src/model.mjs';
-import { orphanNavTasks } from '../src/model.mjs';
+import { isVirtualRun, normalizeSnapshot, orphanNavTasks } from '../src/model.mjs';
+import { taskListLayout } from '../src/render.mjs';
+import { advanceRunSelection, reconcileRunSelection } from '../src/view-state.mjs';
 import { dutyFocusForKey } from '../src/viewer-keymap.mjs';
+import { createViewerSession } from '../src/viewer-session.mjs';
 import { createTestViewer } from './helpers.mjs';
 
 // A task-only capture with 0 runs and 3 navigation tasks: two running, one
@@ -86,14 +88,11 @@ test('orphan-only duty paints TASKS and up/down selects each orphan task', async
     assert.equal(first.run?.virtual?.kind, 'orphans');
     assert.ok(first.hitboxes.nodes.size > 0, 'the virtual display nodes are painted');
     assert.equal(viewer.ui.selectedRunId, 'orphan:tasks');
+    assert.equal(viewer.ui.selectedTaskId, undefined, 'no TASKS row is synthesized');
+    assert.equal(viewer.ui.selectedNodeId, undefined, 'no producer node is auto-selected');
+    assert.equal(viewer.ui.selectedTaskUnlinked, false, 'no unlinked task subject is synthesized');
+    assert.equal(first.selectedNode, undefined, 'details resolve to the run, never a node');
     assert.equal(dutyFocusForKey('4'), 'tasks');
-
-    // The visible virtual run seeds a graph subject during reconciliation. This
-    // test owns the TASKS row order, so start from the neutral task subject the
-    // unlinkable list has always used.
-    viewer.ui.selectedTaskId = undefined;
-    viewer.ui.selectedNodeId = undefined;
-    viewer.ui.selectedTaskUnlinked = false;
 
     // Focus starts on the duty body; key 4 moves it to the painted TASKS list.
     viewer.ui.focus = 'details';
@@ -313,8 +312,308 @@ test('hidden and clear rebuild one virtual run from the remaining visible orphan
   viewer.handleKey('x', { sequence: 'x', name: 'x' });
   assert.equal(viewer.snapshot.runs.filter(isVirtualRun).length, 0);
   assert.deepEqual(viewer.snapshot.runs.map(run => run.id), ['run_live']);
+  assert.equal(viewer.ui.hiddenRunIds.size, 0, 'the virtual id is never written to hidden runs');
+  assert.deepEqual([...viewer.ui.hiddenTaskIds].sort(), ['st_done_a', 'st_done_b']);
 
   viewer.handleKey('u', { sequence: 'u', name: 'u' });
   assert.equal(viewer.snapshot.runs.filter(isVirtualRun).length, 1);
   assert.equal(viewer.snapshot.runs.at(-1).virtual.count, 2);
+});
+
+test('orphan-only default focus selects the virtual run and paints the flat graph', async () => {
+  const viewer = await sessionViewer();
+  viewer.acceptSnapshot(orphanSnapshot(), { silent: true });
+  viewer.draw();
+
+  assert.equal(viewer.ui.selectedRunId, 'orphan:tasks');
+  assert.equal(viewer.ui.runIndex, 0);
+  assert.equal(viewer.ui.focus, 'graph');
+  assert.equal(viewer.ui.selectedTaskId, undefined);
+  assert.equal(viewer.ui.selectedTaskUnlinked, false);
+  assert.equal(viewer.ui.selectedNodeId, undefined);
+  assert.equal(viewer.lastRender.selectedNode, undefined);
+  assert.ok(viewer.lastRender.graph.layout, 'the flat virtual graph has a layout');
+  assert.equal(viewer.lastRender.hitboxes.nodes.size, 3);
+  assert.doesNotMatch(viewer.lastRender.detailsKey ?? '', /^node:/, 'details are not node-focused');
+
+  viewer.ui.focus = 'details';
+  press(viewer, '4');
+  assert.equal(viewer.ui.focus, 'tasks', 'TASKS remains reachable with 4');
+  assert.equal(viewer.ui.selectedTaskId, undefined, 'opening TASKS does not synthesize a row');
+  assert.equal(viewer.ui.selectedNodeId, undefined);
+});
+
+test('a TASKS selection stays unlinked when focus moves to RUNS or CELLS', async () => {
+  const viewer = await dutyViewer({ columns: 54, rows: 42 });
+  viewer.acceptSnapshot(orphanSnapshot(), { silent: true });
+  viewer.draw();
+  // Start from the empty task subject so the first down key selects the first
+  // painted row instead of stepping past the default subject.
+  viewer.ui.selectedTaskId = undefined;
+  viewer.ui.selectedNodeId = undefined;
+  viewer.ui.selectedTaskUnlinked = false;
+  viewer.ui.focus = 'details';
+  press(viewer, '4');
+  press(viewer, '\x1b[B', 'down');
+  assert.equal(viewer.ui.selectedTaskId, 'st_alpha');
+  assert.equal(viewer.ui.selectedTaskUnlinked, true);
+  assert.equal(viewer.ui.selectedNodeId, undefined);
+
+  for (const key of ['1', '2']) {
+    press(viewer, key);
+    viewer.ensureSelection();
+    assert.equal(viewer.ui.selectedTaskUnlinked, true, key + ' keeps the TASKS row unlinked');
+    assert.equal(viewer.ui.selectedNodeId, undefined, key + ' invents no virtual node subject');
+    assert.equal(viewer.ui.selectedTaskId, 'st_alpha');
+    assert.equal(viewer.ui.selectedRunId, 'orphan:tasks');
+  }
+});
+
+const mixedSessionRaw = ({ extraOrphan = false, extraRealRun = false } = {}) => normalizeSnapshot({
+  version: 3,
+  mode: 'live',
+  connected: true,
+  sessionId: 'mixed-session-orphan',
+  updatedAt: '2026-11-16T12:00:00.000Z',
+  runs: [
+    {
+      id: 'run_live', name: 'live run', status: 'running',
+      nodes: [{ id: 'api', state: 'running', task_id: 'st_linked', percent: 60 }],
+      edges: [],
+    },
+    ...(extraRealRun ? [{
+      id: 'run_new', name: 'new run', status: 'running',
+      nodes: [{ id: 'collect', state: 'running', task_id: 'st_new' }],
+      edges: [],
+    }] : []),
+  ],
+  tasks: [
+    { id: 'st_linked', description: 'Linked task', status: 'running', percent: 60 },
+    { id: 'st_orphan_a', description: 'Orphan A', status: 'running', percent: 40 },
+    { id: 'st_orphan_b', description: 'Orphan B', status: 'pending' },
+    ...(extraOrphan ? [{ id: 'st_orphan_c', description: 'Orphan C', status: 'pending' }] : []),
+    ...(extraRealRun ? [{ id: 'st_new', description: 'New task', status: 'running' }] : []),
+  ],
+});
+
+test('fresh-run auto-selection and follow skip the appended virtual run', async () => {
+  const viewer = await sessionViewer();
+  viewer.ui.follow = true;
+  viewer.acceptSnapshot(mixedSessionRaw(), { silent: true });
+  assert.equal(viewer.ui.selectedRunId, 'run_live');
+
+  const advanced = advanceRunSelection(viewer.snapshot.runs, {
+    previousRunIds: new Set(viewer.snapshot.runs
+      .filter(run => !isVirtualRun(run)).map(run => run.id)),
+    hadRuns: true, follow: true, pinned: false,
+    runIndex: 0, selectedRunId: 'run_live',
+  });
+  assert.equal(advanced.fresh, undefined, 'the virtual group is never a fresh producer run');
+  assert.equal(advanced.selectedRunId, 'run_live');
+
+  // Adding a member is a virtual-only change; the real selection stays put.
+  viewer.acceptSnapshot(mixedSessionRaw({ extraOrphan: true }), { silent: true });
+  assert.equal(viewer.ui.selectedRunId, 'run_live');
+  assert.equal(viewer.snapshot.runs.at(-1).virtual.count, 3);
+
+  // A genuinely new real run still wins the fresh-selection path.
+  viewer.acceptSnapshot(mixedSessionRaw({ extraOrphan: true, extraRealRun: true }), { silent: true });
+  assert.equal(viewer.ui.selectedRunId, 'run_new');
+  assert.equal(viewer.ui.selectedTaskId, 'st_new');
+  assert.equal(viewer.ui.selectedTaskUnlinked, false);
+});
+
+test('a vanished real selection falls back to a producer run, not the virtual append', async () => {
+  const viewer = await sessionViewer();
+  viewer.acceptSnapshot(mixedSessionRaw(), { silent: true });
+  const runs = viewer.snapshot.runs;
+
+  const implicit = reconcileRunSelection(runs, { runIndex: 1, selectedRunId: 'run_gone' });
+  assert.equal(implicit.selectedRunId, 'run_live');
+  assert.equal(implicit.index, 0);
+
+  const explicit = reconcileRunSelection(runs, { runIndex: 0, selectedRunId: 'orphan:tasks' });
+  assert.equal(explicit.selectedRunId, 'orphan:tasks');
+  assert.equal(explicit.index, 1);
+});
+
+test('switchRun reaches the appended virtual run last and wraps to real runs', async () => {
+  const viewer = await sessionViewer();
+  viewer.acceptSnapshot(mixedSessionRaw(), { silent: true });
+  assert.deepEqual(viewer.snapshot.runs.map(run => run.id), ['run_live', 'orphan:tasks']);
+
+  press(viewer, '\x1b[C', 'right');
+  assert.equal(viewer.ui.runIndex, 1);
+  assert.equal(viewer.ui.selectedRunId, 'orphan:tasks');
+  assert.equal(viewer.ui.selectedNodeId, 'st_orphan_a');
+
+  press(viewer, '\x1b[C', 'right');
+  assert.equal(viewer.ui.runIndex, 0);
+  assert.equal(viewer.ui.selectedRunId, 'run_live');
+});
+
+test('hiding a completed run promotes its live task and undo reverses it', async () => {
+  const viewer = await sessionViewer();
+  const raw = normalizeSnapshot({
+    version: 3,
+    mode: 'live',
+    connected: true,
+    sessionId: 'hidden-real-promote',
+    updatedAt: '2020-01-01T00:00:00.000Z',
+    runs: [{
+      id: 'run_done', name: 'Done run', status: 'completed', updatedAt: '2020-01-01T00:00:00.000Z',
+      nodes: [
+        { id: 'done-node', state: 'completed', task_id: 'st_done_task' },
+        { id: 'live-node', state: 'running', task_id: 'st_live_task' },
+      ],
+      edges: [],
+    }],
+    tasks: [
+      { id: 'st_done_task', description: 'Done task', status: 'completed', completedAt: '2020-01-01T00:00:00.000Z' },
+      { id: 'st_live_task', description: 'Live task', status: 'running' },
+    ],
+  });
+  viewer.acceptSnapshot(raw, { silent: true });
+
+  viewer.handleKey('x', { sequence: 'x', name: 'x' });
+  assert.deepEqual([...viewer.ui.hiddenRunIds], ['run_done']);
+  assert.equal(viewer.snapshot.runs.some(run => run.id === 'run_done'), false);
+  const virtual = viewer.snapshot.runs.find(isVirtualRun);
+  assert.ok(virtual, 'the live task is promoted into its own group');
+  assert.deepEqual(virtual.virtual.memberTaskIds, ['st_live_task']);
+  assert.equal(viewer.snapshot.tasks.some(task => task.id === 'st_live_task'), true);
+  assert.equal(viewer.snapshot.tasks.some(task => task.id === 'st_done_task'), false);
+
+  viewer.handleKey('u', { sequence: 'u', name: 'u' });
+  assert.equal(viewer.ui.hiddenRunIds.size, 0);
+  assert.equal(viewer.snapshot.runs.some(run => run.id === 'run_done'), true);
+  assert.equal(viewer.snapshot.runs.some(isVirtualRun), false);
+  assert.equal(viewer.snapshot.tasks.some(task => task.id === 'st_live_task'), true);
+});
+
+test('membership changes drop vanished virtual nodes and adopt a new real link', () => {
+  const session = createViewerSession({ requestRepaint: () => {}, draw: () => {} });
+  session.ui.follow = false;
+  const raw = mixedSessionRaw();
+  session.acceptSnapshot(raw, { silent: true });
+  let virtual = session.snapshot.runs.find(isVirtualRun);
+  assert.ok(virtual);
+  session.ui.runIndex = session.snapshot.runs.indexOf(virtual);
+  session.ui.selectedRunId = virtual.id;
+  session.ui.selectedTaskId = 'st_orphan_b';
+  session.ui.selectedTaskUnlinked = true;
+  session.ui.selectedNodeId = 'st_orphan_a';
+  session.ui.focus = 'graph';
+  session.ensureSelection();
+  assert.equal(session.ui.selectedNodeId, 'st_orphan_a', 'the explicit virtual node is kept');
+
+  session.ui.hiddenTaskIds.add('st_orphan_a');
+  session.refreshHiddenSnapshot();
+  virtual = session.snapshot.runs.find(isVirtualRun);
+  assert.deepEqual(virtual.virtual.memberTaskIds, ['st_orphan_b']);
+  session.ensureSelection();
+  assert.equal(session.ui.selectedNodeId, undefined, 'the vanished virtual node leaves no stale subject');
+  assert.equal(session.ui.selectedTaskId, 'st_orphan_b');
+  assert.equal(session.ui.selectedTaskUnlinked, true);
+  assert.equal(session.ui.selectedRunId, virtual.id);
+
+  // The task gains a producer node: the group disappears and the subject moves
+  // to the real run/node that now owns it.
+  session.ui.hiddenTaskIds.clear();
+  session.acceptSnapshot(normalizeSnapshot({
+    version: 3,
+    mode: 'live',
+    connected: true,
+    sessionId: 'mixed-session-orphan',
+    runs: [{
+      id: 'run_live', name: 'live run', status: 'running',
+      nodes: [
+        { id: 'api', state: 'running', task_id: 'st_linked' },
+        { id: 'b-node', state: 'running', task_id: 'st_orphan_b' },
+      ],
+      edges: [],
+    }],
+    tasks: [
+      { id: 'st_linked', description: 'Linked task', status: 'running' },
+      { id: 'st_orphan_b', description: 'Orphan B', status: 'running' },
+    ],
+  }), { silent: true });
+  assert.equal(session.snapshot.runs.some(isVirtualRun), false);
+  session.ensureSelection();
+  assert.equal(session.ui.selectedTaskUnlinked, false);
+  assert.equal(session.ui.selectedRunId, 'run_live');
+  assert.equal(session.ui.selectedNodeId, 'b-node');
+});
+
+test('v1, v2, and v3 compose the same virtual membership and wide TASKS scope', async () => {
+  for (const version of [1, 2, 3]) {
+    const viewer = await sessionViewer();
+    viewer.acceptSnapshot(normalizeSnapshot({
+      version,
+      mode: 'live',
+      connected: true,
+      sessionId: 'virtual-v' + version,
+      runs: [{
+        id: 'run_live', name: 'live run', status: 'running',
+        nodes: [{ id: 'api', state: 'running', task_id: 'st_linked' }], edges: [],
+      }],
+      tasks: [
+        { id: 'st_linked', description: 'Linked task', status: 'running' },
+        { id: 'st_orphan_a', description: 'Orphan A', status: 'running' },
+        { id: 'st_orphan_b', description: 'Orphan B', status: 'pending' },
+      ],
+    }), { silent: true });
+    const virtual = viewer.snapshot.runs.find(isVirtualRun);
+    assert.ok(virtual, 'v' + version + ' composes the group');
+    assert.deepEqual(virtual.virtual.memberTaskIds, ['st_orphan_a', 'st_orphan_b'],
+      'v' + version + ' membership');
+    viewer.ui.runIndex = viewer.snapshot.runs.indexOf(virtual);
+    viewer.ui.selectedRunId = virtual.id;
+    viewer.ui.taskScope = 'run';
+    viewer.draw();
+    const geometry = taskListLayout(viewer.lastRender.layout.sidebar, viewer.snapshot, viewer.ui);
+    assert.ok(geometry);
+    assert.deepEqual(geometry.tasks.map(task => task.id), ['st_orphan_a', 'st_orphan_b'],
+      'v' + version + ' wide scope');
+    assert.equal(geometry.scopeCount, 2, 'v' + version + ' scope count uses full membership');
+  }
+});
+
+test('a virtual fold attempt never writes a view-side fold key', async () => {
+  const virtualKey = JSON.stringify(['orphan:tasks', 'st_orphan_a']);
+  const view = { version: 1, sessionId: 'mixed-session-orphan', expanded: { [virtualKey]: false } };
+  const saves = [];
+  const session = createViewerSession({
+    statePath: '/tmp/virtual-orphan-view-state.json',
+    loadViewStateFn: async () => view,
+    saveViewStateFn: async (_path, next) => { saves.push(next); return next; },
+    requestRepaint: () => {},
+    draw: () => {},
+  });
+  session.acceptSnapshot(mixedSessionRaw(), { silent: true });
+  await session.syncViewState();
+  assert.equal(session.ui.foldedByRun.has('orphan:tasks'), false, 'the stale virtual key is not loaded');
+
+  const virtualIndex = session.snapshot.runs.findIndex(isVirtualRun);
+  assert.ok(virtualIndex >= 0);
+  session.ui.runIndex = virtualIndex;
+  session.ui.selectedRunId = session.snapshot.runs[virtualIndex].id;
+  session.ui.selectedNodeId = 'st_orphan_a';
+  session.ui.focus = 'graph';
+  session.ensureSelection();
+  assert.equal(session.ui.folded.size, 0);
+
+  session.foldSelectedNode();
+  assert.deepEqual(saves, [], 'folding a virtual node reports no write');
+  assert.deepEqual(view.expanded, {}, 'the stale virtual key is purged in memory');
+
+  // A real fold still writes, and the persisted object carries no virtual key.
+  session.ui.runIndex = 0;
+  session.ui.selectedRunId = 'run_live';
+  session.ui.selectedNodeId = 'api';
+  session.ui.focus = 'graph';
+  session.foldSelectedNode();
+  assert.equal(saves.length, 1);
+  assert.deepEqual(Object.keys(saves[0].expanded), [JSON.stringify(['run_live', 'api'])]);
+  assert.equal(view.expanded[virtualKey], undefined);
 });

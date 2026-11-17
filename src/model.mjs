@@ -689,8 +689,12 @@ export function linkedTaskIds(snapshot) {
 // A single run's linked task ids. taskListLayout and the orphan list need the
 // set for one run, not the whole snapshot; keying it by the run object lets a
 // hidden-subject overlay (a new snapshot sharing the same runs) reuse it.
+// The virtual run's visible TASKS scope is its full membership, not the
+// display-capped node list: an overflow node is hidden from the graph, never
+// dropped from the task list.
 export function linkedTaskIdsForRun(run) {
   return memoLinkedRunTaskIds(run, target => {
+    if (isVirtualRun(target)) return new Set(target.virtual?.memberTaskIds ?? []);
     const ids = new Set();
     for (const node of target.nodes ?? []) if (node.taskId) ids.add(node.taskId);
     return ids;
@@ -734,6 +738,10 @@ export function findRunningTarget(snapshot, previous) {
   if (!snapshot?.connected || snapshot.mode === 'saved') return undefined;
   const targets = [];
   for (const run of snapshot.runs) {
+    // Follow tracks producer work. A virtual node mirrors a task that the
+    // standalone pass below already offers, so following it would move the
+    // run subject onto the display-only group.
+    if (isVirtualRun(run)) continue;
     for (const node of run.nodes) {
       if (node.state === 'running') {
         targets.push({ kind: 'node', runId: run.id, nodeId: node.id, taskId: node.taskId });
@@ -833,15 +841,16 @@ export function percentFor(entity) {
 // graph only when a node in a loaded run declares it as its task. Standalone
 // tasks and tasks restored from runs without a checkpoint return undefined.
 // A virtual run displays orphans but owns nothing, so it never answers this
-// producer-ownership lookup; a virtual graph node is selected explicitly by its
-// graph path instead.
+// producer-ownership lookup by default. Graph/run selection may explicitly
+// address the display projection with `includeVirtual`; task selection never
+// passes it, so a TASKS row cannot become owned by the display group.
 // A task referenced by several historical runs prefers the run the user is
 // already looking at, then the first run in the snapshot's display order.
-export function nodeForTask(snapshot, taskId, { preferRunId } = {}) {
+export function nodeForTask(snapshot, taskId, { preferRunId, includeVirtual = false } = {}) {
   if (!snapshot?.runs?.length || !taskId) return undefined;
   const matches = [];
   for (const run of snapshot.runs) {
-    if (isVirtualRun(run)) continue;
+    if (!includeVirtual && isVirtualRun(run)) continue;
     const node = run.nodes.find(candidate => candidate.taskId === taskId);
     if (node) matches.push({ run, node });
   }

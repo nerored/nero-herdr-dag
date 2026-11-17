@@ -1,3 +1,4 @@
+import { isVirtualRun } from './model.mjs';
 import { smoothScroll } from './scroll.mjs';
 import { navTasks, taskAtPoint } from './render-view.mjs';
 import { clamp } from './text.mjs';
@@ -125,9 +126,11 @@ export function applyFocus(vm, focus, structural, scrollInfo = vm.frame?.scroll)
 
 // Fold the selected graph node in the current run. Persistence is the
 // caller's policy: the model stays pure state and reports the new value.
+// The virtual group is not foldable: its nodes are a derived display, and a
+// saved key would outlive the membership that produced it.
 export function toggleFold(vm, { persist } = {}) {
   const run = vm?.snapshot?.runs?.[vm.ui.runIndex];
-  if (!run || vm.ui.focus !== 'graph') return false;
+  if (!run || isVirtualRun(run) || vm.ui.focus !== 'graph') return false;
   const nodeId = vm.ui.selectedNodeId;
   if (!nodeId) return false;
   if (vm.ui.folded.has(nodeId)) vm.ui.folded.delete(nodeId);

@@ -5,7 +5,9 @@ import { commandItems, filterCommands } from './commands.mjs';
 import { saveConfig, staleAfterMs } from './config.mjs';
 import { computeLayout, graphLayoutKey } from './graph.mjs';
 import { languageLabel, normalizeLanguage, t } from './i18n.mjs';
-import { findRunningTarget, navTasks, nodeForTask, normalizeSnapshot, orphanNavTasks } from './model.mjs';
+import {
+  findRunningTarget, isVirtualRun, navTasks, nodeForTask, normalizeSnapshot, orphanNavTasks,
+} from './model.mjs';
 import { withOrphanRun } from './orphan-run.mjs';
 import { switcherView } from './render-overlays.mjs';
 import { dashboardLayout } from './render-view.mjs';
@@ -353,8 +355,12 @@ export function createViewerSession({
     }
     ui.selectedNodeId = nodeId;
     ui.runOverview = false;
-    ui.selectedTaskId = clickedNode.taskId;
-    ui.selectedTaskUnlinked = false;
+    // A virtual breadcrumb node is still only a display subject: the task it
+    // mirrors remains unlinked and never becomes producer ownership.
+    if (!isVirtualRun(paintedRun)) {
+      ui.selectedTaskId = clickedNode.taskId;
+      ui.selectedTaskUnlinked = false;
+    }
     ui.follow = false;
     ui.followTarget = undefined;
     ui.manualScroll = false;
@@ -557,8 +563,10 @@ export function createViewerSession({
         const nodeId = ui.selectedNodeId ?? run.nodes[0].id;
         ui.selectedNodeId = nodeId;
         ui.runOverview = false;
-        ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
-        ui.selectedTaskUnlinked = false;
+        if (!isVirtualRun(run)) {
+          ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
+          ui.selectedTaskUnlinked = false;
+        }
         ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
         ui.graphFocus = nodeId;
         ui.follow = false;
@@ -818,10 +826,24 @@ export function createViewerSession({
       if (!isCurrent()) return;
       viewState = loaded;
       viewStateSessionId = sessionKey;
-      // Saved fold keys are per (run,node). Load a set for every visible run so
-      // switching runs never borrows another run's same-id folds.
+      // Saved fold keys are per (run,node). Load a set for every visible
+      // producer run so switching runs never borrows another run's same-id
+      // folds. A virtual run is never foldable, so a stale sidecar key for its
+      // id is ignored instead of resurrecting a derived fold, and the next real
+      // preference write persists the sanitized object.
       const runs = snapshot?.runs ?? [];
-      ui.foldedByRun = new Map(runs.map(run => [run.id, foldedFromView(viewState, run.id)]));
+      const virtualRunIds = new Set(runs.filter(run => isVirtualRun(run)).map(run => run.id));
+      if (virtualRunIds.size) {
+        for (const encoded of Object.keys(viewState.expanded)) {
+          try {
+            const [runId] = JSON.parse(encoded);
+            if (virtualRunIds.has(runId)) delete viewState.expanded[encoded];
+          } catch { /* malformed keys stay inert for foldedFromView */ }
+        }
+      }
+      ui.foldedByRun = new Map(runs
+        .filter(run => !isVirtualRun(run))
+        .map(run => [run.id, foldedFromView(viewState, run.id)]));
       const runId = runs[ui.runIndex]?.id;
       ui.foldedRunId = runId;
       ui.folded = new Set(runId === undefined ? [] : ui.foldedByRun.get(runId) ?? []);
@@ -855,7 +877,9 @@ export function createViewerSession({
   function clearCompleted() {
     const source = fullSnapshot ?? snapshot;
     const items = completedItems(source, { now: Date.now() });
-    const runs = items.runs.filter(run => !ui.hiddenRunIds.has(run.id));
+    // Never write a virtual run id into the hidden-run set; the projection is
+    // rebuilt from the member tasks that remain visible.
+    const runs = items.runs.filter(run => !isVirtualRun(run) && !ui.hiddenRunIds.has(run.id));
     const tasks = items.tasks.filter(task => !ui.hiddenTaskIds.has(task.id));
     if (!runs.length && !tasks.length) {
       addToast(t(ui.language, 'toastNoCompleted'), 'info');
@@ -954,8 +978,10 @@ export function createViewerSession({
     const nodeId = ui.selectedNodeId ?? run.nodes[0].id;
     ui.selectedNodeId = nodeId;
     ui.runOverview = false;
-    ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
-    ui.selectedTaskUnlinked = false;
+    if (!isVirtualRun(run)) {
+      ui.selectedTaskId = run.nodes.find(node => node.id === nodeId)?.taskId;
+      ui.selectedTaskUnlinked = false;
+    }
     ui.focus = vm.frame?.layout?.layout === 'duty' ? 'cells' : 'graph';
     ui.graphFocus = nodeId;
     ui.follow = false;

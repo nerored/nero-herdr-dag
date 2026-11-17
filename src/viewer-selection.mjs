@@ -1,5 +1,5 @@
 import { nodeScrollTarget } from './graph.mjs';
-import { nodeForTask } from './model.mjs';
+import { isVirtualRun, nodeForTask } from './model.mjs';
 import { navTasks, taskAtPoint } from './render-view.mjs';
 import { clamp } from './text.mjs';
 import { reconcileRunSelection, syncFoldedRun } from './view-state.mjs';
@@ -90,6 +90,13 @@ export function ensureSelectionState(ui, state) {
     if (nodeOwnsSubject) {
       ui.selectedTaskId = undefined;
       ui.selectedTaskUnlinked = false;
+    } else if (isVirtualRun(run)) {
+      // The virtual group's default subject is the run itself. Synthesizing a
+      // TASKS row here would paint the unlinked task overview over the flat
+      // graph before the user asked for a task; key 4/down still selects one.
+      ui.selectedTaskId = undefined;
+      ui.selectedTaskUnlinked = false;
+      ui.selectedNodeId = undefined;
     } else {
       const replacement = tasks.find(task => task.status === 'running') ?? tasks[0];
       alignTaskSelection(ui, state, replacement?.id);
@@ -115,7 +122,13 @@ export function ensureSelectionState(ui, state) {
   if (unlinkedTaskOwnsSubject) {
     ui.selectedNodeId = undefined;
   } else if (!run.nodes.some(node => node.id === ui.selectedNodeId)) {
-    ui.selectedNodeId = (run.nodes.find(node => node.state === 'running') ?? run.nodes[0])?.id;
+    // A virtual run has no producer node to fall back to. Only an explicit
+    // node subject (a graph/cells click or cycle) may highlight one of its
+    // display nodes; ordinary reconciliation leaves the neutral task subject
+    // intact so TASKS keeps its "unlinked / no node" state across focus moves.
+    ui.selectedNodeId = isVirtualRun(run)
+      ? undefined
+      : (run.nodes.find(node => node.state === 'running') ?? run.nodes[0])?.id;
   }
   syncFoldedRun(ui, run.id);
 }
@@ -140,10 +153,14 @@ export function setNodeSubject(ui, state, nodeId, {
     ui.selectedRunId = run.id;
     ui.runPinned = true;
   }
+  // A virtual node is a display projection, not producer ownership. It can
+  // become the node subject (graph/cells focus), but it never adopts the task
+  // or clears the unlinked flag that keeps the TASKS row honest.
+  const virtual = isVirtualRun(run);
   ui.selectedNodeId = node?.id;
   ui.runOverview = false;
-  if (syncTask) ui.selectedTaskId = node?.taskId;
-  ui.selectedTaskUnlinked = false;
+  if (syncTask && !virtual) ui.selectedTaskId = node?.taskId;
+  if (!virtual) ui.selectedTaskUnlinked = false;
   ui.follow = false;
   ui.followTarget = undefined;
   ui.manualScroll = manualScroll;

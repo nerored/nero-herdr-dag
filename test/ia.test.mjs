@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DemoEngine } from '../src/demo.mjs';
 import { messages } from '../src/i18n.mjs';
-import { normalizeSnapshot } from '../src/model.mjs';
-import { navTasks, renderApp } from '../src/render.mjs';
+import { isVirtualRun, normalizeSnapshot } from '../src/model.mjs';
+import { withOrphanRun } from '../src/orphan-run.mjs';
+import { navTasks, progressCounts, renderApp } from '../src/render.mjs';
 import { width as textWidth } from '../src/text.mjs';
 import {
   collapseTransition, expandTransition, filterSwitcher, moveSwitcher,
@@ -261,6 +262,30 @@ test('the breadcrumb truncates the run, survives, and names an unlinked task', (
   assert.equal(textWidth(header), 54);
   assert.equal(result.hitboxes.context.task.id, 'st_free');
   assert.equal(result.hitboxes.context.node, undefined);
+});
+
+test('a virtual run never supplies task-row progress', () => {
+  const visible = withOrphanRun(normalizeSnapshot({
+    version: 3, mode: 'live', connected: true, sessionId: 'virtual-progress',
+    runs: [{
+      id: 'run_real', status: 'running',
+      nodes: [{ id: 'n', state: 'running', task_id: 'st_linked' }], edges: [],
+    }],
+    tasks: [
+      { id: 'st_linked', description: 'Linked', status: 'running' },
+      { id: 'st_orphan', description: 'Orphan', status: 'running', percent: 40 },
+    ],
+  }));
+  const virtual = visible.runs.find(isVirtualRun);
+  assert.ok(virtual);
+  const orphan = visible.tasks.find(task => task.id === 'st_orphan');
+  const linked = visible.tasks.find(task => task.id === 'st_linked');
+
+  // The synthetic node is not a production row for the orphan task.
+  assert.equal(progressCounts(visible, orphan), undefined);
+  assert.equal(progressCounts(visible, orphan, virtual), undefined);
+  assert.deepEqual(progressCounts(visible, linked), { done: 0, total: 1 });
+  assert.deepEqual(progressCounts(visible, linked, visible.runs[0]), { done: 0, total: 1 });
 });
 
 test('the switcher freezes runs-then-tasks order by id and refreshes values', () => {

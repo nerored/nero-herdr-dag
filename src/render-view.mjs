@@ -8,7 +8,7 @@ import { memoNavTasks, memoProgressCounts } from './derived-cache.mjs';
 import { diagnosisFor } from './diagnosis.mjs';
 import { t } from './i18n.mjs';
 import {
-  linkedTaskIdsForRun, modeFor, navTasks as pureNavTasks, nodeForTask, orphanNavTasks,
+  isVirtualRun, linkedTaskIdsForRun, modeFor, navTasks as pureNavTasks, nodeForTask, orphanNavTasks,
   percentFor, isUnsuccessfulState, PROVENANCE_KINDS, runStats, TERMINAL,
 } from './model.mjs';
 import { recordTargetFor } from './records.mjs';
@@ -429,6 +429,8 @@ export function percentInfo(entity, language, counts) {
 
 // done/total for the progress row: a task uses its child checklist when one is
 // recorded, otherwise the run that owns its node supplies the node counts.
+// A virtual run is a display group, not an owner, so it never answers the row:
+// its synthetic nodes would report the whole orphan group as one task's work.
 export function progressCounts(snapshot, task, run) {
   return memoProgressCounts(snapshot, task, run, () => {
     const children = task?.children ?? [];
@@ -438,11 +440,12 @@ export function progressCounts(snapshot, task, run) {
         total: children.length,
       };
     }
-    if (run) {
+    if (run && !isVirtualRun(run)) {
       const stats = runStats(run);
       return { done: stats.done, total: stats.total };
     }
     for (const candidate of snapshot?.runs ?? []) {
+      if (isVirtualRun(candidate)) continue;
       if (candidate.nodes.some(node => node.taskId === task?.id)) {
         const stats = runStats(candidate);
         return { done: stats.done, total: stats.total };

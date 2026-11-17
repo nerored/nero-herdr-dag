@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { computeLayout, nodeScrollTarget } from '../src/graph.mjs';
-import { nodeForTask, normalizeSnapshot } from '../src/model.mjs';
+import { isVirtualRun, nodeForTask, normalizeSnapshot } from '../src/model.mjs';
+import { withOrphanRun } from '../src/orphan-run.mjs';
 import { navTasks, renderApp, taskAtPoint, taskListLayout } from '../src/render.mjs';
 import {
-  createViewer, ensureSelectionState, selectRunById, selectTaskAtPoint, selectTaskHit, selectionScrollTarget,
+  createViewer, ensureSelectionState, selectRunById, selectTaskAtPoint, selectTaskHit,
+  selectionScrollTarget, setNodeSubject,
 } from '../src/viewer.mjs';
 import { baseUi as makeBaseUi, themeFor } from './helpers.mjs';
 
@@ -185,6 +187,45 @@ test('an unlinked click clears the graph subject and keeps task details', () => 
   assert.equal(rendered.detailsKey, 'task:st_free');
   assert.match(rendered.text, /TASK · st_free/);
   assert.match(rendered.text, /Free task/);
+});
+
+test('an explicit virtual node is a node subject and never owns the task', () => {
+  const snapshot = withOrphanRun(normalizeSnapshot({
+    version: 3, mode: 'live', connected: true, sessionId: 'virtual-node',
+    runs: [{
+      id: 'run_real', name: 'real', status: 'running',
+      nodes: [{ id: 'n', state: 'running', task_id: 'st_linked' }], edges: [],
+    }],
+    tasks: [
+      { id: 'st_linked', description: 'Linked', status: 'running' },
+      { id: 'st_orphan', description: 'Orphan', status: 'running' },
+    ],
+  }));
+  const virtual = snapshot.runs.find(isVirtualRun);
+  assert.ok(virtual);
+  const ui = baseUi({
+    runIndex: snapshot.runs.indexOf(virtual),
+    selectedRunId: virtual.id,
+    selectedTaskId: 'st_orphan',
+    selectedTaskUnlinked: true,
+    selectedNodeId: undefined,
+    focus: 'graph',
+    foldedRunId: virtual.id,
+    foldedByRun: new Map(),
+    folded: new Set(),
+  });
+
+  const applied = setNodeSubject(ui, snapshot, 'st_orphan', { runId: virtual.id });
+  assert.equal(applied.run.id, virtual.id);
+  assert.equal(ui.selectedNodeId, 'st_orphan', 'the virtual display node becomes the node subject');
+  assert.equal(ui.selectedTaskId, 'st_orphan');
+  assert.equal(ui.selectedTaskUnlinked, true, 'the task is still unlinked');
+  assert.equal(nodeForTask(snapshot, 'st_orphan'), undefined);
+  assert.equal(nodeForTask(snapshot, 'st_orphan', { includeVirtual: true }).node.id, 'st_orphan');
+
+  ensureSelectionState(ui, snapshot);
+  assert.equal(ui.selectedNodeId, 'st_orphan', 'the explicit node survives reconciliation');
+  assert.equal(ui.selectedTaskUnlinked, true);
 });
 
 test('a stale task hitbox is ignored instead of selecting the old subject', () => {
