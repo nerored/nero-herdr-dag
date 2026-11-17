@@ -280,7 +280,8 @@ function renderNarrowCellList(canvas, rect, snapshot, ui, { palette, language, f
   const viewport = Math.max(1, rect.h - 2);
   const layoutHidden = isVirtualRun(run) ? Math.max(0, nodes.length - viewport) : 0;
   const cap = isVirtualRun(run) && run.virtual?.omittedNodes
-    ? ` · o${run.virtual.omittedNodes} h${layoutHidden}`
+    ? ` · ${t(language, 'virtualGraphOmitted', { count: run.virtual.omittedNodes })}`
+      + ` · ${t(language, 'virtualGraphHidden', { count: layoutHidden })}`
     : '';
   narrowListFrame(canvas, rect, run ? `${t(language, 'cells')} · ${fit(`${displayRunName(run, language)}${cap}`, Math.max(6, rect.w - 12))}` : t(language, 'cells'), palette, focused);
   const maxScroll = Math.max(0, nodes.length - viewport);

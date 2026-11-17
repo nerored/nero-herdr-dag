@@ -167,6 +167,56 @@ test('virtual graph paints flat member nodes with hitboxes and separate cap coun
   assert.match(narrow.lastRender.text, /h4095/);
 });
 
+test('wide virtual graph badge prints one hidden and one omitted token', async () => {
+  const viewer = await sessionViewer({ width: 160, height: 50 });
+  const tasks = Array.from({ length: 5000 }, (_, index) => ({
+    id: `orphan-${index}`,
+    description: `Orphan ${index}`,
+    status: 'pending',
+  }));
+  viewer.acceptSnapshot(normalizeSnapshot({
+    version: 3, mode: 'live', connected: true, sessionId: 'virtual-wide-badge', runs: [], tasks,
+  }), { silent: true });
+  viewer.draw();
+  const frame = viewer.lastRender;
+  const badgeLine = frame.text.split('\n').find(line => line.includes('GRAPH') && line.includes('4096/5000'));
+  assert.ok(badgeLine, 'the wide badge is painted in full');
+  assert.equal((badgeLine.match(/h\d+/g) ?? []).length, 1, `one layout-hidden token in: ${badgeLine}`);
+  assert.equal((badgeLine.match(/o\d+/g) ?? []).length, 1, `one omitted token in: ${badgeLine}`);
+  assert.match(badgeLine, new RegExp(`h${frame.graph.layout.hiddenNodes}`));
+  assert.match(badgeLine, /o904/);
+});
+
+test('narrow CELLS cap localizes omitted and hidden tokens in EN and ZH', async () => {
+  const render = async (language) => {
+    const viewer = await sessionViewer({ width: 70, height: 24 });
+    viewer.ui.language = language;
+    const tasks = Array.from({ length: 5000 }, (_, index) => ({
+      id: `st_${String(index).padStart(5, '0')}`,
+      description: `orphan ${index}`,
+      status: 'pending',
+    }));
+    viewer.acceptSnapshot(normalizeSnapshot({
+      version: 3, mode: 'live', connected: true, sessionId: `narrow-cap-${language}`, runs: [], tasks,
+    }), { silent: true });
+    viewer.draw();
+    return viewer.lastRender;
+  };
+  const en = await render('en');
+  const zh = await render('zh');
+  const enLine = en.text.split('\n').find(line => line.includes('CELLS'));
+  const zhLine = zh.text.split('\n').find(line => line.includes('节点 · 未归属任务'));
+  assert.ok(enLine && zhLine);
+  const enHidden = en.run.nodes.length - en.scroll.cells.viewportH;
+  const zhHidden = zh.run.nodes.length - zh.scroll.cells.viewportH;
+  assert.match(enLine, new RegExp(`o904 · h${enHidden}`));
+  assert.match(zhLine, new RegExp(`省904 · 隐${zhHidden}`));
+  assert.doesNotMatch(zhLine, /o904|h\d+/, 'the Chinese cell cap never falls back to Latin tokens');
+  assert.doesNotMatch(enLine, /省|隐/);
+  assert.equal(en.run.virtual.omittedNodes, 904);
+  assert.equal(zh.run.virtual.omittedNodes, 904, 'wide and narrow agree on the omitted count');
+});
+
 test('virtual painted surfaces prove labels, scope, hitboxes, switcher, and Chinese context', async () => {
   const raw = normalizeSnapshot({
     version: 3, mode: 'live', connected: true, sessionId: 'painted-surfaces',
@@ -241,20 +291,40 @@ test('normal indexed run never paints an appended virtual run', () => {
   assert.ok(frame.hitboxes.runs.has('run_build'));
 });
 
-test('virtual task scope remains unattached after pressing the existing scope toggle', async () => {
+test('a virtual-only TASKS scope never leaks back onto a real run', async () => {
   const viewer = await sessionViewer({ width: 120, height: 40 });
   viewer.acceptSnapshot(mixedSessionSnapshot(), { silent: true });
-  viewer.ui.runIndex = 1;
-  viewer.ui.selectedRunId = 'orphan:tasks';
+  const realIndex = viewer.snapshot.runs.findIndex(run => run.id === 'run_live');
+  const virtual = viewer.snapshot.runs.find(isVirtualRun);
+  assert.ok(realIndex >= 0 && virtual);
+  viewer.ui.runIndex = viewer.snapshot.runs.indexOf(virtual);
+  viewer.ui.selectedRunId = virtual.id;
   viewer.ui.focus = 'tasks';
   viewer.draw();
+
+  // The scope toggle on the virtual group must not store its derived
+  // 'unattached' label in the shared run/all state.
   press(viewer, 't');
   viewer.draw();
-  const geometry = taskListLayout(viewer.lastRender.layout.sidebar, viewer.snapshot, viewer.ui);
-  assert.equal(viewer.ui.taskScope, 'unattached');
-  assert.equal(geometry.scope, 'unattached');
-  assert.deepEqual(geometry.tasks.map(task => task.id), ['st_orphan_a', 'st_orphan_b']);
+  assert.equal(viewer.ui.taskScope, 'run', 'the virtual scope stays derived, not stored');
+  const virtualGeometry = taskListLayout(viewer.lastRender.layout.sidebar, viewer.snapshot, viewer.ui);
+  assert.equal(virtualGeometry.scope, 'unattached');
+  assert.deepEqual(virtualGeometry.tasks.map(task => task.id), ['st_orphan_a', 'st_orphan_b']);
   assert.match(viewer.lastRender.text, /TASKS\s+2 · unattached/);
+
+  // Switching back to the real run paints that run's own scope and linked list.
+  press(viewer, '\x1b[D', 'left');
+  viewer.draw();
+  assert.equal(viewer.ui.runIndex, realIndex);
+  assert.equal(viewer.ui.selectedRunId, 'run_live');
+  assert.equal(viewer.ui.taskScope, 'run');
+  const realGeometry = taskListLayout(viewer.lastRender.layout.sidebar, viewer.snapshot, viewer.ui);
+  assert.equal(realGeometry.scope, 'run');
+  assert.deepEqual(realGeometry.tasks.map(task => task.id), ['st_linked']);
+  const realTasksLine = viewer.lastRender.text.split('\n').find(line => /TASKS\s+1\b/.test(line));
+  assert.ok(realTasksLine, 'the real run paints its own TASKS header');
+  assert.doesNotMatch(realTasksLine, /unattached/i, 'the real run never paints the virtual scope');
+  assert.match(realTasksLine, /TASKS\s+1 · run/);
 });
 
 test('mixed linked and orphan tasks keep viewer 4/down order in canonical parity', async () => {

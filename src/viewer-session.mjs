@@ -574,10 +574,7 @@ export function createViewerSession({
         break;
       }
       case 'scope':
-        if (isVirtualRun(run)) ui.taskScope = 'unattached';
-        else ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
-        ui.tasksScroll = 0;
-        ui.tasksScrollTarget = 0;
+        toggleTaskScope(run);
         break;
       case 'completed':
         ui.completedCollapsed = !ui.completedCollapsed;
@@ -1055,7 +1052,16 @@ export function createViewerSession({
     if (!ui.expanded) Object.assign(ui, expandTransition(ui));
   }
 
-  function toggleTaskScope() {
+  // The virtual group's scope is derived by taskListLayout from its full
+  // membership. Writing that derived value into ui.taskScope would let it leak
+  // onto the next real run, so the shared run/all toggle leaves it untouched.
+  function toggleTaskScope(run) {
+    if (!isVirtualRun(run)) ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
+    ui.tasksScroll = 0;
+    ui.tasksScrollTarget = 0;
+  }
+
+  function toggleTaskScopeFromKeyboard() {
     const structural = structuralFor(terminalWidth(), {
       expanded: ui.expanded, sidebar: sidebarEnabled(),
     });
@@ -1063,11 +1069,7 @@ export function createViewerSession({
       openSwitcher();
       return;
     }
-    const currentRun = snapshot.runs?.[ui.runIndex];
-    if (isVirtualRun(currentRun)) ui.taskScope = 'unattached';
-    else ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
-    ui.tasksScroll = 0;
-    ui.tasksScrollTarget = 0;
+    toggleTaskScope(snapshot.runs?.[ui.runIndex]);
   }
 
   // A failed read installs a placeholder snapshot without a draw; the pointer
@@ -1147,7 +1149,7 @@ export function createViewerSession({
     toggleVerbose,
     focusDuty,
     expandDetails,
-    toggleTaskScope,
+    toggleTaskScope: toggleTaskScopeFromKeyboard,
     syncPointerViewModel,
   };
 }

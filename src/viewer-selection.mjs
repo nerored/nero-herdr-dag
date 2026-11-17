@@ -42,6 +42,9 @@ export function alignTaskSelection(ui, state, taskId) {
 // the unrelated highlight the task click just cleared.
 export function ensureSelectionState(ui, state) {
   if (!state) return;
+  // 'unattached' is a virtual-only scope derived by taskListLayout; it must
+  // never survive in shared UI state, where a later real run would paint it.
+  if (ui.taskScope !== 'run' && ui.taskScope !== 'all') ui.taskScope = 'run';
   if (!state.runs.length) {
     ui.runIndex = 0;
     ui.selectedRunId = undefined;
@@ -85,7 +88,12 @@ export function ensureSelectionState(ui, state) {
     // as the graph/cells subject instead of aligning to another task that
     // would move the highlight back to the run's first node.
     const run = state.runs[ui.runIndex];
-    const nodeOwnsSubject = (ui.focus === 'graph' || ui.focus === 'cells')
+    // A virtual run never auto-picks a node, so any node still present there
+    // was explicitly clicked or cycled. Keep it as the subject while details
+    // is focused too; only a node that vanished from the group is cleared.
+    const focusOwnsNode = ui.focus === 'graph' || ui.focus === 'cells'
+      || (ui.focus === 'details' && isVirtualRun(run));
+    const nodeOwnsSubject = focusOwnsNode
       && run?.nodes.some(node => node.id === ui.selectedNodeId);
     if (nodeOwnsSubject) {
       ui.selectedTaskId = undefined;

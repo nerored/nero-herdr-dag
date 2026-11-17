@@ -177,7 +177,6 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
       if (run.virtual?.omittedNodes) parts.push(t(language, 'virtualGraphOmitted', { count: run.virtual.omittedNodes }));
       if (layout?.hiddenNodes) parts.push(t(language, 'virtualGraphHidden', { count: layout.hiddenNodes }));
     }
-    if (isVirtualRun(run) && layout?.hiddenNodes) parts.push(t(language, 'virtualGraphHiddenShort', { count: layout.hiddenNodes }));
     parts.push(text);
     return parts.join(' · ');
   };
@@ -256,14 +255,6 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
     focused: ui.focus === 'graph',
     badge: graphBadge(statsBadge(), layout),
   });
-  if (isVirtualRun(run) && (run.virtual?.omittedNodes || layout.hiddenNodes)) {
-    rich(canvas, innerX + 1, innerY + 1, innerW - 2, [[
-      [t(language, 'virtualGraphCapSummary', {
-        omitted: run.virtual?.omittedNodes ?? 0,
-        hidden: layout.hiddenNodes ?? 0,
-      }), { fg: palette.warn, bold: true }],
-    ]], palette, palette.panel);
-  }
   const maxScroll = Math.max(0, layout.height - viewportH);
   const scroll = scrollOffset(ui.graphScroll, maxScroll);
   const offset = layout.height <= viewportH ? Math.floor((viewportH - layout.height) / 2) : -scroll;
@@ -315,7 +306,7 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
         members: run.virtual?.memberTaskIds?.length ?? run.virtual?.count ?? run.nodes.length,
       }),
       run.virtual?.omittedNodes ? t(language, 'virtualGraphOmitted', { count: run.virtual.omittedNodes }) : null,
-      layout?.hiddenNodes ? t(language, 'virtualGraphHiddenShort', { count: layout.hiddenNodes }) : null,
+      layout?.hiddenNodes ? t(language, 'virtualGraphHidden', { count: layout.hiddenNodes }) : null,
     ].filter(Boolean).join(' · ')
     : t(language, 'edgesNodes', { edges: run.edges.length, nodes: stats.total });
   if (ui.graphFocus && ui.selectedNodeId) {

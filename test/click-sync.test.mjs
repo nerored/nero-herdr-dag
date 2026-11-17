@@ -9,6 +9,7 @@ import {
   selectionScrollTarget, setNodeSubject,
 } from '../src/viewer.mjs';
 import { baseUi as makeBaseUi, themeFor } from './helpers.mjs';
+import { createViewerSession } from '../src/viewer-session.mjs';
 
 const now = 1_000_000;
 const { palette, theme } = themeFor(0);
@@ -226,6 +227,48 @@ test('an explicit virtual node is a node subject and never owns the task', () =>
   ensureSelectionState(ui, snapshot);
   assert.equal(ui.selectedNodeId, 'st_orphan', 'the explicit node survives reconciliation');
   assert.equal(ui.selectedTaskUnlinked, true);
+});
+
+test('an explicit virtual node survives an accept while details is focused', () => {
+  const raw = normalizeSnapshot({
+    version: 3, mode: 'live', connected: true, sessionId: 'virtual-node-persist',
+    runs: [],
+    tasks: [
+      { id: 'st_alpha', description: 'Alpha', status: 'running' },
+      { id: 'st_beta', description: 'Beta', status: 'pending' },
+    ],
+  });
+  const session = createViewerSession({ requestRepaint: () => {}, draw: () => {} });
+  session.ui.follow = false;
+  session.acceptSnapshot(raw, { silent: true });
+  const virtual = session.snapshot.runs.find(isVirtualRun);
+  assert.ok(virtual);
+  session.vm.frame = { run: virtual, layout: { layout: 'investigation' } };
+
+  // Click the display node from the default state (no task subject), then move
+  // focus into details; the next accept must keep that explicit node.
+  session.selectNodeFromPointer('st_alpha');
+  assert.equal(session.ui.selectedNodeId, 'st_alpha');
+  assert.equal(session.ui.selectedTaskId, undefined);
+  assert.equal(session.ui.selectedTaskUnlinked, false);
+  session.expandDetails();
+  assert.equal(session.ui.focus, 'details');
+  assert.equal(session.ui.lastFocus, 'graph');
+
+  session.acceptSnapshot(raw, { silent: true });
+  assert.equal(session.ui.selectedNodeId, 'st_alpha', 'the explicit node survives a details-focused accept');
+  assert.equal(session.ui.selectedTaskId, undefined, 'TASKS still has no synthesized row');
+  assert.equal(session.ui.selectedTaskUnlinked, false, 'a display node never becomes task ownership');
+  assert.equal(nodeForTask(session.snapshot, 'st_alpha'), undefined);
+  assert.ok(session.snapshot.runs.find(isVirtualRun).nodes.some(candidate => candidate.id === 'st_alpha'));
+
+  // Only a vanished node loses the subject.
+  session.acceptSnapshot(normalizeSnapshot({
+    version: 3, mode: 'live', connected: true, sessionId: 'virtual-node-persist',
+    runs: [],
+    tasks: [{ id: 'st_beta', description: 'Beta', status: 'pending' }],
+  }), { silent: true });
+  assert.equal(session.ui.selectedNodeId, undefined, 'a removed virtual node is cleared');
 });
 
 test('a stale task hitbox is ignored instead of selecting the old subject', () => {
