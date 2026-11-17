@@ -6,6 +6,7 @@ import { saveConfig, staleAfterMs } from './config.mjs';
 import { computeLayout, graphLayoutKey } from './graph.mjs';
 import { languageLabel, normalizeLanguage, t } from './i18n.mjs';
 import { findRunningTarget, navTasks, nodeForTask, normalizeSnapshot, orphanNavTasks } from './model.mjs';
+import { withOrphanRun } from './orphan-run.mjs';
 import { switcherView } from './render-overlays.mjs';
 import { dashboardLayout } from './render-view.mjs';
 import { keyboardScrollTarget } from './scroll.mjs';
@@ -203,6 +204,15 @@ export function createViewerSession({
     reconcile(vm, { snapshot });
   }
 
+  // The one visible-snapshot seam: hide first, then append the view-only orphan
+  // run. `fullSnapshot` stays producer-faithful, and withOrphanRun memoizes the
+  // projection per hidden snapshot so repeated reads never stack groups.
+  function visibleSnapshot(full) {
+    return withOrphanRun(hiddenSnapshot(full, {
+      runIds: ui.hiddenRunIds, taskIds: ui.hiddenTaskIds,
+    }));
+  }
+
   function stateSignature(current) {
     const map = new Map();
     for (const run of current.runs) {
@@ -255,9 +265,7 @@ export function createViewerSession({
     }
     fullSnapshot = normalized;
     pruneHiddenSubjects(ui, normalized);
-    snapshot = hiddenSnapshot(normalized, {
-      runIds: ui.hiddenRunIds, taskIds: ui.hiddenTaskIds,
-    });
+    snapshot = visibleSnapshot(normalized);
     reconcile(vm, { snapshot, previousRunIds, hadRuns });
     if (ui.follow && snapshot.connected) follow(now);
     requestRepaint();
@@ -838,9 +846,7 @@ export function createViewerSession({
   }
 
   function refreshHiddenSnapshot() {
-    snapshot = hiddenSnapshot(fullSnapshot, {
-      runIds: ui.hiddenRunIds, taskIds: ui.hiddenTaskIds,
-    });
+    snapshot = visibleSnapshot(fullSnapshot);
     ensureSelection();
     helpFrameDrawn = false;
     void draw();

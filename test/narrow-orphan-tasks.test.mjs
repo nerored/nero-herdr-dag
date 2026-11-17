@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeSnapshot } from '../src/model.mjs';
+import { normalizeSnapshot, isVirtualRun } from '../src/model.mjs';
 import { orphanNavTasks } from '../src/model.mjs';
 import { dutyFocusForKey } from '../src/viewer-keymap.mjs';
 import { createTestViewer } from './helpers.mjs';
@@ -82,10 +82,18 @@ test('orphan-only duty paints TASKS and up/down selects each orphan task', async
     const first = viewer.lastRender;
     assert.match(first.text, /TASKS/, 'the TASKS region is painted');
     assert.ok(first.scroll.tasks.viewportH > 0, 'the task list exposes a scroll viewport');
-    assert.equal(first.run, undefined, 'an empty run list never fabricates a run');
-    assert.equal(first.hitboxes.nodes.size, 0, 'no synthetic node is painted');
-    assert.equal(viewer.ui.selectedRunId, undefined);
+    assert.equal(first.run?.id, 'orphan:tasks', 'orphans are grouped under the view-only run');
+    assert.equal(first.run?.virtual?.kind, 'orphans');
+    assert.ok(first.hitboxes.nodes.size > 0, 'the virtual display nodes are painted');
+    assert.equal(viewer.ui.selectedRunId, 'orphan:tasks');
     assert.equal(dutyFocusForKey('4'), 'tasks');
+
+    // The visible virtual run seeds a graph subject during reconciliation. This
+    // test owns the TASKS row order, so start from the neutral task subject the
+    // unlinkable list has always used.
+    viewer.ui.selectedTaskId = undefined;
+    viewer.ui.selectedNodeId = undefined;
+    viewer.ui.selectedTaskUnlinked = false;
 
     // Focus starts on the duty body; key 4 moves it to the painted TASKS list.
     viewer.ui.focus = 'details';
@@ -110,8 +118,8 @@ test('orphan-only duty paints TASKS and up/down selects each orphan task', async
     viewer.draw();
     assert.match(viewer.lastRender.text, /Beta orphan/);
     assert.match(viewer.lastRender.text, /no node/);
-    assert.equal(viewer.lastRender.run, undefined);
-    assert.equal(viewer.lastRender.hitboxes.nodes.size, 0);
+    assert.equal(viewer.lastRender.run?.id, 'orphan:tasks');
+    assert.ok(viewer.lastRender.hitboxes.nodes.size > 0);
 
     press(viewer, '\x1b[B', 'down');
     assert.equal(viewer.ui.selectedTaskId, 'st_zeta', 'completed orphan rows follow running rows');
@@ -186,4 +194,127 @@ test('a normal run keeps RUNS/CELLS/DUTY and 1/2/3 focus without a TASKS region'
   assert.equal(viewer.ui.focus, 'details');
   press(viewer, '4');
   assert.equal(viewer.ui.focus, 'details', 'an unpainted TASKS region never keeps focus');
+});
+
+// The session boundary is the only place the virtual run may enter. These
+// fixtures keep a real run so the append-last and hide-first order is visible.
+const sessionViewer = async ({ width = 120, height = 40 } = {}) => {
+  const { viewer } = await createTestViewer({
+    args: { once: true, width, height, noColor: true, noMotion: true, fps: 10 },
+    deps: {
+      loadConfig: async () => ({ language: 'en' }),
+      loadOmoTheme: async () => 'system',
+      loadOmoAppearance: async () => ({}),
+      columns: width,
+      rows: height,
+    },
+  });
+  viewer.ui.follow = false;
+  return viewer;
+};
+
+const mixedSessionSnapshot = (orphanStatus = 'running') => normalizeSnapshot({
+  version: 3,
+  mode: 'live',
+  connected: true,
+  sessionId: 'mixed-session-orphan',
+  updatedAt: '2026-11-16T12:00:00.000Z',
+  runs: [{
+    id: 'run_live',
+    name: 'live run',
+    status: 'running',
+    nodes: [{ id: 'api', state: 'running', task_id: 'st_linked', percent: 60 }],
+    edges: [],
+  }],
+  tasks: [
+    { id: 'st_linked', description: 'Linked task', status: 'running', percent: 60 },
+    { id: 'st_orphan_a', description: 'Orphan A', status: orphanStatus, percent: 40 },
+    { id: 'st_orphan_b', description: 'Orphan B', status: 'pending' },
+  ],
+});
+
+test('the visible session snapshot appends one virtual run and repeated accepts never duplicate it', async () => {
+  const viewer = await sessionViewer();
+  const raw = mixedSessionSnapshot();
+  assert.equal(viewer.acceptSnapshot(raw, { silent: true }), true);
+
+  assert.equal(viewer.fullSnapshot.runs.length, 1, 'the raw snapshot keeps only the producer run');
+  assert.equal(viewer.fullSnapshot.runs.some(isVirtualRun), false);
+  assert.notEqual(viewer.snapshot, viewer.fullSnapshot);
+  assert.deepEqual(viewer.snapshot.runs.map(run => run.id), ['run_live', 'orphan:tasks']);
+  assert.equal(viewer.snapshot.runs.at(-1).virtual.count, 2);
+  assert.deepEqual(viewer.snapshot.runs.at(-1).virtual.memberTaskIds, ['st_orphan_a', 'st_orphan_b']);
+
+  // A second accept of the same capture rebuilds the projection exactly once.
+  assert.equal(viewer.acceptSnapshot(raw, { silent: true }), true);
+  assert.equal(viewer.snapshot.runs.filter(isVirtualRun).length, 1);
+  assert.equal(viewer.snapshot.runs.length, 2);
+
+  // The session keeps the same visible object across draws; only an accepted
+  // capture or a hidden-set change recomposes it.
+  const settledVisible = viewer.snapshot;
+  viewer.draw();
+  assert.equal(viewer.snapshot, settledVisible);
+  assert.equal(viewer.snapshot.runs.filter(isVirtualRun).length, 1);
+
+  // The transition signature stays on the raw snapshot: one task toast, not a
+  // second synthetic-node toast for the same completion.
+  viewer.ui.toasts = [];
+  assert.equal(viewer.acceptSnapshot(mixedSessionSnapshot('completed'), { silent: false }), true);
+  assert.equal(viewer.ui.toasts.filter(toast => /completed/.test(toast.text)).length, 1);
+  assert.equal(viewer.snapshot.runs.filter(isVirtualRun).length, 1);
+});
+
+test('hidden and clear rebuild one virtual run from the remaining visible orphans', async () => {
+  const viewer = await sessionViewer();
+  const raw = normalizeSnapshot({
+    version: 3,
+    mode: 'live',
+    connected: true,
+    sessionId: 'hidden-session-orphan',
+    updatedAt: '2026-11-16T12:00:00.000Z',
+    runs: [{
+      id: 'run_live',
+      name: 'live run',
+      status: 'running',
+      nodes: [{ id: 'api', state: 'running', task_id: 'st_linked' }],
+      edges: [],
+    }],
+    tasks: [
+      { id: 'st_linked', description: 'Linked task', status: 'running' },
+      {
+        id: 'st_done_a', description: 'Done orphan A', status: 'completed',
+        completedAt: '2020-01-01T00:00:00.000Z', updatedAt: '2020-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'st_done_b', description: 'Done orphan B', status: 'completed',
+        completedAt: '2020-01-01T00:00:00.000Z', updatedAt: '2020-01-01T00:00:00.000Z',
+      },
+    ],
+  });
+  assert.equal(viewer.acceptSnapshot(raw, { silent: true }), true);
+  assert.equal(viewer.snapshot.runs.at(-1).virtual.count, 2);
+
+  viewer.ui.hiddenTaskIds.add('st_done_a');
+  viewer.acceptSnapshot(raw, { silent: true });
+  assert.equal(viewer.snapshot.runs.filter(isVirtualRun).length, 1);
+  assert.deepEqual(viewer.snapshot.runs.at(-1).virtual.memberTaskIds, ['st_done_b']);
+
+  viewer.ui.hiddenTaskIds.add('st_done_b');
+  viewer.acceptSnapshot(raw, { silent: true });
+  assert.equal(viewer.snapshot.runs.some(isVirtualRun), false, 'no visible orphans means no virtual run');
+  assert.deepEqual(viewer.snapshot.runs.map(run => run.id), ['run_live']);
+
+  viewer.ui.hiddenTaskIds.clear();
+  viewer.acceptSnapshot(raw, { silent: true });
+  assert.equal(viewer.snapshot.runs.filter(isVirtualRun).length, 1);
+  assert.equal(viewer.snapshot.runs.at(-1).virtual.count, 2);
+
+  viewer.handleKey('x', { sequence: 'x', name: 'x' });
+  assert.equal(viewer.snapshot.runs.filter(isVirtualRun).length, 0);
+  assert.deepEqual(viewer.snapshot.runs.map(run => run.id), ['run_live']);
+
+  viewer.handleKey('u', { sequence: 'u', name: 'u' });
+  assert.equal(viewer.snapshot.runs.filter(isVirtualRun).length, 1);
+  assert.equal(viewer.snapshot.runs.at(-1).virtual.count, 2);
 });

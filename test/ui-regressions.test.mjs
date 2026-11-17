@@ -483,8 +483,7 @@ test('the viewer read lifecycle keeps a failed read and lets a healthy snapshot 
   assert.equal(readFailureEvidence(healthy, undefined).placeholder, undefined);
 });
 
-test('a legacy v2 explicit percent renders numerically through the CLI', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'dag-legacy-percent-'));
+test('a legacy v2 explicit percent renders numerically through the CLI', () => {  const dir = mkdtempSync(join(tmpdir(), 'dag-legacy-percent-'));
   const statePath = join(dir, 'snapshot.json');
   writeFileSync(statePath, JSON.stringify({
     version: 2, sessionId, connected: true,
@@ -507,7 +506,8 @@ test('a legacy v2 explicit percent renders numerically through the CLI', () => {
   try {
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /87%/);
-    assert.doesNotMatch(run.stdout, /87% \(derived\)/);
+    assert.match(run.stdout, /orphan:tasks/, 'the unlinked task is grouped for display');
+    assert.doesNotMatch(run.stdout, /87% \(derived\)/, 'the selected real run keeps its recorded percent');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

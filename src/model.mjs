@@ -677,6 +677,9 @@ export function linkedTaskIds(snapshot) {
   return memoLinkedTaskIds(snapshot, state => {
     const ids = new Set();
     for (const run of state.runs ?? []) {
+      // A virtual run displays orphan tasks; it never becomes their owner.
+      // Counting its nodes here would erase the orphan list that builds it.
+      if (isVirtualRun(run)) continue;
       for (const node of run.nodes ?? []) if (node.taskId) ids.add(node.taskId);
     }
     return ids;
@@ -829,12 +832,16 @@ export function percentFor(entity) {
 // The inverse lookup used by the navigation panel: a task has a place in the
 // graph only when a node in a loaded run declares it as its task. Standalone
 // tasks and tasks restored from runs without a checkpoint return undefined.
+// A virtual run displays orphans but owns nothing, so it never answers this
+// producer-ownership lookup; a virtual graph node is selected explicitly by its
+// graph path instead.
 // A task referenced by several historical runs prefers the run the user is
 // already looking at, then the first run in the snapshot's display order.
 export function nodeForTask(snapshot, taskId, { preferRunId } = {}) {
   if (!snapshot?.runs?.length || !taskId) return undefined;
   const matches = [];
   for (const run of snapshot.runs) {
+    if (isVirtualRun(run)) continue;
     const node = run.nodes.find(candidate => candidate.taskId === taskId);
     if (node) matches.push({ run, node });
   }
