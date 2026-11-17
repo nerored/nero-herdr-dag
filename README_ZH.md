@@ -248,6 +248,8 @@ OmO 进程                                  Herdr viewer 进程
 
 - `src/model.mjs`：归一化 v1/v2/v3 快照，推导 mode 与字段来源，清理文本，
   计算拓扑层、run 统计和选择查找。
+- `src/orphan-run.mjs`：把可见的根孤立任务投影成一个视图专用 run，追加在真实
+  run 之后；统计使用完整成员，显示节点保持扁平并有上限。
 - `src/normalize.mjs`：宿主值原语只有这一份实现，覆盖文本、数字、整数、
   ISO 时间、字节长度和已定义字段。
 - `src/evidence.mjs`：统一归一化宿主证据，包括思考/回复摘录、速率历史、

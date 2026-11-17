@@ -318,6 +318,9 @@ Modules are grouped by role. Every module in `src/` is listed once below.
 - `src/model.mjs` normalizes v1, v2, and v3 snapshots, derives mode and field
   provenance, sanitizes text, and computes topological layers, run statistics,
   and selection lookups.
+- `src/orphan-run.mjs` projects visible root orphan tasks into one view-only
+  run appended after real runs, keeping full membership for stats while the
+  display nodes stay capped and flat.
 - `src/normalize.mjs` is the one implementation of each host-value primitive:
   text, number, integer, ISO timestamp, byte length, and defined fields.
 - `src/evidence.mjs` normalizes host evidence once, covering reasoning and

@@ -666,6 +666,13 @@ function computeRunStats(run) {
   };
 }
 
+// A virtual run is a viewer projection, never producer ownership. The marker
+// is structural so model readers can recognize it without importing the
+// projection module that builds it.
+export function isVirtualRun(run) {
+  return Boolean(run) && typeof run === 'object' && run.virtual?.kind === 'orphans';
+}
+
 export function linkedTaskIds(snapshot) {
   return memoLinkedTaskIds(snapshot, state => {
     const ids = new Set();

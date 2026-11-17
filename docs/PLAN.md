@@ -235,6 +235,7 @@ viewer 解析 `generatedAt` 的顺序是：`generatedAt`、`updatedAt`、`genera
 bin/dag-studio.mjs        CLI: demo / view / install / uninstall / --help / --version（-h、-v 为别名）
 extension.mjs             OmO 生命周期、事件订阅、/dag-studio
 src/model.mjs             快照 v1/v2/v3 规范化、模式与字段来源、运行排序、拓扑分层
+src/orphan-run.mjs        可见根孤立任务的视图专用 run 投影（追加末位、扁平零边、显示上限）
 src/normalize.mjs         宿主值原语（文本、数字、整数、ISO 时间、字节长度、已定义字段）
 src/evidence.mjs          任务/运行证据字段的统一规范化（回复、错误、重试、turn、run_stats）
 src/task-data.mjs         任务存储读取、合并、父子关系
