@@ -5,7 +5,7 @@
 // acyclic.
 import { rich } from './frame-primitives.mjs';
 import { statusLabel, t } from './i18n.mjs';
-import { modeFor, runStats } from './model.mjs';
+import { isVirtualRun, modeFor, runStats } from './model.mjs';
 import {
   captureAgeLabel, displayRunName, entityState, HEADER_H, isActiveSnapshot,
   modeColor, resolveSelection, snapshotFreshness,
@@ -32,7 +32,7 @@ function renderBreadcrumb(canvas, width, snapshot, ui, { palette, language }, hi
   const status = entityState(statusEntity);
   const stats = run ? runStats(run) : null;
   const retries = statusEntity?.retries ?? statusEntity?.failedTurns;
-  const runText = run ? displayRunName(run) : t(language, 'noWorkflowShort');
+  const runText = run ? displayRunName(run, language) : t(language, 'noWorkflowShort');
   const nodeText = node?.label
     ?? (showTask ? t(language, 'noNodeShort') : t(language, 'runOverviewShort'));
   const taskText = showTask ? task?.id : node?.taskId;
@@ -49,6 +49,7 @@ function renderBreadcrumb(canvas, width, snapshot, ui, { palette, language }, hi
     const parts = [];
     const taskId = showTask ? task?.id : node?.taskId;
     if (runValue) parts.push({ kind: 'run', id: run?.id, text: runValue, sep: '', fg: palette.text, bold: true });
+    if (run && isVirtualRun(run)) parts.push({ kind: null, text: t(language, 'virtualRunBadge'), sep: ' · ', fg: palette.accent2, bold: true });
     if (nodeValue) parts.push({ kind: 'node', id: node?.id, text: nodeValue, sep: separator, fg: palette.accent2 });
     if (taskValue) parts.push({ kind: 'task', id: taskId, text: taskValue, sep: separator, fg: palette.dim });
     if (status) {

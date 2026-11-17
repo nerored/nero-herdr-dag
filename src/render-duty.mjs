@@ -14,6 +14,7 @@ import { agentLabel, modelLabel } from './render-subject.mjs';
 import { statusLabel, t } from './i18n.mjs';
 import {
   activitySummary, elapsedLabel, incoming, isUnsuccessfulState, nodeActivity, nodeMap, outgoing, runStats,
+  isVirtualRun,
 } from './model.mjs';
 import {
   progressBlock, renderEmptyState, sourceHealthSection,
@@ -72,7 +73,7 @@ function dutyBody(canvas, full, snapshot, ui, {
   const stats = run ? runStats(run) : null;
   const compact = viewportH <= 5;
   const subjectLabel = showTask ? task.description
-    : node ? node.label : run ? displayRunName(run) : t(language, 'noWorkflow');
+    : node ? node.label : run ? displayRunName(run, language) : t(language, 'noWorkflow');
   const subjectId = showTask ? task.id : node ? node.id : run ? run.id : '—';
   const planText = showTask ? [task.planRole, task.planPath].filter(Boolean).join(' · ') : undefined;
   const linkedTaskId = showTask ? task.id : node?.taskId;
@@ -143,7 +144,7 @@ function dutyBody(canvas, full, snapshot, ui, {
   ], palette);
   if (run) {
     y = detailLine(canvas, x, y, w, [[t(language, 'dutyRunLine', {
-      name: displayRunName(run), done: stats.done, total: stats.total, running: runningCount,
+      name: displayRunName(run, language), done: stats.done, total: stats.total, running: runningCount,
     }), { fg: palette.dim }]], palette);
   }
   // Plan identity belongs above progress and source health: on a short duty
@@ -257,7 +258,8 @@ function renderNarrowRunList(canvas, rect, snapshot, ui, { palette, language, fo
     rich(canvas, rect.x + 2, row, Math.max(1, rect.w - 4), [
       [`${selected ? '▸' : ' '} `, { fg: selected ? palette.accent : palette.faint, bold: selected }],
       [`${statusIcon(status)} `, { fg: statusColor(palette, status), bold: true }],
-      [fit(displayRunName(run), Math.max(8, rect.w - 22)), { fg: selected ? palette.white : palette.text, bold: selected }],
+      [fit(displayRunName(run, language), Math.max(8, rect.w - 22)), { fg: selected ? palette.white : palette.text, bold: selected }],
+      ...(isVirtualRun(run) ? [[` ${t(language, 'virtualRunBadge')}`, { fg: palette.accent2, bold: true }]] : []),
       [` ${fit(suffix, 12)}`, { fg: palette.faint }],
     ], palette, selected ? palette.selection : palette.panel);
     hitboxes.runs.set(run.id, { x: rect.x + 1, y: row, w: rect.w - 2, h: 1 });
@@ -275,8 +277,12 @@ function renderNarrowRunList(canvas, rect, snapshot, ui, { palette, language, fo
 function renderNarrowCellList(canvas, rect, snapshot, ui, { palette, language, focused = false }, hitboxes) {
   const run = snapshot?.runs?.[clamp(ui.runIndex ?? 0, 0, Math.max(0, (snapshot?.runs?.length ?? 1) - 1))];
   const nodes = run?.nodes ?? [];
-  narrowListFrame(canvas, rect, run ? `${t(language, 'cells')} · ${fit(displayRunName(run), Math.max(6, rect.w - 12))}` : t(language, 'cells'), palette, focused);
   const viewport = Math.max(1, rect.h - 2);
+  const layoutHidden = isVirtualRun(run) ? Math.max(0, nodes.length - viewport) : 0;
+  const cap = isVirtualRun(run) && run.virtual?.omittedNodes
+    ? ` · o${run.virtual.omittedNodes} h${layoutHidden}`
+    : '';
+  narrowListFrame(canvas, rect, run ? `${t(language, 'cells')} · ${fit(`${displayRunName(run, language)}${cap}`, Math.max(6, rect.w - 12))}` : t(language, 'cells'), palette, focused);
   const maxScroll = Math.max(0, nodes.length - viewport);
   const offset = scrollOffset(ui.cellsScroll, maxScroll);
   const region = { x: rect.x + 1, y: rect.y + 1, w: Math.max(1, rect.w - 2), h: viewport };
@@ -285,7 +291,7 @@ function renderNarrowCellList(canvas, rect, snapshot, ui, { palette, language, f
     if (row >= rect.y + rect.h - 1) break;
     const selected = node.id === ui.selectedNodeId;
     if (selected) canvas.fill(rect.x + 1, row, rect.w - 2, 1, { bg: palette.selection, fg: palette.text });
-    const status = node.state ?? 'pending';
+  const status = node.state ?? 'unknown';
     const suffix = percentInfo(node, language).known ? percentInfo(node, language).label : statusLabel(language, status);
     rich(canvas, rect.x + 2, row, Math.max(1, rect.w - 4), [
       [`${selected ? '▸' : ' '} `, { fg: selected ? palette.accent : palette.faint, bold: selected }],
@@ -307,7 +313,9 @@ function renderNarrowCellList(canvas, rect, snapshot, ui, { palette, language, f
 
 function renderNarrowTaskList(canvas, rect, snapshot, ui, { palette, language, focused = false }) {
   const tasks = orphanNavTasks(snapshot);
-  narrowListFrame(canvas, rect, t(language, 'tasks'), palette, focused);
+  narrowListFrame(canvas, rect, isVirtualRun(snapshot?.runs?.[ui.runIndex])
+    ? `${t(language, 'tasks')} · ${t(language, 'taskScopeUnattached')}`
+    : t(language, 'tasks'), palette, focused);
   const viewport = Math.max(1, rect.h - 2);
   const maxScroll = Math.max(0, tasks.length - viewport);
   const offset = scrollOffset(ui.tasksScroll, maxScroll);
@@ -385,7 +393,7 @@ export function renderDuty(canvas, rect, snapshot, ui, { now, time, motion = tru
     : selection.node ? selection.node.state : selection.run?.status;
   const label = selection.showTask ? selection.task.description
     : selection.node ? selection.node.label
-      : selection.run ? displayRunName(selection.run) : t(language, 'noWorkflow');
+      : selection.run ? displayRunName(selection.run, language) : t(language, 'noWorkflow');
   // The narrow panel names what it actually shows: a task, the current node, a
   // run overview, or details. "DUTY" was an internal layout name, not a subject.
   const title = selection.showTask

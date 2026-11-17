@@ -90,8 +90,9 @@ export function taskListLayout(rect, snapshot, ui) {
   const linked = run
     ? allTasks.filter(task => linkedTaskIdsForRun(run).has(task.id))
     : [];
-  const scoped = ui?.taskScope === 'all' || !run || !linked.length ? allTasks : linked;
-  const scope = !run || !linked.length ? 'all' : ui.taskScope;
+  const scoped = isVirtualRun(run) ? allTasks.filter(task => linkedTaskIdsForRun(run).has(task.id))
+    : ui?.taskScope === 'all' || !run || !linked.length ? allTasks : linked;
+  const scope = isVirtualRun(run) ? 'unattached' : !run || !linked.length ? 'all' : ui.taskScope;
   const completed = scoped.filter(task => task.status === 'completed');
   const completedCollapsed = ui?.completedCollapsed !== false;
   const tasks = completedCollapsed

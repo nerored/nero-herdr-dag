@@ -1,7 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { isVirtualRun, normalizeSnapshot, orphanNavTasks } from '../src/model.mjs';
-import { taskListLayout } from '../src/render.mjs';
+import { renderApp, taskListLayout } from '../src/render.mjs';
+import { withOrphanRun } from '../src/orphan-run.mjs';
+import { paletteAt, createTheme } from '../src/theme.mjs';
+import { filterSwitcher, switcherItems } from '../src/view-state.mjs';
+import { hitTargetAt } from '../src/view-model.mjs';
 import { advanceRunSelection, reconcileRunSelection } from '../src/view-state.mjs';
 import { dutyFocusForKey } from '../src/viewer-keymap.mjs';
 import { createViewerSession } from '../src/viewer-session.mjs';
@@ -128,6 +132,129 @@ test('orphan-only duty paints TASKS and up/down selects each orphan task', async
     press(viewer, '\x1b[A', 'up');
     assert.equal(viewer.ui.selectedTaskId, 'st_beta', 'up moves back through the painted list');
   }
+});
+
+test('virtual graph paints flat member nodes with hitboxes and separate cap counts', async () => {
+  const viewer = await sessionViewer({ width: 120, height: 40 });
+  const tasks = Array.from({ length: 4098 }, (_, index) => ({
+    id: `orphan-${index}`,
+    description: `Orphan ${index}`,
+    status: index === 0 ? 'unknown' : 'pending',
+  }));
+  viewer.acceptSnapshot(normalizeSnapshot({
+    version: 3, mode: 'live', connected: true, sessionId: 'virtual-cap', runs: [], tasks,
+  }), { silent: true });
+  viewer.draw();
+  const frame = viewer.lastRender;
+  const run = frame.run;
+  assert.equal(run.virtual.count, 4098);
+  assert.equal(run.virtual.memberTaskIds.length, 4098);
+  assert.equal(run.virtual.omittedNodes, 2);
+  assert.equal(run.edges.length, 0);
+  assert.ok(frame.hitboxes.nodes.size > 0);
+  assert.ok(frame.hitboxes.nodes.size <= run.nodes.length);
+  assert.match(frame.text, /UNATTACHED/);
+  assert.equal(frame.graph.layout.hiddenNodes, 3186);
+  assert.match(frame.text, /o2/);
+  assert.match(frame.text, /h3186/);
+  assert.equal(run.nodes[0].state, 'unknown');
+  const narrow = await sessionViewer({ width: 70, height: 24 });
+  narrow.acceptSnapshot(normalizeSnapshot({
+    version: 3, mode: 'live', connected: true, sessionId: 'virtual-cap-narrow', runs: [], tasks,
+  }), { silent: true });
+  narrow.draw();
+  assert.match(narrow.lastRender.text, /o2/);
+  assert.match(narrow.lastRender.text, /h4095/);
+});
+
+test('virtual painted surfaces prove labels, scope, hitboxes, switcher, and Chinese context', async () => {
+  const raw = normalizeSnapshot({
+    version: 3, mode: 'live', connected: true, sessionId: 'painted-surfaces',
+    runs: [{ id: 'real', name: 'Real', status: 'running', nodes: [{ id: 'linked-node', state: 'running', task_id: 'linked' }], edges: [] }],
+    tasks: [
+      { id: 'linked', description: 'Linked', status: 'running' },
+      { id: 'orphan-a', description: 'Orphan A', status: 'running', percent: 40 },
+      { id: 'orphan-b', description: 'Orphan B', status: 'unknown' },
+    ],
+  });
+  const snapshot = withOrphanRun(raw);
+  const virtual = snapshot.runs.at(-1);
+  const palette = paletteAt(0);
+  const theme = createTheme({ palette, color: false });
+  const baseUi = {
+    runIndex: 1, selectedRunId: virtual.id, focus: 'graph', selectedNodeId: 'orphan-a',
+    selectedTaskId: 'orphan-a', selectedTaskUnlinked: false, taskScope: 'all',
+    follow: false, motion: false, help: false, verbose: false, folded: new Set(),
+    sidebar: true, fps: 10, toasts: [], completedCollapsed: false,
+  };
+  for (const [width, height] of [[120, 40], [70, 24]]) {
+    const frame = renderApp(snapshot, width < 112 ? { ...baseUi, runsScroll: 1, runIndex: 1 } : baseUi, { width, height, now: 1_000_000, palette, theme });
+    assert.match(frame.text, /UNATTACHED TASKS/);
+    assert.match(frame.text, /UNATTACHED/);
+    assert.match(frame.text, /TASKS/);
+    if (width < 112) {
+      assert.match(frame.text, /RUNS/);
+      assert.match(frame.text, /UNATTACHED TASKS/);
+      assert.ok(frame.hitboxes.runs.has('orphan:tasks'));
+      const runRect = frame.hitboxes.runs.get('orphan:tasks');
+      const runRows = frame.text.split('\n').slice(runRect.y, runRect.y + runRect.h).join('\n');
+      assert.match(runRows, /UNATTACHED TASKS/);
+      assert.match(frame.text, /CELLS · UNATTACHED TASKS/);
+      const rect = frame.hitboxes.nodes.get('orphan-a');
+      assert.ok(rect);
+      assert.deepEqual(hitTargetAt({ snapshot, ui: baseUi, frame }, rect.x, rect.y), { kind: 'node', id: 'orphan-a' });
+    } else {
+      assert.match(frame.text, /unattached/);
+      const rect = frame.hitboxes.nodes.get('orphan-a');
+      assert.ok(rect);
+      assert.deepEqual(hitTargetAt({ snapshot, ui: baseUi, frame }, rect.x, rect.y), { kind: 'node', id: 'orphan-a' });
+    }
+  }
+  const switcher = filterSwitcher(switcherItems(snapshot, [], { tasks: snapshot.tasks, language: 'en' }), 'unattached');
+  assert.deepEqual(switcher.map(item => item.key), ['run:orphan:tasks']);
+  const switcherFrame = renderApp(snapshot, { ...baseUi, switcher: { query: 'unattached', frozenKeys: [], activeKey: 'run:orphan:tasks' } }, { width: 120, height: 40, now: 1_000_000, palette, theme });
+  assert.ok(switcherFrame.hitboxes.switcher.has('run:orphan:tasks'));
+  assert.match(switcherFrame.text, /UNATTACHED TASKS/);
+  const zh = renderApp(snapshot, { ...baseUi, language: 'zh' }, { width: 120, height: 40, now: 1_000_000, palette, theme });
+  assert.match(zh.text, /未归属任务/);
+  assert.doesNotMatch(zh.text, /UNATTACHED TASKS/);
+});
+
+test('normal indexed run never paints an appended virtual run', () => {
+  const snapshot = withOrphanRun(normalizeSnapshot({
+    ...normalSnapshot(),
+    tasks: [
+      { id: 'st_api', description: 'build the HTTP API', status: 'running', percent: 60 },
+      { id: 'st_tests', description: 'run the test suite', status: 'pending' },
+      { id: 'st_orphan', description: 'orphan task', status: 'pending' },
+    ],
+  }));
+  const palette = paletteAt(0);
+  const theme = createTheme({ palette, color: false });
+  const frame = renderApp(snapshot, {
+    runIndex: 0, selectedRunId: 'run_build', focus: 'graph', selectedNodeId: 'api',
+    selectedTaskId: 'st_api', selectedTaskUnlinked: false, follow: false, motion: false,
+    folded: new Set(), sidebar: true, help: false, verbose: false, toasts: [], language: 'en',
+  }, { width: 120, height: 40, now: 1_000_000, palette, theme });
+  assert.equal(frame.run.id, 'run_build');
+  assert.equal(frame.run.virtual, undefined);
+  assert.ok(frame.hitboxes.runs.has('run_build'));
+});
+
+test('virtual task scope remains unattached after pressing the existing scope toggle', async () => {
+  const viewer = await sessionViewer({ width: 120, height: 40 });
+  viewer.acceptSnapshot(mixedSessionSnapshot(), { silent: true });
+  viewer.ui.runIndex = 1;
+  viewer.ui.selectedRunId = 'orphan:tasks';
+  viewer.ui.focus = 'tasks';
+  viewer.draw();
+  press(viewer, 't');
+  viewer.draw();
+  const geometry = taskListLayout(viewer.lastRender.layout.sidebar, viewer.snapshot, viewer.ui);
+  assert.equal(viewer.ui.taskScope, 'unattached');
+  assert.equal(geometry.scope, 'unattached');
+  assert.deepEqual(geometry.tasks.map(task => task.id), ['st_orphan_a', 'st_orphan_b']);
+  assert.match(viewer.lastRender.text, /TASKS\s+2 · unattached/);
 });
 
 test('mixed linked and orphan tasks keep viewer 4/down order in canonical parity', async () => {

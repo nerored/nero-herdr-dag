@@ -574,7 +574,8 @@ export function createViewerSession({
         break;
       }
       case 'scope':
-        ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
+        if (isVirtualRun(run)) ui.taskScope = 'unattached';
+        else ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
         ui.tasksScroll = 0;
         ui.tasksScrollTarget = 0;
         break;
@@ -1062,7 +1063,9 @@ export function createViewerSession({
       openSwitcher();
       return;
     }
-    ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
+    const currentRun = snapshot.runs?.[ui.runIndex];
+    if (isVirtualRun(currentRun)) ui.taskScope = 'unattached';
+    else ui.taskScope = ui.taskScope === 'run' ? 'all' : 'run';
     ui.tasksScroll = 0;
     ui.tasksScrollTarget = 0;
   }

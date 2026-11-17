@@ -25,7 +25,7 @@ import { computeLayout, drawGraph, graphLayoutMatches, nodeScrollTarget, spinner
 import { statusLabel, t } from './i18n.mjs';
 import {
   activitySummary, elapsedLabel, incoming, isActiveRun, nodeActivity, nodeForTask, nodeMap, outgoing,
-  runStats, TERMINAL,
+  runStats, TERMINAL, isVirtualRun,
 } from './model.mjs';
 import { scrollbarGeometry } from './scroll.mjs';
 import { contrastRatio, statusColor, statusIcon } from './theme.mjs';
@@ -64,7 +64,8 @@ function renderSidebar(canvas, rect, snapshot, ui, { time, now, palette, motion,
     rich(canvas, x, y, w, [
       [`${selected ? '▸' : ' '} `, { fg: selected ? palette.accent : palette.faint, bold: selected }],
       [`${icon} `, { fg: runColor(run, palette), bold: true }],
-      [displayRunName(run), { fg: selected ? palette.white : palette.text, bold: selected }],
+      [displayRunName(run, language), { fg: selected ? palette.white : palette.text, bold: selected }],
+      ...(isVirtualRun(run) ? [[` · ${t(language, 'virtualRunBadge')}`, { fg: palette.accent2, bold: true }]] : []),
     ], palette, bg);
     const barWidth = Math.max(4, w - 16);
     const bar = stats.percentKnown ? percentBar(stats.percent, barWidth, { empty: '─' }) : '─'.repeat(barWidth);
@@ -91,7 +92,7 @@ function renderSidebar(canvas, rect, snapshot, ui, { time, now, palette, motion,
   rich(canvas, taskGeometry.x, tasksY - 1, taskGeometry.w, [
     [t(language, 'tasks'), { fg: palette.accent2, bold: true }],
     [`  ${taskGeometry.scopeCount}`, { fg: palette.faint }],
-    [` · ${taskGeometry.scope === 'all' ? t(language, 'taskScopeAll') : t(language, 'taskScopeRun')}`, { fg: palette.faint }],
+    [` · ${taskGeometry.scope === 'unattached' ? t(language, 'taskScopeUnattached') : taskGeometry.scope === 'all' ? t(language, 'taskScopeAll') : t(language, 'taskScopeRun')}`, { fg: palette.faint }],
     ...(taskGeometry.completedCollapsed && taskGeometry.completedCount
       ? [[` · ✓${taskGeometry.completedCount}`, { fg: palette.completed }]]
       : []),
@@ -166,8 +167,17 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
   const graphBadge = (text, layout) => {
     const parts = [];
     if (warningCount) parts.push(t(language, 'warningsBadge', { count: warningCount }));
-    if (layout?.capped) parts.push(t(language, 'graphCapped', { count: layout.hiddenNodes }));
+    if (layout?.capped && !isVirtualRun(run)) parts.push(t(language, 'graphCapped', { count: layout.hiddenNodes }));
     if (layout?.fallbackEdges) parts.push(t(language, 'graphFallbackWires', { count: layout.fallbackEdges }));
+    if (isVirtualRun(run)) {
+      parts.push(t(language, 'virtualGraphNodes', {
+        nodes: run.nodes.length,
+        members: run.virtual?.memberTaskIds?.length ?? run.virtual?.count ?? run.nodes.length,
+      }));
+      if (run.virtual?.omittedNodes) parts.push(t(language, 'virtualGraphOmitted', { count: run.virtual.omittedNodes }));
+      if (layout?.hiddenNodes) parts.push(t(language, 'virtualGraphHidden', { count: layout.hiddenNodes }));
+    }
+    if (isVirtualRun(run) && layout?.hiddenNodes) parts.push(t(language, 'virtualGraphHiddenShort', { count: layout.hiddenNodes }));
     parts.push(text);
     return parts.join(' · ');
   };
@@ -246,6 +256,14 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
     focused: ui.focus === 'graph',
     badge: graphBadge(statsBadge(), layout),
   });
+  if (isVirtualRun(run) && (run.virtual?.omittedNodes || layout.hiddenNodes)) {
+    rich(canvas, innerX + 1, innerY + 1, innerW - 2, [[
+      [t(language, 'virtualGraphCapSummary', {
+        omitted: run.virtual?.omittedNodes ?? 0,
+        hidden: layout.hiddenNodes ?? 0,
+      }), { fg: palette.warn, bold: true }],
+    ]], palette, palette.panel);
+  }
   const maxScroll = Math.max(0, layout.height - viewportH);
   const scroll = scrollOffset(ui.graphScroll, maxScroll);
   const offset = layout.height <= viewportH ? Math.floor((viewportH - layout.height) / 2) : -scroll;
@@ -290,7 +308,16 @@ function graphPanel(canvas, rect, snapshot, run, ui, {
   canvas.hline(rect.x + 1, separatorY, rect.w - 2, { fg: palette.border, bg: palette.panel });
   const selected = run.nodes.find(node => node.id === ui.selectedNodeId);
   const names = id => nodeMap(run).get(id)?.label ?? id;
-  let dependencyLine = t(language, 'edgesNodes', { edges: run.edges.length, nodes: stats.total });
+  let dependencyLine = isVirtualRun(run)
+    ? [
+      t(language, 'virtualGraphNodes', {
+        nodes: run.nodes.length,
+        members: run.virtual?.memberTaskIds?.length ?? run.virtual?.count ?? run.nodes.length,
+      }),
+      run.virtual?.omittedNodes ? t(language, 'virtualGraphOmitted', { count: run.virtual.omittedNodes }) : null,
+      layout?.hiddenNodes ? t(language, 'virtualGraphHiddenShort', { count: layout.hiddenNodes }) : null,
+    ].filter(Boolean).join(' · ')
+    : t(language, 'edgesNodes', { edges: run.edges.length, nodes: stats.total });
   if (ui.graphFocus && ui.selectedNodeId) {
     const focusNode = run.nodes.find(node => node.id === ui.graphFocus);
     dependencyLine = t(language, 'graphFocusHint', { name: focusNode?.label ?? ui.graphFocus });
@@ -479,7 +506,7 @@ function runOverview(canvas, rect, run, snapshot, { now, palette, language, verb
     : t(language, 'completeCount', { done: stats.done, total: stats.total });
   rich(canvas, end + 2, y, Math.max(0, rect.x + rect.w - 2 - end - 2), [[completion, { fg: palette.text, bold: true }]], palette, palette.panel);
   y++;
-  for (const line of wrap(displayRunName(run), w)) {
+  for (const line of wrap(displayRunName(run, language), w)) {
     y = detailLine(canvas, x, y, w, [[line, { fg: palette.text, bold: true }]], palette);
   }
   y++;
@@ -531,7 +558,7 @@ function renderDetails(canvas, rect, snapshot, ui, {
     : node
       ? t(language, 'nodeTitle', { label: node.label })
       : run
-        ? t(language, 'runTitle', { name: displayRunName(run) })
+        ? t(language, 'runTitle', { name: displayRunName(run, language) })
         : t(language, 'detailsTitle');
   const badgeStatus = showTask ? task.status : node ? node.state : run?.status;
   const badge = badgeStatus ? statusLabel(language, badgeStatus) : null;
