@@ -52,7 +52,7 @@ function renderBreadcrumb(canvas, width, snapshot, ui, { palette, language }, hi
     if (run && isVirtualRun(run)) parts.push({ kind: null, text: t(language, 'virtualRunBadge'), sep: ' · ', fg: palette.accent2, bold: true });
     if (nodeValue) parts.push({ kind: 'node', id: node?.id, text: nodeValue, sep: separator, fg: palette.accent2 });
     if (taskValue) parts.push({ kind: 'task', id: taskId, text: taskValue, sep: separator, fg: palette.dim });
-    if (status) {
+    if (status && !(isVirtualRun(run) && statusEntity === run)) {
       parts.push({
         kind: null,
         text: statusLabel(language, status).toUpperCase(),

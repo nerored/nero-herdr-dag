@@ -67,7 +67,7 @@ export function runListLayout(rect, snapshot) {
   }
   if (used < runs.length) y++;
   const blockBottom = Math.max(y + 1, rect.y + runHeight + 1);
-  return { headingY, runsY, runHeight, used, blockBottom, tasksY: blockBottom + 1 };
+  return { headingY, runsY, runHeight, used, blockBottom, tasksY: blockBottom + 1, viewportH: used, contentH: runs.length, maxScroll: Math.max(0, runs.length - used) };
 }
 
 // Pure navigation-task geometry shared by the painter and the pointer handler.

@@ -252,14 +252,16 @@ function renderNarrowRunList(canvas, rect, snapshot, ui, { palette, language, fo
     if (selected) canvas.fill(rect.x + 1, row, rect.w - 2, 1, { bg: palette.selection, fg: palette.text });
     const stats = runStats(run);
     const status = run.status ?? 'pending';
+  const virtual = isVirtualRun(run);
+  const color = virtual ? palette.accent2 : statusColor(palette, status);
     const suffix = stats?.percentKnown
       ? `${stats.percent}%`
       : t(language, 'runningCount', { count: stats?.counts.running ?? 0 });
     rich(canvas, rect.x + 2, row, Math.max(1, rect.w - 4), [
       [`${selected ? '▸' : ' '} `, { fg: selected ? palette.accent : palette.faint, bold: selected }],
-      [`${statusIcon(status)} `, { fg: statusColor(palette, status), bold: true }],
+      [`${virtual ? ' ' : statusIcon(status)} `, { fg: color, bold: true }],
       [fit(displayRunName(run, language), Math.max(8, rect.w - 22)), { fg: selected ? palette.white : palette.text, bold: selected }],
-      ...(isVirtualRun(run) ? [[` ${t(language, 'virtualRunBadge')}`, { fg: palette.accent2, bold: true }]] : []),
+      ...(virtual ? [[` ${t(language, 'virtualRunBadge')}`, { fg: palette.accent2, bold: true }]] : []),
       [` ${fit(suffix, 12)}`, { fg: palette.faint }],
     ], palette, selected ? palette.selection : palette.panel);
     hitboxes.runs.set(run.id, { x: rect.x + 1, y: row, w: rect.w - 2, h: 1 });

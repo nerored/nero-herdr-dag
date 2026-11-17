@@ -49,45 +49,76 @@ function renderSidebar(canvas, rect, snapshot, ui, { time, now, palette, motion,
   let y = rect.y + 1;
   const runs = snapshot.runs;
   const runGeometry = runListLayout(rect, snapshot);
+  const runOffset = scrollOffset(ui.runsScroll, runGeometry.maxScroll);
+  const runEntries = runs.slice(runOffset, runOffset + runGeometry.viewportH);
+  const runBarGeometry = scrollbarGeometry({
+    y: runGeometry.runsY,
+    trackHeight: runGeometry.viewportH * 2,
+    viewport: runGeometry.viewportH,
+    content: runs.length,
+    offset: runOffset,
+    unitHeight: 2,
+  });
+  const runBar = runBarGeometry ? { x: rect.x + rect.w - 2, w: 1, ...runBarGeometry } : null;
+  const runScroll = {
+    viewportH: runGeometry.viewportH,
+    contentH: runs.length,
+    offset: runOffset,
+    maxScroll: runGeometry.maxScroll,
+    bar: runBar,
+  };
   rich(canvas, x, y, w, [
     [t(language, 'runs'), { fg: palette.accent2, bold: true }],
     [`  ${runs.length}`, { fg: palette.faint }],
   ], palette, palette.panel);
   y = runGeometry.runsY;
-  for (let index = 0; index < runs.length && y + 1 < rect.y + runGeometry.runHeight; index++) {
-    const run = runs[index];
+  for (let row = 0; row < runEntries.length; row++) {
+    const index = runOffset + row;
+    const run = runEntries[row];
     const selected = index === ui.runIndex;
+    const virtual = isVirtualRun(run);
     if (selected) canvas.fill(x, y, w, 2, { bg: palette.selection, fg: palette.text });
     const bg = selected ? palette.selection : palette.panel;
-    const icon = isActiveRun(run) && motion ? spinnerFrame(time) : statusIcon(run.status === 'failed' ? 'failed' : run.status === 'completed' ? 'completed' : run.status);
+    const icon = virtual ? ' ' : (isActiveRun(run) && motion ? spinnerFrame(time) : statusIcon(run.status === 'failed' ? 'failed' : run.status === 'completed' ? 'completed' : run.status));
     const stats = runStats(run);
+    const color = virtual ? palette.accent2 : runColor(run, palette);
     rich(canvas, x, y, w, [
       [`${selected ? '▸' : ' '} `, { fg: selected ? palette.accent : palette.faint, bold: selected }],
-      [`${icon} `, { fg: runColor(run, palette), bold: true }],
+      [`${icon} `, { fg: color, bold: true }],
       [displayRunName(run, language), { fg: selected ? palette.white : palette.text, bold: selected }],
-      ...(isVirtualRun(run) ? [[` · ${t(language, 'virtualRunBadge')}`, { fg: palette.accent2, bold: true }]] : []),
+      ...(virtual ? [[` · ${t(language, 'virtualRunBadge')}`, { fg: palette.accent2, bold: true }]] : []),
     ], palette, bg);
     const barWidth = Math.max(4, w - 16);
     const bar = stats.percentKnown ? percentBar(stats.percent, barWidth, { empty: '─' }) : '─'.repeat(barWidth);
     const attention = [];
-    if (stats.counts.failed) attention.push([` ×${stats.counts.failed}`, { fg: palette.failed, bold: true }]);
-    if (stats.counts.blocked) attention.push([` ◌${stats.counts.blocked}`, { fg: palette.blocked, bold: true }]);
+    if (!virtual) {
+      if (stats.counts.failed) attention.push([` ×${stats.counts.failed}`, { fg: palette.failed, bold: true }]);
+      if (stats.counts.blocked) attention.push([` ◌${stats.counts.blocked}`, { fg: palette.blocked, bold: true }]);
+    }
     if (!attention.length) attention.push([` · ${stats.done}/${stats.total}`, { fg: palette.dim }]);
     rich(canvas, x + 2, y + 1, w - 2, [
-      [bar, { fg: runColor(run, palette), dim: !selected }],
+      [bar, { fg: color, dim: !selected }],
       [stats.percentKnown ? ` ${stats.percent}%` : ' —', { fg: selected ? palette.accent : palette.faint }],
       ...attention,
     ], palette, bg);
     hitboxes.runs.set(run.id, { x, y, w, h: 2 });
     y += 2;
   }
-  if (runGeometry.used < runs.length) {
-    rich(canvas, x, y, w, [[t(language, 'more', { count: runs.length - runGeometry.used }), { fg: palette.faint, dim: true }]], palette, palette.panel);
+  if (runGeometry.viewportH < runs.length) {
+    const below = runs.length - runOffset - runEntries.length;
+    const count = below || runOffset;
+    if (y < rect.y + runGeometry.runHeight) {
+      rich(canvas, x, y, w, [[t(language, 'more', { count }), { fg: palette.faint, dim: true }]], palette, palette.panel);
+    }
     y++;
+  }
+  if (runBar) {
+    drawScrollbar(canvas, runBar, palette);
+    hitboxes.scrollbars.set('runs', runBar);
   }
   y = runGeometry.blockBottom;
   const taskGeometry = taskListLayout(rect, snapshot, ui);
-  if (!taskGeometry) return null;
+  if (!taskGeometry) return { runs: runScroll, region: null, viewportH: 0, contentH: 0, offset: 0, maxScroll: 0, bar: null };
   const { tasks, tasksY, taskRows, contentH, maxScroll, offset, visible, bar, contentW } = taskGeometry;
   rich(canvas, taskGeometry.x, tasksY - 1, taskGeometry.w, [
     [t(language, 'tasks'), { fg: palette.accent2, bold: true }],
@@ -148,6 +179,7 @@ function renderSidebar(canvas, rect, snapshot, ui, { time, now, palette, motion,
     rich(canvas, taskGeometry.x, y, contentW, [[t(language, 'more', { count: below }), { fg: palette.faint, dim: true }]], palette, palette.panel);
   }
   return {
+    runs: runScroll,
     region: taskGeometry.region,
     viewportH: taskRows,
     contentH,
@@ -490,8 +522,8 @@ function runOverview(canvas, rect, run, snapshot, { now, palette, language, verb
     return;
   }
   const stats = runStats(run);
-  const color = runColor(run, palette);
-  const end = pill(canvas, x, y, statusLabel(language, run.status).toUpperCase(), color, statusIcon(run.status));
+  const color = isVirtualRun(run) ? palette.accent2 : runColor(run, palette);
+  const end = isVirtualRun(run) ? x - 2 : pill(canvas, x, y, statusLabel(language, run.status).toUpperCase(), color, statusIcon(run.status));
   const completion = stats.percentKnown
     ? t(language, 'complete', { percent: stats.percent })
     : t(language, 'completeCount', { done: stats.done, total: stats.total });
@@ -551,7 +583,7 @@ function renderDetails(canvas, rect, snapshot, ui, {
       : run
         ? t(language, 'runTitle', { name: displayRunName(run, language) })
         : t(language, 'detailsTitle');
-  const badgeStatus = showTask ? task.status : node ? node.state : run?.status;
+  const badgeStatus = showTask ? task.status : node ? node.state : run && !isVirtualRun(run) ? run.status : null;
   const badge = badgeStatus ? statusLabel(language, badgeStatus) : null;
   // Measure and render the body on a tall scratch canvas so scrolling can
   // reveal sections beyond the visible panel, then clip the window into the
@@ -799,7 +831,7 @@ export function renderApp(viewOrSnapshot, uiOrOptions, options = {}) {
         bar: graph.bar ?? null,
       },
       tasks: narrow?.tasks ?? taskScroll ?? { viewportH: 0, contentH: 0, offset: 0, maxScroll: 0, bar: null },
-      runs: narrow?.runs ?? { viewportH: 0, contentH: 0, offset: 0, maxScroll: 0, bar: null },
+      runs: narrow?.runs ?? taskScroll?.runs ?? { viewportH: 0, contentH: 0, offset: 0, maxScroll: 0, bar: null },
       cells: narrow?.cells ?? { viewportH: 0, contentH: 0, offset: 0, maxScroll: 0, bar: null },
       details: detailsScroll,
     },
