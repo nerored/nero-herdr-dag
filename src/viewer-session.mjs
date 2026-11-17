@@ -115,6 +115,8 @@ export function detailsVerboseAvailable(structural) {
 export function scrollRegionForFocus(focus, structural, scrollInfo = {}) {
   if (structural === 'investigation') {
     if (focus === 'details') return 'details';
+    if (focus === 'runs') return (scrollInfo.runs?.viewportH ?? 0) > 0 ? 'runs' : 'graph';
+    if (focus === 'cells') return (scrollInfo.cells?.viewportH ?? 0) > 0 ? 'cells' : 'graph';
     if (focus === 'tasks') return (scrollInfo.tasks?.viewportH ?? 0) > 0 ? 'tasks' : 'graph';
     return 'graph';
   }

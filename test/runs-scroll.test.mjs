@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { withOrphanRun } from '../src/orphan-run.mjs';
 import { renderApp } from '../src/render.mjs';
+import { scrollRegionForFocus } from '../src/viewer-session.mjs';
 import { baseUi, createTestViewer, makeSnapshot, themeFor } from './helpers.mjs';
 
 const now = 1_000_000;
@@ -98,4 +99,40 @@ test('the virtual run never paints a producer status or failure X', () => {
   });
   assert.match(narrow.text, /UNATTACHED TASKS/);
   assert.doesNotMatch(narrow.text, /× UNATTACHED TASKS/);
+});
+
+test('wide RUNS is a focusable scroll region, not the details pane', () => {
+  const top = render(manyRunsSnapshot());
+  const region = top.hitboxes.regions.get('runs');
+  assert.ok(region && region.h > 0, 'wide RUNS has a hit region');
+  assert.equal(top.hitboxes.scrollbars.has('runs'), true);
+  assert.equal(scrollRegionForFocus('runs', 'investigation', top.scroll), 'runs');
+  assert.equal(scrollRegionForFocus('details', 'investigation', top.scroll), 'details');
+});
+
+test('a wheel over wide RUNS scrolls RUNS, not the details pane', async () => {
+  const { viewer } = await createTestViewer({
+    args: { noColor: true, noMotion: true, fps: 10 },
+    deps: {
+      loadConfig: async () => ({ language: 'en' }),
+      loadOmoTheme: async () => 'system',
+      loadOmoAppearance: async () => ({}),
+      columns: 120,
+      rows: 40,
+    },
+  });
+  viewer.ui.follow = false;
+  viewer.acceptSnapshot(manyRunsBase(), { silent: true });
+  viewer.draw();
+  const region = viewer.lastRender.hitboxes.regions.get('runs');
+  assert.ok(region, 'wide RUNS has a wheel region');
+  const beforeDetails = viewer.ui.detailsScrollTarget;
+  viewer.onMouseEvent({
+    button: 65,
+    x: region.x + Math.floor(region.w / 2),
+    y: region.y + Math.floor(region.h / 2),
+    release: false,
+  });
+  assert.ok(viewer.ui.runsScrollTarget > 0, 'wheel moved the RUNS target');
+  assert.equal(viewer.ui.detailsScrollTarget, beforeDetails, 'details did not take the wheel');
 });

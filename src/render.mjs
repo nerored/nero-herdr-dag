@@ -66,6 +66,9 @@ function renderSidebar(canvas, rect, snapshot, ui, { time, now, palette, motion,
     offset: runOffset,
     maxScroll: runGeometry.maxScroll,
     bar: runBar,
+    region: runGeometry.maxScroll > 0 && runGeometry.viewportH > 0
+      ? { x: rect.x + 1, y: runGeometry.runsY, w: Math.max(1, rect.w - 2), h: runGeometry.viewportH * 2 }
+      : null,
   };
   rich(canvas, x, y, w, [
     [t(language, 'runs'), { fg: palette.accent2, bold: true }],
@@ -807,6 +810,7 @@ export function renderApp(viewOrSnapshot, uiOrOptions, options = {}) {
       if (narrow.cells.bar) hitboxes.scrollbars.set('cells', narrow.cells.bar);
       if (narrow.tasks?.bar) hitboxes.scrollbars.set('tasks', narrow.tasks.bar);
     } else {
+      if (taskScroll?.runs?.region) addRegion('runs', taskScroll.runs.region);
       addRegion('details', layout.details);
     }
     if (graph.bar) hitboxes.scrollbars.set('graph', graph.bar);
