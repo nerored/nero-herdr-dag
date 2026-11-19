@@ -1,15 +1,16 @@
-import { constants, watch, existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { constants, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { BoundedCache, BoundedKeySet } from './bounded-cache.mjs';
 import { lstat, open, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { clean, graphemeSlice } from './text.mjs';
 import { normalizeTask, TERMINAL } from './model.mjs';
 import { normalizeRateHistory } from './evidence.mjs';
 import { iso } from './normalize.mjs';
 import { projectKey } from './omo.mjs';
 import { readEnv } from './env.mjs';
+import { DirectoryWatcher } from './dir-watch.mjs';
 
 const taskId = value => typeof value === 'string' && /^st_[A-Za-z0-9_-]{1,253}$/.test(value);
 // Notifications are rendered as-is by the host UI, so strip terminal control
@@ -354,10 +355,8 @@ export class TaskData {
     this.sourceStatuses = [];
     this.staleCache = 0;
     this.stopped = false;
+    // descriptor id -> DirectoryWatcher for <root>/tasks
     this.watchers = new Map();
-    this.watchedDirectories = new Map();
-    this.watchRetryTimers = new Map();
-    this.watchAttempts = new Map();
   }
 
   get sources() {
@@ -816,77 +815,28 @@ export class TaskData {
   }
 
   start() {
-    for (const descriptor of this.directories) this.armWatcher(descriptor);
-  }
-
-  armWatcher(descriptor) {
     if (this.stopped) return;
-    const tasksDir = join(descriptor.root, 'tasks');
-    let directory = tasksDir;
-    for (let depth = 0; !existsSync(directory) && dirname(directory) !== directory && depth < 4; depth++) {
-      directory = dirname(directory);
+    for (const descriptor of this.directories) {
+      let watcher = this.watchers.get(descriptor.id);
+      if (!watcher) {
+        watcher = new DirectoryWatcher({
+          target: join(descriptor.root, 'tasks'),
+          // Keep the historical ancestor cap: a store deeper than this is
+          // retried once its path appears instead of watching a broad parent.
+          maxAncestorDepth: 4,
+          onChange: () => this.onChange(),
+          onError: error => this.warnOnce(`watch:${descriptor.id}`,
+            `DAG Studio: Task watcher: ${notifyText(error?.message ?? error)}`),
+        });
+        this.watchers.set(descriptor.id, watcher);
+      }
+      watcher.start();
     }
-    if (dirname(directory) === directory) return;
-    if (this.watchedDirectories.get(descriptor.id) === directory) return;
-    this.watchers.get(descriptor.id)?.close();
-    this.watchers.delete(descriptor.id);
-    this.watchedDirectories.delete(descriptor.id);
-    const next = relative(directory, tasksDir).split(/[\\/]/)[0];
-    let watcher;
-    try {
-      watcher = watch(directory, { persistent: false }, (_event, filename) => {
-        if (this.stopped || (next && filename && String(filename) !== next)) return;
-        try {
-          this.armWatcher(descriptor);
-          this.onChange();
-        } catch (error) {
-          this.notify(`DAG Studio: Task watcher: ${notifyText(error?.message ?? error)}`);
-        }
-      });
-    } catch (error) {
-      // A store deeper than the ancestor search cannot be watched yet. Keep
-      // start() from failing; refresh still reads it, and a bounded retry arms
-      // the watcher once the path exists.
-      this.warnOnce(`watch:${descriptor.id}`, `DAG Studio: Task watcher: ${notifyText(error?.message ?? error)}`);
-      this.scheduleWatcherRetry(descriptor);
-      return;
-    }
-    watcher.on('error', error => this.handleWatcherError(descriptor, watcher, error));
-    this.watchers.set(descriptor.id, watcher);
-    this.watchedDirectories.set(descriptor.id, directory);
-    this.watchAttempts.delete(descriptor.id);
-    this.armWatcher(descriptor);
-  }
-
-  handleWatcherError(descriptor, watcher, error) {
-    try { watcher.close(); } catch { /* already closed */ }
-    if (this.watchers.get(descriptor.id) !== watcher) return;
-    this.watchers.delete(descriptor.id);
-    this.watchedDirectories.delete(descriptor.id);
-    if (this.stopped) return;
-    this.warnOnce(`watch:${descriptor.id}`, `DAG Studio: Task watcher: ${notifyText(error?.message ?? error)}`);
-    this.scheduleWatcherRetry(descriptor);
-  }
-
-  scheduleWatcherRetry(descriptor) {
-    if (this.stopped || this.watchRetryTimers.has(descriptor.id)) return;
-    const attempt = (this.watchAttempts.get(descriptor.id) ?? 0) + 1;
-    this.watchAttempts.set(descriptor.id, attempt);
-    const timer = setTimeout(() => {
-      this.watchRetryTimers.delete(descriptor.id);
-      if (!this.stopped) this.armWatcher(descriptor);
-    }, Math.min(30_000, 500 * 2 ** Math.min(attempt - 1, 6)));
-    timer.unref?.();
-    this.watchRetryTimers.set(descriptor.id, timer);
   }
 
   stop() {
     this.stopped = true;
-    for (const watcher of this.watchers.values()) watcher.close();
+    for (const watcher of this.watchers.values()) watcher.stop();
     this.watchers.clear();
-    this.watchedDirectories.clear();
-    for (const timer of this.watchRetryTimers.values()) clearTimeout(timer);
-    this.watchRetryTimers.clear();
-    this.watchAttempts.clear();
   }
 }

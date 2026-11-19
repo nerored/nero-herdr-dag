@@ -1153,9 +1153,11 @@ test('a deeply missing store cannot break watcher startup', async t => {
   assert.match(messages[0], /Task watcher/);
   assert.doesNotThrow(() => data.start());
   assert.equal(messages.length, 1);
-  assert.equal(data.watchRetryTimers.size, 1);
+  assert.equal(data.watchers.size, 1);
+  const watcher = data.watchers.get(data.directories[0].id);
+  assert.ok(watcher.retryTimer);
   data.stop();
-  assert.equal(data.watchRetryTimers.size, 0);
+  assert.equal(watcher.retryTimer, undefined);
 });
 
 test('corrupt records are reported once across repeated refreshes', async t => {
@@ -1173,7 +1175,7 @@ test('corrupt records are reported once across repeated refreshes', async t => {
   assert.equal(messages.length, 2);
 });
 
-test('a watcher error clears its registration and schedules a bounded retry', async t => {
+test('a watcher error closes the handle and schedules a bounded retry', async t => {
   const root = await tempStore(t, 'dag-watch-error-');
   await seed(root, { 'st_watch.json': record('st_watch') });
   const messages = [];
@@ -1183,15 +1185,14 @@ test('a watcher error clears its registration and schedules a bounded retry', as
   data.start();
   const id = data.directories[0].id;
   const watcher = data.watchers.get(id);
-  assert.ok(watcher);
-  watcher.emit('error', Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' }));
-  assert.equal(data.watchers.has(id), false);
-  assert.equal(data.watchedDirectories.has(id), false);
-  assert.equal(data.watchRetryTimers.has(id), true);
-  assert.equal(data.watchAttempts.get(id), 1);
+  assert.ok(watcher?.watcher);
+  watcher.watcher.emit('error', Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' }));
+  assert.equal(watcher.watcher, undefined);
+  assert.ok(watcher.retryTimer);
+  assert.equal(watcher.attempt, 1);
   assert.ok(messages.some(message => message.includes('ENOSPC')));
   data.stop();
-  assert.equal(data.watchRetryTimers.size, 0);
+  assert.equal(watcher.retryTimer, undefined);
 });
 
 test('writeJson writes a 0600 destination and leaves no temporary file', async t => {

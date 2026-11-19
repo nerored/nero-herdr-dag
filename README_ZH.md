@@ -171,7 +171,9 @@ generation，并写入稳定入口 `<agent-dir>/extensions/omo-herdr-dag-studio.
 generation；`/dag-studio` 会复用仍在运行的 pane，而不是替换它。安装后请启动
 新的 OmO 会话（或关闭 DAG pane 后再次运行 `/dag-studio`）以使用新的 viewer。
 如果 `/dag-studio` 复用的 pane 所记录的 generation 早于 `current.json`，它会
-只警告一次并继续复用该 pane，绝不会替你关闭它。然后使用：
+只警告一次并继续复用该 pane，绝不会替你关闭它。控制器会监听任务存储和每个
+`dag/runs` checkpoint 目录，因此新出现的 run 会直接进入正在运行的 pane，
+无需重新执行 `/dag-studio`。然后使用：
 
 ```text
 /dag-studio
@@ -256,6 +258,8 @@ OmO 进程                                  Herdr viewer 进程
 - `src/evidence.mjs`：统一归一化宿主证据，包括思考/回复摘录、速率历史、
   重试和轮次，快照与任务存储读取共用。
 - `src/task-data.mjs`：读取并合并任务存储与父子记录。
+- `src/dir-watch.mjs`：监听可能尚未创建的存储目录，跟随父目录创建重新挂载，
+  并对失效监听做有界退避重试。
 - `src/run-summary.mjs`：为 run 概览聚合节点时间窗、时长和总计，不读 I/O，
   也不隐藏时钟。
 - `src/demo.mjs`：生成确定性的演示数据。

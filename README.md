@@ -254,7 +254,9 @@ stacks RUNS, CELLS, a TASKS list of tasks no run links to a node, and the curren
 node/details panel, with a focus glyph on the active pane; there is no graph at
 this width. Widening or zooming the pane to full screen restores the navigation
 column and the graph. A live viewer is reused; a manually closed
-viewer stays closed until `/dag-studio` is run.
+viewer stays closed until `/dag-studio` is run. The controller watches the task
+store and every `dag/runs` checkpoint directory, so a new run reaches a live
+pane without rerunning `/dag-studio`.
 
 ## Configuration
 
@@ -329,6 +331,9 @@ Modules are grouped by role. Every module in `src/` is listed once below.
   reply excerpts, rate history, retries, and turns, for both snapshot and
   task-store readers.
 - `src/task-data.mjs` reads and merges task stores and parent/child records.
+- `src/dir-watch.mjs` watches a store directory that may not exist yet: it
+  follows ancestor creation, re-arms the watch, and retries a dead handle with
+  bounded backoff.
 - `src/run-summary.mjs` aggregates node windows, durations, and totals for the
   run overview without I/O or a hidden clock.
 - `src/demo.mjs` produces the deterministic fake world.

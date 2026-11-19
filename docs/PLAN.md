@@ -264,6 +264,7 @@ src/orphan-run.mjs        可见根孤立任务的视图专用 run 投影（追�
 src/normalize.mjs         宿主值原语（文本、数字、整数、ISO 时间、字节长度、已定义字段）
 src/evidence.mjs          任务/运行证据字段的统一规范化（回复、错误、重试、turn、run_stats）
 src/task-data.mjs         任务存储读取、合并、父子关系
+src/dir-watch.mjs         惰性创建目录的监听封装：跟随祖先创建、重新挂载、失效退避重试
 src/run-summary.mjs       运行级聚合（token/成本/缓存/时长/关键路径/并行度）
 src/demo.mjs              周期性假数据引擎
 src/records.mjs           记录文件的有界读取、条目元数据与相对显示路径

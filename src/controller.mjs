@@ -10,6 +10,7 @@ import { modeFor, normalizeRun, TERMINAL } from './model.mjs';
 import { todoTitleForRun, loadTodoEvents } from './todo-title.mjs';
 import { resolveTaskStateDirs, TaskData } from './task-data.mjs';
 import { BoundedKeySet } from './bounded-cache.mjs';
+import { DirectoryWatcher } from './dir-watch.mjs';
 
 const SCAN_BATCH = 8;
 // Warning coalescing is session-lifetime state: store and record names are
@@ -182,11 +183,11 @@ export class DagPane {
   constructor({
     sessionId, parentPane, socket, stateDir, cwd, node, viewer, herdr,
     // Herdr's split ratio is the source pane's share; 2/3 leaves the viewer pane at 1/3.
-    notify = () => {}, taskStateDir, taskStateDirs, retentionDays, streamDelay = 250, ratio = 2 / 3, sessionFile,
+    notify = () => {}, taskStateDir, taskStateDirs, retentionDays, streamDelay = 250, runScanDelay = 250, ratio = 2 / 3, sessionFile,
     translate, installGeneration, generationFile,
   }) {
     Object.assign(this, {
-      sessionId, parentPane, stateDir, cwd, node, viewer, herdr, notify, ratio, sessionFile,
+      sessionId, parentPane, stateDir, cwd, node, viewer, herdr, notify, ratio, sessionFile, runScanDelay,
       translate: typeof translate === 'function' ? translate : undefined,
       installGeneration, generationFile,
     });
@@ -210,6 +211,8 @@ export class DagPane {
       origin: source.origin,
     }));
     this.retentionDays = retentionDays ?? retentionDaysFromEnv();
+    this.runWatchers = new Map();
+    this.runRescanTimer = undefined;
     this.streamDelay = streamDelay;
     this.queue = Promise.resolve();
     this.rateTimer = undefined;
@@ -578,6 +581,37 @@ export class DagPane {
     if (connected && !this.stopped && (this.runs.length || tasks.length)) await this.ensure(false);
   }
 
+  // OmO writes run checkpoints under <root>/dag/runs, outside the tasks
+  // directory TaskData watches. Without a watch here a new run appears only
+  // after /dag-studio reopens the pane, which rescans the store. Debounce the
+  // rescan because one run update can rename several checkpoint files.
+  startRunWatchers() {
+    for (const checkpoint of this.checkpointDirs) {
+      if (this.runWatchers.has(checkpoint.source)) continue;
+      const watcher = new DirectoryWatcher({
+        target: checkpoint.dir,
+        onChange: () => this.scheduleRunRescan(),
+        onError: error => this.warnOnce(`watch-runs:${checkpoint.source}`,
+          `DAG Studio: Run watcher: ${clean(error?.message ?? error)}`),
+      });
+      this.runWatchers.set(checkpoint.source, watcher);
+      watcher.start();
+    }
+  }
+
+  scheduleRunRescan() {
+    if (this.stopped || this.runRescanTimer) return;
+    this.runRescanTimer = setTimeout(() => {
+      this.runRescanTimer = undefined;
+      if (this.stopped) return;
+      this.enqueue(async () => {
+        await this.restoreRuns();
+        await this.save(true, false);
+      }).catch(() => {});
+    }, this.runScanDelay);
+    this.runRescanTimer.unref?.();
+  }
+
   start() {
     return this.enqueue(async () => {
       await pruneExpiredSnapshots(this.stateDir, {
@@ -592,6 +626,7 @@ export class DagPane {
         this.taskData.restore(state.tasks);
       }
       this.taskData.start();
+      this.startRunWatchers();
       if (!this.rateTimer) {
         this.rateTimer = setInterval(() => {
           if (this.stopped || !this.taskData.sampleRates()) return;
@@ -721,6 +756,10 @@ export class DagPane {
     this.streamTimer = undefined;
     clearInterval(this.rateTimer);
     this.rateTimer = undefined;
+    clearTimeout(this.runRescanTimer);
+    this.runRescanTimer = undefined;
+    for (const watcher of this.runWatchers.values()) watcher.stop();
+    this.runWatchers.clear();
     this.taskData.stop();
     // Save the final snapshot before dropping the live excerpts so a task that
     // had streamed output still carries it into the disconnected state file.

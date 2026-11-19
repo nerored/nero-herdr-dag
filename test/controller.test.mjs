@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { watch } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DagPane, dagTitle, isDagViewerPane, MAX_CHECKPOINT_BYTES } from '../src/controller.mjs';
 import { DemoEngine } from '../src/demo.mjs';
 import { nodeForTask, normalizeSnapshot } from '../src/model.mjs';
@@ -40,6 +41,49 @@ async function setup(t, herdr, options = {}) {
   t.after(() => controller.stop());
   return { stateDir, controller };
 }
+
+test('a new checkpoint on disk refreshes the snapshot without reopening', async t => {
+  const mock = fixture();
+  const base = await mkdtemp(join(tmpdir(), 'dag-run-watch-'));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const store = join(base, 'store');
+  await mkdir(join(store, 'tasks'), { recursive: true });
+  const controller = new DagPane({
+    sessionId: 'session-1', parentPane: 'parent', socket: '/tmp/herdr.sock', stateDir: join(base, 'state'),
+    cwd: base, node: '/usr/bin/node', viewer: '/tmp/viewer.mjs', herdr: mock.herdr,
+    taskStateDirs: [{ root: store, origin: 'explicit', label: 'explicit store' }],
+    runScanDelay: 10,
+  });
+  t.after(() => controller.stop());
+  await controller.start();
+
+  // The checkpoint directory does not exist yet: the watcher must follow the
+  // creation of dag/runs and the first run file, then rescan without open().
+  const appeared = new Promise((resolve, reject) => {
+    let watcher;
+    const timer = setTimeout(() => {
+      try { watcher?.close(); } catch { /* already closed */ }
+      reject(new Error('timed out waiting for the new checkpoint to reach the snapshot'));
+    }, 5_000);
+    const check = async () => {
+      let state;
+      try { state = await readJson(controller.stateFile); }
+      catch { return; }
+      if (!state?.runs?.some(item => item.id === 'dag_watch_new')) return;
+      clearTimeout(timer);
+      try { watcher?.close(); } catch { /* already closed */ }
+      resolve(state);
+    };
+    watcher = watch(dirname(controller.stateFile), { persistent: false }, () => { void check(); });
+    watcher.on('error', error => { clearTimeout(timer); reject(error); });
+    void check();
+  });
+
+  await writeJson(join(store, 'dag', 'runs', 'new-run.json'),
+    checkpoint('dag_watch_new', ['st_watch_new'], { createdAt: '2026-11-19T00:00:00.000Z' }));
+  const state = await appeared;
+  assert.deepEqual(state.runs.map(item => item.id), ['dag_watch_new']);
+});
 
 test('receiving a run writes a v3 snapshot and creates exactly one viewer pane', async t => {
   const mock = fixture();
