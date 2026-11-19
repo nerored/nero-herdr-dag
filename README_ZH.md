@@ -126,26 +126,37 @@ footer 保留图例（`●运行 ✓完成 ×失败 ◌等待`），后面是可
 
 ## 从 npm 安装
 
-发布包包含构建后的扩展、viewer 和 `dag-studio` CLI：
+发布包包含构建后的扩展、viewer 和 `dag-studio` CLI。一条命令安装 OmO 扩展：
 
 ```bash
-# 全局安装 CLI
+bunx herdr-dag-studio install
+```
+
+或者全局安装 CLI 后执行安装器：
+
+```bash
 bun add -g herdr-dag-studio
-dag-studio --version
-
-# 注册 OmO 扩展 generation（默认 ~/.omo/agent）
 dag-studio install
+dag-studio --version
+```
 
-# 不安装直接运行
+也可以合并成一行：
+
+```bash
+bun add -g herdr-dag-studio && dag-studio install
+```
+
+`dag-studio install` 默认写入 `~/.omo/agent`，OmO 使用其他目录时传
+`--agent-dir PATH`。`bun add` 只安装 CLI，不会注册 OmO 扩展；Bun 默认也不
+执行依赖的安装钩子，所以 `dag-studio install` 必须显式执行。
+
+只查看 viewer 或把依赖装进当前项目：
+
+```bash
 bunx herdr-dag-studio --help
-
-# 或只装进当前项目
 bun add herdr-dag-studio
 bunx dag-studio --help
 ```
-
-`dag-studio install` 支持 `--agent-dir PATH`。项目内 `bun add` 不会注册
-OmO 扩展，仍需运行 `dag-studio install`。
 
 维护者先执行一次 `bunx npm login`，之后运行 `bun publish`；`prepublishOnly`
 会跑测试，`prepare` 会在打包前重新构建 `dist/`。

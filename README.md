@@ -184,27 +184,38 @@ for accessibility and deterministic output.
 ## Install from npm
 
 The published package ships the built extension, the viewer, and the
-`dag-studio` CLI:
+`dag-studio` CLI. Install the OmO extension with one command:
 
 ```bash
-# Install the CLI system-wide
+bunx herdr-dag-studio install
+```
+
+Or install the CLI globally and run its installer:
+
+```bash
 bun add -g herdr-dag-studio
-dag-studio --version
-
-# Register the OmO extension generation (defaults to ~/.omo/agent)
 dag-studio install
+dag-studio --version
+```
 
-# Or run it without installing
+Both steps can also be one shell line:
+
+```bash
+bun add -g herdr-dag-studio && dag-studio install
+```
+
+`dag-studio install` defaults to `~/.omo/agent` and accepts `--agent-dir PATH`
+when OmO uses another directory. `bun add` alone only installs the CLI; it does
+not register the OmO extension, and Bun does not run dependency install hooks
+by default, so `dag-studio install` stays explicit.
+
+To inspect the viewer or keep the dependency inside one project:
+
+```bash
 bunx herdr-dag-studio --help
-
-# Or keep the dependency inside one project
 bun add herdr-dag-studio
 bunx dag-studio --help
 ```
-
-`dag-studio install` accepts `--agent-dir PATH` when OmO uses a non-default
-agent directory. A project-local `bun add` does not register the extension;
-run `dag-studio install` afterwards.
 
 Maintainers publish with `bunx npm login` once, then `bun publish`. The
 `prepublishOnly` script runs the test suite, and `prepare` rebuilds `dist/`
