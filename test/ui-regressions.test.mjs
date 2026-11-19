@@ -118,10 +118,10 @@ test('a 54-column header keeps the brand and truncates a UUID session id', () =>
   assert.equal(lines.length, 20);
   for (const line of lines) assert.equal(textWidth(line), 54, `line width: ${textWidth(line)}`);
   const header = lines[0];
-  assert.match(header, /v0\.1\.0/);
+  assert.match(header, /v1\.0\.0/);
   assert.doesNotMatch(header, new RegExp(sessionId));
   assert.match(header, /…/);
-  assert.ok(header.indexOf('v0.1.0') < header.indexOf('● LIVE'));
+  assert.ok(header.indexOf('v1.0.0') < header.indexOf('● LIVE'));
   // The clock is dropped at this width.
   assert.doesNotMatch(header, /\b\d{2}:\d{2}:\d{2}\b/);
 });
@@ -140,7 +140,7 @@ test('the CLI --once frame keeps the 54-column brand and hides the full UUID', (
     ], { cwd: process.cwd(), encoding: 'utf8', timeout: 20_000 });
     assert.equal(run.status, 0, run.stderr);
     const lines = run.stdout.split('\n');
-    assert.match(lines[0], /v0\.1\.0/);
+    assert.match(lines[0], /v1\.0\.0/);
     assert.doesNotMatch(lines[0], new RegExp(sessionId));
     for (const line of lines.slice(0, 20)) {
       assert.ok(textWidth(line) <= 54, `CLI line width: ${textWidth(line)}`);

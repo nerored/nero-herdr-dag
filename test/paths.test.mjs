@@ -95,19 +95,19 @@ test('missing or unrelated session file falls back to the host project store', (
 
 test('automatic roots read the host project store, never the repository store', () => {
   const roots = resolveTaskStateDirs({
-    sessionFile: '/home/nero/.omo/agent/sessions/--home-nero-projects-github-nero-herdr-dag--/2026-11-09T09-01-40-289Z_01a1bf8a-b241-7c95-8e04-d36830a6755a.jsonl',
-    env: { OMO_CODING_AGENT_DIR: '/home/nero/.omo/agent' },
-    cwd: '/home/nero/projects/github/nero-herdr-dag',
+    sessionFile: '/home/u/sessions/example.jsonl',
+    env: { OMO_CODING_AGENT_DIR: '/home/u/.omo/agent' },
+    cwd: '/home/u/projects/example-repo',
   });
   assert.deepEqual(roots.map(root => root.root), [
-    '/home/nero/.omo/agent/projects/nero-herdr-dag-d1641f7ebb40/senpi-task',
+    '/home/u/.omo/agent/projects/example-repo-d2a7a21bebd4/senpi-task',
   ]);
   assert.deepEqual(roots.map(root => root.origin), ['agent-project']);
   assert.ok(roots.every(root => /^[a-z-]+-[0-9a-f]{8}$/.test(root.id)));
 });
 
 test('projectKey mirrors the host project directory name', () => {
-  assert.equal(projectKey('/home/nero/projects/github/nero-herdr-dag'), 'nero-herdr-dag-d1641f7ebb40');
+  assert.equal(projectKey('/home/u/projects/example-repo'), 'example-repo-d2a7a21bebd4');
   const odd = join(tmpdir(), 'unsafe name!');
   assert.match(projectKey(odd), /^unsafe_name_-[\da-f]{12}$/);
 });

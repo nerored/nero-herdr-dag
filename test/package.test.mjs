@@ -12,6 +12,12 @@ const hasMake = spawnSync('make', ['--version'], { encoding: 'utf8' }).status ==
 
 const readPackage = async () => JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 
+test('the rendered product version matches package.json', async () => {
+  const pkg = await readPackage();
+  const { PRODUCT_VERSION } = await import('../src/render-chrome.mjs');
+  assert.equal(PRODUCT_VERSION, pkg.version);
+});
+
 const exists = path => stat(path).then(() => true, () => false);
 
 // A clean checkout contains the tracked inputs only. dist/ is gitignored, so

@@ -13,6 +13,10 @@ import {
 import { gradientCells, mix, statusColor } from './theme.mjs';
 import { clock, fit, truncateMiddle, width as textWidth } from './text.mjs';
 
+// The header shows the released package version. test/package.test.mjs pins
+// this constant to package.json so a release cannot ship a stale brand.
+export const PRODUCT_VERSION = '1.0.0';
+
 function modeBadge(snapshot, language, freshness = snapshotFreshness(snapshot)) {
   const mode = modeFor(snapshot);
   if (mode === 'demo') return `◆ ${t(language, 'modeDemo')}`;
@@ -136,8 +140,9 @@ export function renderHeader(canvas, width, snapshot, ui, {
     x += textWidth(part.text);
   }
   x += 2;
-  canvas.put(x, 0, 'v0.1.0', { fg: palette.faint, bg: palette.bgAlt, dim: true });
-  const brandEnd = x + textWidth('v0.1.0');
+  const versionLabel = `v${PRODUCT_VERSION}`;
+  canvas.put(x, 0, versionLabel, { fg: palette.faint, bg: palette.bgAlt, dim: true });
+  const brandEnd = x + textWidth(versionLabel);
   renderBreadcrumb(canvas, width, snapshot, ui, { palette, language }, hitboxes);
   const badgeText = modeBadge(snapshot, language, freshness);
   const badgeColor = modeColor(snapshot, palette, time, motion, freshness);

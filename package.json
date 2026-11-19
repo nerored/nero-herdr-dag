@@ -1,6 +1,6 @@
 {
   "name": "herdr-dag-studio",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Animated three-pane OmO workflow DAG studio for Herdr",
   "license": "MIT",
   "type": "module",
@@ -14,7 +14,7 @@
   "files": [
     "bin/",
     "dist/",
-    "docs/",
+    "docs/assets/",
     "demo/",
     "scripts/",
     "src/",
@@ -31,6 +31,7 @@
     "test": "bun test --exclude=test/helpers.mjs",
     "bench": "bun scripts/bench.mjs",
     "build": "bun scripts/build.mjs",
+    "prepublishOnly": "bun test",
     "prepare": "bun run build",
     "check": "bun run test && bun run build",
     "install:extension": "bun scripts/install.mjs",
@@ -46,5 +47,16 @@
     "tui",
     "workflow",
     "dashboard"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nerored/nero-herdr-dag.git"
+  },
+  "homepage": "https://github.com/nerored/nero-herdr-dag#readme",
+  "bugs": {
+    "url": "https://github.com/nerored/nero-herdr-dag/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

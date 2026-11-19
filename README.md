@@ -181,6 +181,35 @@ The file is watched and the dashboard refreshes when the producer replaces it.
 Use `--once` for a single frame. `--no-color` and `--no-motion` are available
 for accessibility and deterministic output.
 
+## Install from npm
+
+The published package ships the built extension, the viewer, and the
+`dag-studio` CLI:
+
+```bash
+# Install the CLI system-wide
+bun add -g herdr-dag-studio
+dag-studio --version
+
+# Register the OmO extension generation (defaults to ~/.omo/agent)
+dag-studio install
+
+# Or run it without installing
+bunx herdr-dag-studio --help
+
+# Or keep the dependency inside one project
+bun add herdr-dag-studio
+bunx dag-studio --help
+```
+
+`dag-studio install` accepts `--agent-dir PATH` when OmO uses a non-default
+agent directory. A project-local `bun add` does not register the extension;
+run `dag-studio install` afterwards.
+
+Maintainers publish with `bunx npm login` once, then `bun publish`. The
+`prepublishOnly` script runs the test suite, and `prepare` rebuilds `dist/`
+before Bun packs the tarball.
+
 ## Install as an OmO extension
 
 Install directly from the source checkout with the Makefile:

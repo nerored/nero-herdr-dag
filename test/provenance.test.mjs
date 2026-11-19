@@ -94,7 +94,7 @@ test('demo, live, and saved frames render the truthful mode badge at 54/72/120',
       assert.match(header, /DAG STUDIO/);
       assert.match(header, expectation.badge, `${name} ${columns} badge`);
       assert.doesNotMatch(header, expectation.forbidden, `${name} ${columns} mislabels mode`);
-      assert.ok(header.indexOf('v0.1.0') < header.search(expectation.badge));
+      assert.ok(header.indexOf('v1.0.0') < header.search(expectation.badge));
       if (columns === 54) assert.doesNotMatch(header, new RegExp(sessionId));
       const footer = lines.at(-1);
       const glyph = name === 'demo' ? '◆' : name === 'saved' ? '○' : '●';

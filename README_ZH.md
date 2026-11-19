@@ -124,6 +124,32 @@ footer 保留图例（`●运行 ✓完成 ×失败 ◌等待`），后面是可
 隐藏已结束项只影响当前视图，`X` 恢复全部隐藏项，`u` 撤销上一次隐藏，不会删除快照或记录文件。
 在 Herdr 中按 `m` 后即可原生拖选；默认 `copy_on_select = true` 时松开鼠标即复制。
 
+## 从 npm 安装
+
+发布包包含构建后的扩展、viewer 和 `dag-studio` CLI：
+
+```bash
+# 全局安装 CLI
+bun add -g herdr-dag-studio
+dag-studio --version
+
+# 注册 OmO 扩展 generation（默认 ~/.omo/agent）
+dag-studio install
+
+# 不安装直接运行
+bunx herdr-dag-studio --help
+
+# 或只装进当前项目
+bun add herdr-dag-studio
+bunx dag-studio --help
+```
+
+`dag-studio install` 支持 `--agent-dir PATH`。项目内 `bun add` 不会注册
+OmO 扩展，仍需运行 `dag-studio install`。
+
+维护者先执行一次 `bunx npm login`，之后运行 `bun publish`；`prepublishOnly`
+会跑测试，`prepare` 会在打包前重新构建 `dist/`。
+
 ## 安装为 OmO 扩展
 
 使用 Makefile 安装、更新或卸载：
