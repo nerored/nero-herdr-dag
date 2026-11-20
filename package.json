@@ -1,6 +1,6 @@
 {
   "name": "herdr-dag-studio",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Animated three-pane OmO workflow DAG studio for Herdr",
   "license": "MIT",
   "type": "module",

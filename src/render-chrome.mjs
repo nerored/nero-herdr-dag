@@ -15,7 +15,7 @@ import { clock, fit, truncateMiddle, width as textWidth } from './text.mjs';
 
 // The header shows the released package version. test/package.test.mjs pins
 // this constant to package.json so a release cannot ship a stale brand.
-export const PRODUCT_VERSION = '1.0.0';
+export const PRODUCT_VERSION = '1.0.1';
 
 function modeBadge(snapshot, language, freshness = snapshotFreshness(snapshot)) {
   const mode = modeFor(snapshot);
